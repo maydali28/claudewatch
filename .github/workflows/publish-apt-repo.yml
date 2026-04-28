@@ -140,7 +140,7 @@ jobs:
             echo "Signing key has no expiry set (acceptable, but a 5y expiry is recommended)."
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
 
