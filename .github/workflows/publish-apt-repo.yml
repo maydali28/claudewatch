@@ -62,7 +62,7 @@ jobs:
         run: rm -rf apt-repo/.git
 
       - name: Download linux artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: linux-artifacts
           path: linux-artifacts
