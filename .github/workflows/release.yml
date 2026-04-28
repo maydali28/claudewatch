@@ -171,7 +171,7 @@ jobs:
       # is exactly what we scan. Fail the release on any high/critical CVE
       # rather than shipping a vulnerable transitive dep silently.
       - name: Scan SBOM for vulnerabilities
-        uses: anchore/scan-action@v6
+        uses: anchore/scan-action@v7
         with:
           sbom: release-files/sbom.cyclonedx.json
           fail-build: true
