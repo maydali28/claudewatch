@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feat/**'
+      - 'fix/**'
+      - 'hotfix/**'
+      - 'chore/**'
+      - 'docs/**'
+      - 'style/**'
+      - 'refactor/**'
+      - 'perf/**'
+      - 'test/**'
+      - 'build/**'
+      - 'ci/**'
+      - 'revert/**'
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # pnpm version is read from the "packageManager" field in package.json,
+      # so CI and release jobs cannot drift apart. Bumping pnpm requires
+      # editing one place.
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check for duplicate dependencies
+        run: pnpm dedupe --check
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Dependency boundaries
+        run: pnpm depcruise
+
+      - name: Format check
+        run: pnpm format:check
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # Bundle size gate — fails on regression past the budgets in
+      # scripts/check-bundle-size.mjs. See that file for how to raise.
+      - name: Check renderer bundle size
+        run: pnpm size-check
+
+      # Boots the built main process headlessly to confirm
+      # `Preferences.load()` succeeds. Catches ESM/CJS interop regressions in
+      # electron-store v10+ that wouldn't surface from `pnpm build` alone.
+      - name: Smoke test packaged preferences load
+        run: xvfb-run --auto-servernum pnpm smoke:preferences

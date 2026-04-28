@@ -1,0 +1,25 @@
+#!/bin/sh
+branch=$(git symbolic-ref --short HEAD)
+pattern='^(main|develop|feat|feature|fix|hotfix|chore|docs|refactor|perf|test|ci|release)\/[a-z0-9._-]+$'
+
+# Allow protected base branches through without pattern check
+if [ "$branch" = "main" ] || [ "$branch" = "develop" ]; then
+  exit 0
+fi
+
+if ! echo "$branch" | grep -qE "$pattern"; then
+  echo ""
+  echo "  ✖ Push rejected: '$branch' does not follow the branch naming convention."
+  echo ""
+  echo "  Required format:  <type>/<description>"
+  echo "  Allowed types:    feat, feature, fix, hotfix, chore, docs,"
+  echo "                    refactor, perf, test, ci, release"
+  echo "  Description:      lowercase, alphanumeric, dots, hyphens, underscores"
+  echo ""
+  echo "  Examples:"
+  echo "    feat/add-kyc-endpoint"
+  echo "    fix/auth-token-expiry"
+  echo "    hotfix/cors-header-missing"
+  echo ""
+  exit 1
+fi

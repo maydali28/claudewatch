@@ -1,0 +1,178 @@
+{
+  "name": "claudewatch",
+  "version": "1.0.0",
+  "description": "Claude Code session explorer (macOS, Windows, Linux)",
+  "main": "out/main/index.js",
+  "author": {
+    "name": "Mohamed Ali May",
+    "email": "may.mohamedali28@gmail.com"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@10.19.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "build": {
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "${RELEASES_URL}",
+        "useMultipleRangeRequest": false
+      }
+    ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "fs-xattr",
+      "macos-alias"
+    ],
+    "overrides": {
+      "esbuild@<=0.24.2": ">=0.25.0",
+      "prismjs@<1.30.0": ">=1.30.0",
+      "electron@<35.7.5": ">=35.7.5",
+      "tmp@<=0.2.3": ">=0.2.4",
+      "lodash@>=4.0.0 <=4.17.22": ">=4.17.23",
+      "tar@<7.5.7": ">=7.5.7",
+      "tar@<=7.5.2": ">=7.5.3",
+      "tar@<7.5.8": ">=7.5.8",
+      "@tootallnate/once@<3.0.1": ">=3.0.1",
+      "tar@<=7.5.9": ">=7.5.11",
+      "tar@<=7.5.10": ">=7.5.10",
+      "tar@<=7.5.3": ">=7.5.4",
+      "lodash@>=4.0.0 <=4.17.23": ">=4.18.0",
+      "lodash@<=4.17.23": ">=4.18.0",
+      "electron@<38.8.6": ">=38.8.6",
+      "electron@<39.8.1": ">=39.8.1",
+      "vite@<=6.4.1": ">=6.4.2",
+      "electron@<39.8.5": ">=39.8.5",
+      "@xmldom/xmldom@<=0.7.999": ">=0.8.1"
+    }
+  },
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "depcruise": "depcruise --config .dependency-cruiser.cjs \"src/**/*.{ts,tsx}\"",
+    "depcruise:graph": "depcruise --config .dependency-cruiser.cjs --output-type dot \"src/**/*.{ts,tsx}\" | dot -Tsvg > dependency-graph.svg",
+    "size-check": "node scripts/check-bundle-size.mjs",
+    "smoke:preferences": "node scripts/smoke-preferences.mjs",
+    "format": "prettier --write src",
+    "format:check": "prettier --check src",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "package": "electron-vite build && electron-forge package",
+    "make": "electron-vite build && electron-forge make",
+    "publish": "electron-vite build && electron-forge publish",
+    "commit": "git-cz",
+    "changelog": "node scripts/generate-changelog.mjs",
+    "changelog:all": "node scripts/generate-changelog.mjs --all",
+    "release": "node scripts/release.mjs",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "src/**/*.{js,mjs,cjs,json,css,md}": [
+      "prettier --write"
+    ]
+  },
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
+  },
+  "dependencies": {
+    "@radix-ui/react-checkbox": "^1.3.3",
+    "@radix-ui/react-collapsible": "^1.1.12",
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-label": "^2.1.8",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-progress": "^1.1.8",
+    "@radix-ui/react-radio-group": "^1.3.8",
+    "@radix-ui/react-scroll-area": "^1.2.10",
+    "@radix-ui/react-select": "^2.2.6",
+    "@radix-ui/react-separator": "^1.1.8",
+    "@radix-ui/react-slot": "^1.2.4",
+    "@radix-ui/react-switch": "^1.2.6",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@radix-ui/react-tooltip": "^1.2.8",
+    "@sentry/electron": "^7.12.0",
+    "@tanstack/react-query": "^5.100.5",
+    "chokidar": "^5.0.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "electron-log": "^5.4.3",
+    "electron-store": "^11.0.2",
+    "electron-updater": "^6.8.3",
+    "lucide-react": "^1.11.0",
+    "react": "^19.2.5",
+    "react-day-picker": "^9.14.0",
+    "react-dom": "^19.2.5",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.1",
+    "react-window": "^2.2.7",
+    "recharts": "^3.8.1",
+    "remark-gfm": "^4.0.1",
+    "semver": "^7.7.4",
+    "tailwind-merge": "^3.5.0",
+    "zod": "^4.3.6",
+    "zustand": "^5.0.12"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^20.5.2",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@electron-forge/cli": "^7.11.1",
+    "@electron-forge/maker-deb": "^7.11.1",
+    "@electron-forge/maker-dmg": "^7.11.1",
+    "@electron-forge/maker-rpm": "^7.11.1",
+    "@electron-forge/maker-squirrel": "^7.11.1",
+    "@electron-forge/maker-zip": "^7.11.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
+    "@electron-forge/plugin-vite": "^7.11.1",
+    "@electron-forge/publisher-github": "^7.11.1",
+    "@electron-forge/shared-types": "^7.11.1",
+    "@tailwindcss/vite": "^4.2.4",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "@types/semver": "^7.7.1",
+    "@typescript-eslint/eslint-plugin": "^8.59.0",
+    "@typescript-eslint/parser": "^8.59.0",
+    "@vitejs/plugin-react": "^6.0.1",
+    "@vitest/coverage-v8": "^2.1.9",
+    "@vitest/ui": "^2.1.9",
+    "commitizen": "^4.3.1",
+    "conventional-changelog": "^7.2.0",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
+    "cz-conventional-changelog": "^3.3.0",
+    "dependency-cruiser": "^17.3.10",
+    "electron": "^41.3.0",
+    "electron-vite": "^5.0.0",
+    "eslint": "^9.39.4",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "prettier": "^3.8.3",
+    "rollup-plugin-visualizer": "^7.0.1",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10",
+    "vitest": "^2.1.9"
+  }
+}
