@@ -1,0 +1,35 @@
+version: 2
+updates:
+
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: 'weekly'
+      day: monday
+      time: '00:00'
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: 'chore: update github-action workflows'
+    labels:
+      - dependabot
+
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '00:00'
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: 'chore: update npm dependencies'
+    groups:
+      electron:
+        patterns:
+          - "electron"
+          - "electron-*"
+          - "@electron-forge/*"
+      react:
+        patterns:
+          - "react"
+          - "react-*"
+          - "@types/react*"

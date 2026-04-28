@@ -1,0 +1,15 @@
+node_modules/
+dist/
+out/
+.DS_Store
+*.local
+coverage/
+TODO.md
+
+# Environment files — .env and .env.example are committed (safe defaults only)
+# Put real secrets in .env.local — never commit it
+.env.local
+.env.*.local
+.env
+
+private/

@@ -1,0 +1,11 @@
+# Syft config used by the release workflow's SBOM step.
+#
+# By default syft only enables `javascript-lock-cataloger` for directory
+# scans, which reads pnpm-lock.yaml and emits every entry — including
+# devDependencies that never ship to users. We delete the lockfile before
+# scanning to avoid that, but doing so leaves syft with no JS cataloger at
+# all. Adding `javascript-package-cataloger` (which syft normally only
+# enables for image/installed scans) makes it walk the prod-only
+# node_modules/ tree we just installed.
+select-catalogers:
+  - "+javascript-package-cataloger"

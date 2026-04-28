@@ -1,0 +1,234 @@
+name: Publish APT repo
+
+on:
+  workflow_call:
+    inputs:
+      ref_name:
+        description: 'Tag or ref name used in the publish commit message (e.g. v1.2.3)'
+        required: true
+        type: string
+    secrets:
+      APT_GPG_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Builds and publishes a signed APT repository on the gh-pages branch so
+  # users can install ClaudeWatch via `apt install claudewatch`. This job
+  # accumulates .deb files across releases — older versions stay installable
+  # and `apt update` always sees the newest version on top.
+  publish-apt-repo:
+    runs-on: ubuntu-latest
+    # Serialise pushes to gh-pages. Two release runs landing concurrently
+    # would race on the merge of the existing pool with the new .deb and one
+    # would clobber the other's history.
+    concurrency:
+      group: publish-apt-repo
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    steps:
+      # We need the build script (lives on the release tag/main) and the
+      # existing apt-repo state (lives on gh-pages). Two checkouts into
+      # separate paths.
+      - name: Checkout source
+        uses: actions/checkout@v6
+        with:
+          path: source
+
+      # The repo we're about to regenerate lives on the gh-pages branch. We
+      # check it out so we can rebuild the indices over the union of
+      # (existing pool) ∪ (new .deb), keeping older versions installable.
+      # If the branch does not exist yet, the next step initialises one.
+      - name: Checkout existing gh-pages tree
+        id: checkout-pages
+        uses: actions/checkout@v6
+        with:
+          ref: gh-pages
+          path: apt-repo
+        continue-on-error: true
+
+      - name: Initialise empty apt-repo dir on first run
+        if: steps.checkout-pages.outcome == 'failure'
+        run: mkdir -p apt-repo
+
+      # Drop the .git metadata so peaceiris/actions-gh-pages can repopulate
+      # the branch cleanly from our regenerated tree. We are about to write
+      # the canonical state; we don't want the existing branch's history
+      # (or its remote/credential config) to leak into the publish step.
+      - name: Strip git metadata from apt-repo
+        run: rm -rf apt-repo/.git
+
+      - name: Download linux artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: linux-artifacts
+          path: linux-artifacts
+
+      - name: Install APT repo tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends dpkg-dev apt-utils gnupg
+
+      - name: Import and validate GPG signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APT_GPG_PRIVATE_KEY:-}" ]; then
+            echo "::error::APT_GPG_PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          # Lock down the GPG home so other steps in the runner can't read
+          # the imported private key from a world-readable directory.
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+
+          # Configure gpg-agent for loopback pinentry. Even though the
+          # recommended setup uses an unprotected key, an operator may
+          # rotate to a passphrase-protected one — supporting it here
+          # costs nothing and saves a workflow change later.
+          echo "allow-loopback-pinentry" >> ~/.gnupg/gpg-agent.conf
+          gpgconf --kill gpg-agent || true
+
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+
+          # Pick the signing-capable secret key. `--list-secret-keys
+          # --with-colons` emits one `sec:` record per primary key; field
+          # 12 lists capabilities (s = sign). We require exactly one
+          # signing-capable secret key in the keyring so a stray import
+          # can never silently change which key signs the release.
+          mapfile -t SIGN_KEYS < <(
+            gpg --list-secret-keys --with-colons \
+              | awk -F: '$1 == "sec" && $12 ~ /s/ { print $5 }'
+          )
+          if [ "${#SIGN_KEYS[@]}" -eq 0 ]; then
+            echo "::error::no signing-capable secret key found after import"
+            exit 1
+          fi
+          if [ "${#SIGN_KEYS[@]}" -gt 1 ]; then
+            echo "::error::multiple signing-capable secret keys found: ${SIGN_KEYS[*]}"
+            echo "::error::APT_GPG_PRIVATE_KEY must contain exactly one signing key"
+            exit 1
+          fi
+          KEY_ID="${SIGN_KEYS[0]}"
+          echo "APT_GPG_KEY_ID=${KEY_ID}" >> "$GITHUB_ENV"
+
+          # Validate expiry. An expired key would produce signatures apt
+          # rejects (EXPKEYSIG), bricking `apt update` for users until we
+          # cut another release. Failing here forces a deliberate rotation.
+          # Field 7 of `sec:` is the expiry as a unix timestamp; empty means
+          # "no expiry" (acceptable, though we recommend setting one).
+          EXPIRY=$(gpg --list-secret-keys --with-colons "$KEY_ID" \
+            | awk -F: '$1 == "sec" { print $7; exit }')
+          if [ -n "$EXPIRY" ]; then
+            NOW=$(date -u +%s)
+            if [ "$EXPIRY" -le "$NOW" ]; then
+              echo "::error::signing key $KEY_ID is expired ($(date -u -d "@$EXPIRY" -Iseconds))"
+              echo "::error::rotate the key (see docs/RELEASE_KEY.md) and update APT_GPG_PRIVATE_KEY"
+              exit 1
+            fi
+            DAYS_LEFT=$(( (EXPIRY - NOW) / 86400 ))
+            if [ "$DAYS_LEFT" -lt 90 ]; then
+              echo "::warning::signing key $KEY_ID expires in $DAYS_LEFT days — schedule a rotation"
+            fi
+            echo "Signing key valid for $DAYS_LEFT more days."
+          else
+            echo "Signing key has no expiry set (acceptable, but a 5y expiry is recommended)."
+          fi
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - name: Build APT repo
+        # The recommended signing key is unprotected, so APT_GPG_PASSPHRASE
+        # is intentionally not wired up here. If you ever rotate to a
+        # passphrase-protected key, add it as a repo secret and uncomment
+        # the env block below — build-apt-repo.mjs reads it via stdin so
+        # the value never appears in argv or process listings.
+        # env:
+        #   APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          node source/scripts/build-apt-repo.mjs \
+            --debs linux-artifacts \
+            --out  apt-repo \
+            --gpg-key-id "$APT_GPG_KEY_ID"
+
+      # Stamp the installer with the real fingerprint of the just-published
+      # signing key. The script is committed with a placeholder so it can't
+      # be run from the source tree without proper release engineering — we
+      # only ever distribute the stamped copy via gh-pages.
+      - name: Publish install.sh with pinned fingerprint
+        run: |
+          set -euo pipefail
+          FINGERPRINT=$(gpg --fingerprint --with-colons "$APT_GPG_KEY_ID" \
+            | awk -F: '/^fpr:/ { print $10; exit }')
+          if [[ -z "$FINGERPRINT" ]]; then
+            echo "::error::could not derive fingerprint for $APT_GPG_KEY_ID"
+            exit 1
+          fi
+          # Use a placeholder string that cannot appear in the script body
+          # by accident, then sed it out exactly once. Fail loudly if the
+          # placeholder is missing — that means someone edited install.sh
+          # in a way that broke this contract.
+          if ! grep -q '__FINGERPRINT__' source/scripts/install.sh; then
+            echo "::error::install.sh has no fingerprint placeholder; refusing to publish an unpinned installer"
+            exit 1
+          fi
+          sed "s/__FINGERPRINT__/${FINGERPRINT}/" \
+            source/scripts/install.sh > apt-repo/install.sh
+          chmod 0755 apt-repo/install.sh
+
+          # Sanity check: the published installer must contain the real
+          # fingerprint and must NOT contain the placeholder string.
+          grep -q "$FINGERPRINT" apt-repo/install.sh
+          ! grep -q '__FINGERPRINT__' apt-repo/install.sh
+
+      # Sanity-check the produced tree before publishing. A corrupt or empty
+      # repo would brick `apt update` for everyone who already added the
+      # source, so we'd rather fail the workflow than push it.
+      - name: Verify generated repo
+        run: |
+          set -euo pipefail
+          test -s apt-repo/dists/stable/Release
+          test -s apt-repo/dists/stable/Release.gpg
+          test -s apt-repo/dists/stable/InRelease
+          test -s apt-repo/pubkey.gpg
+          test -s apt-repo/install.sh
+          test -x apt-repo/install.sh
+          # Every Packages index must reference at least one .deb.
+          for p in apt-repo/dists/stable/main/binary-*/Packages; do
+            grep -q '^Filename: pool/' "$p" || { echo "::error::empty index: $p"; exit 1; }
+          done
+          # Verify the InRelease signature against the just-exported public key.
+          gpg --no-default-keyring --keyring "$RUNNER_TEMP/verify.kbx" \
+            --import apt-repo/pubkey.gpg
+          gpg --no-default-keyring --keyring "$RUNNER_TEMP/verify.kbx" \
+            --verify apt-repo/dists/stable/InRelease
+          # Bash syntax-check the published installer.
+          bash -n apt-repo/install.sh
+
+      # Drop the working config file before publish so it doesn't end up
+      # served from gh-pages.
+      - name: Clean transient files
+        run: rm -f apt-repo/apt-release.conf
+
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: apt-repo
+          publish_branch: gh-pages
+          # We rebuilt the canonical tree from the merged pool above, so we
+          # want the published branch to reflect exactly that — no stale
+          # files from previous runs.
+          force_orphan: false
+          keep_files: false
+          commit_message: "chore: publish apt repo for ${{ inputs.ref_name }}"
+          user_name: github-actions[bot]
+          user_email: github-actions[bot]@users.noreply.github.com

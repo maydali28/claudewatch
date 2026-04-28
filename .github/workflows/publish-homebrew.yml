@@ -1,0 +1,56 @@
+name: Publish Homebrew
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Release version without leading v (e.g. 1.2.3)'
+        required: true
+        type: string
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish-homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download mac artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: mac-artifacts
+          path: mac-artifacts
+
+      - name: Update Homebrew cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          DMG=$(find mac-artifacts -name "*arm64*.dmg" | head -1)
+          if [ -z "$DMG" ]; then
+            DMG=$(find mac-artifacts -name "*.dmg" | head -1)
+          fi
+          if [ -z "$DMG" ]; then
+            echo "No DMG found — skipping Homebrew tap update"
+            exit 0
+          fi
+          SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+
+          git clone "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/maydali28/homebrew-claudewatch.git" claudewatch
+          mkdir -p claudewatch/Casks
+          sed -e "s|__VERSION__|${VERSION}|g" \
+              -e "s|__SHA256__|${SHA}|g" \
+              homebrew/claudewatch.rb > claudewatch/Casks/claudewatch.rb
+
+          cd claudewatch
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/claudewatch.rb
+          git diff --staged --quiet || git commit -m "chore: update claudewatch cask to v${VERSION}"
+          git push

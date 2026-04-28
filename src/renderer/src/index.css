@@ -1,0 +1,377 @@
+@import 'tailwindcss';
+
+/* ─── Design tokens ──────────────────────────────────────────────────────────── */
+:root {
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --primary: 221.2 83.2% 53.3%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 221.2 83.2% 53.3%;
+  --radius: 0.5rem;
+}
+
+[data-theme='dark'] {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --card: 222.2 84% 4.9%;
+  --card-foreground: 210 40% 98%;
+  --popover: 222.2 84% 4.9%;
+  --popover-foreground: 210 40% 98%;
+  --primary: 217.2 91.2% 59.8%;
+  --primary-foreground: 222.2 47.4% 11.2%;
+  --secondary: 217.2 32.6% 17.5%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --input: 217.2 32.6% 17.5%;
+  --ring: 224.3 76.3% 48%;
+}
+
+/* ─── Tailwind semantic token bindings ───────────────────────────────────────── */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* ─── Animation keyframes (used by Radix UI + animate-in/out utilities) ─────── */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+@keyframes zoom-in-95 {
+  from {
+    transform: scale(0.95);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@keyframes zoom-out-95 {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(0.95);
+  }
+}
+@keyframes slide-in-from-top-2 {
+  from {
+    transform: translateY(-0.5rem);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes slide-in-from-bottom-2 {
+  from {
+    transform: translateY(0.5rem);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes slide-in-from-left-2 {
+  from {
+    transform: translateX(-0.5rem);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+@keyframes slide-in-from-right-2 {
+  from {
+    transform: translateX(0.5rem);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* ─── animate-in / animate-out utility classes ───────────────────────────────── */
+.animate-in {
+  animation-duration: 150ms;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-fill-mode: both;
+}
+.animate-out {
+  animation-duration: 100ms;
+  animation-timing-function: ease-in;
+  animation-fill-mode: both;
+}
+
+.fade-in-0 {
+  animation-name: fade-in;
+}
+.fade-out-0 {
+  animation-name: fade-out;
+}
+.zoom-in-95 {
+  animation-name: zoom-in-95;
+}
+.zoom-out-95 {
+  animation-name: zoom-out-95;
+}
+.slide-in-from-top-2 {
+  animation-name: slide-in-from-top-2;
+}
+.slide-in-from-bottom-2 {
+  animation-name: slide-in-from-bottom-2;
+}
+.slide-in-from-left-2 {
+  animation-name: slide-in-from-left-2;
+}
+.slide-in-from-right-2 {
+  animation-name: slide-in-from-right-2;
+}
+
+/* ─── Base resets ────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  border-color: hsl(var(--border));
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ─── Focus visibility baseline ──────────────────────────────────────────────
+ * Many components historically used `focus:outline-none` without an explicit
+ * replacement ring, leaving keyboard users without a focus indicator. Apply a
+ * default `:focus-visible` ring so anything not customised still meets WCAG
+ * 2.4.7 (Focus Visible). Components that *do* style focus override this via
+ * Tailwind's higher-specificity utility classes.
+ *
+ * `:focus-visible` (not `:focus`) is intentional — mouse clicks should not
+ * leave a ring, only keyboard navigation should.
+ */
+button:focus-visible,
+[role='button']:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+  border-radius: calc(var(--radius) - 2px);
+}
+
+/* ─── Custom DayPicker (.cdp) ────────────────────────────────────────────────── */
+.cdp .rdp-months {
+  position: relative;
+}
+.cdp .rdp-month_caption {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  margin-bottom: 4px;
+}
+.cdp .rdp-caption_label {
+  font-size: 12px;
+  font-weight: 500;
+}
+.cdp .rdp-nav {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  pointer-events: none;
+}
+.cdp .rdp-button_previous,
+.cdp .rdp-button_next {
+  pointer-events: all;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: hsl(var(--muted-foreground));
+}
+.cdp .rdp-button_previous:hover,
+.cdp .rdp-button_next:hover {
+  background: hsl(var(--accent));
+}
+.cdp .rdp-chevron {
+  width: 12px;
+  height: 12px;
+  fill: currentColor;
+}
+.cdp .rdp-weekdays {
+  display: flex;
+}
+.cdp .rdp-weekday {
+  width: 32px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: hsl(var(--muted-foreground));
+  font-weight: normal;
+}
+.cdp .rdp-week {
+  display: flex;
+  margin-top: 2px;
+}
+.cdp .rdp-day {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.cdp .rdp-day_button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: hsl(var(--foreground));
+  transition:
+    background 120ms,
+    color 120ms;
+}
+.cdp .rdp-day_button:hover {
+  background: hsl(var(--accent));
+}
+.cdp .rdp-today .rdp-day_button {
+  font-weight: 600;
+  color: hsl(var(--primary));
+}
+.cdp .rdp-outside {
+  opacity: 0.35;
+}
+.cdp .rdp-disabled {
+  opacity: 0.25;
+  pointer-events: none;
+}
+.cdp .rdp-range_middle {
+  background: hsl(var(--primary) / 0.12);
+  border-radius: 0;
+}
+.cdp .rdp-range_middle .rdp-day_button {
+  background: transparent;
+  color: hsl(var(--foreground));
+  border-radius: 0;
+}
+.cdp .rdp-range_middle .rdp-day_button:hover {
+  background: hsl(var(--primary) / 0.2);
+}
+.cdp .rdp-range_start {
+  background: linear-gradient(to right, transparent 50%, hsl(var(--primary) / 0.12) 50%);
+}
+.cdp .rdp-range_end {
+  background: linear-gradient(to left, transparent 50%, hsl(var(--primary) / 0.12) 50%);
+}
+.cdp .rdp-range_start .rdp-day_button,
+.cdp .rdp-range_end .rdp-day_button {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-radius: 6px;
+}
+.cdp .rdp-range_start .rdp-day_button:hover,
+.cdp .rdp-range_end .rdp-day_button:hover {
+  background: hsl(var(--primary) / 0.85);
+  color: hsl(var(--primary-foreground));
+}
+.cdp
+  .rdp-selected:not(.rdp-range_start):not(.rdp-range_end):not(.rdp-range_middle)
+  .rdp-day_button {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+
+/* ─── Scrollbar styling ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}

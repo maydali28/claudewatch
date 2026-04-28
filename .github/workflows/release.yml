@@ -1,0 +1,281 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: 'Tag to release (e.g. v1.2.3)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    strategy:
+      # Don't cancel sibling platforms when one fails — a 5-minute lint failure
+      # on linux shouldn't waste the 15 minutes already spent on the mac signer.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: mac
+            os: macos-14
+            cache_path: ~/Library/Caches/electron
+            artifact_glob: |
+              dist/make/**/*.dmg
+              dist/make/**/*.zip
+          - platform: windows
+            os: windows-latest
+            cache_path: ~\AppData\Local\electron\Cache
+            artifact_glob: |
+              dist/make/**/*.exe
+              dist/make/**/*.nupkg
+              dist/make/**/RELEASES
+              dist/make/**/*.zip
+          - platform: linux
+            os: ubuntu-latest
+            cache_path: ~/.cache/electron
+            artifact_glob: |
+              dist/make/**/*.deb
+              dist/make/**/*.rpm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.19.0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Cache Electron binaries
+        uses: actions/cache@v5
+        with:
+          path: ${{ matrix.cache_path }}
+          key: electron-${{ matrix.platform }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: electron-${{ matrix.platform }}-
+      - name: Install Linux build dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm fakeroot dpkg libarchive-tools
+      - run: pnpm install --frozen-lockfile
+      # Workaround for upstream electron-winstaller bug: vendored 7z binaries
+      # are named with -x64 suffix but the runtime resolver looks for plain
+      # 7z.exe / 7z.dll. Tracked at:
+      #   https://github.com/electron/windows-installer/issues/527
+      # Drop this step once the upstream fix lands and we bump
+      # electron-winstaller (transitive of @electron-forge/maker-squirrel).
+      - name: Fix electron-winstaller 7z vendor (os.arch bug)
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: |
+          $vendorDir = "node_modules\electron-winstaller\vendor"
+          Copy-Item "$vendorDir\7z-x64.exe" "$vendorDir\7z.exe" -Force
+          Copy-Item "$vendorDir\7z-x64.dll" "$vendorDir\7z.dll" -Force
+      - run: pnpm make
+        env:
+          MAIN_VITE_SENTRY_DSN: ${{ secrets.MAIN_VITE_SENTRY_DSN }}
+          MAIN_VITE_RELEASE_SERVER_URL: ${{ secrets.MAIN_VITE_RELEASE_SERVER_URL }}
+          MAIN_VITE_GITHUB_RELEASES_URL: ${{ secrets.MAIN_VITE_GITHUB_RELEASES_URL }}
+          VITE_WEBSITE_URL: ${{ secrets.VITE_WEBSITE_URL }}
+          VITE_REPO_URL: ${{ secrets.VITE_REPO_URL }}
+          # Only consumed by the Windows Squirrel maker; harmless on mac/linux.
+          MAIN_VITE_BREW_CASK_NAME: ${{ secrets.MAIN_VITE_BREW_CASK_NAME }}
+      - uses: actions/upload-artifact@v7
+        with:
+          retention-days: 1
+          compression-level: 9
+          name: ${{ matrix.platform }}-artifacts
+          path: ${{ matrix.artifact_glob }}
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Collect release files
+        run: |
+          mkdir -p release-files
+          find artifacts -type f \( \
+            -name "*.dmg" -o -name "*.zip" \
+            -o -name "*.exe" -o -name "*.nupkg" \
+            -o -name "RELEASES" \
+            -o -name "*.deb" -o -name "*.rpm" \
+          \) -exec cp {} release-files/ \;
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.release_name }}"
+          else
+            VERSION="${{ github.ref_name }}"
+          fi
+          # strip leading 'v' for semver use inside manifests
+          echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "tag=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate update manifests
+        run: node scripts/generate-update-manifests.mjs --dir release-files --version "${{ steps.version.outputs.version }}"
+
+      - name: Extract changelog for this release
+        id: changelog
+        run: |
+          node scripts/extract-release-notes.mjs > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            cp CHANGELOG.md release-notes.md
+          fi
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.19.0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # Install only the runtime dependency closure so the SBOM reflects what
+      # users actually run (the contents of app.asar), not build tooling.
+      # Scanning the full dev tree flags unfixable CVEs in vendored binaries
+      # — esbuild's Go stdlib and electron-winstaller's bundled 7-Zip 16.04 —
+      # neither of which ships to users. Syft can't introspect .asar/.dmg, so
+      # a fresh prod install is the cleanest source of signal.
+      - name: Install production-only dependency tree for SBOM
+        run: |
+          mkdir -p sbom-scope
+          cp package.json pnpm-lock.yaml sbom-scope/
+          cp -R patches sbom-scope/
+          cd sbom-scope
+          pnpm install --prod --ignore-scripts --frozen-lockfile
+          # Remove the manifests *after* install. Syft's pnpm-lock cataloger
+          # would otherwise enumerate every entry in the lockfile (including
+          # devDeps like @electron-forge and its build-tool transitives),
+          # ignoring what's actually on disk. Deleting them forces syft to
+          # walk node_modules/ instead, which only contains the prod tree.
+          rm -f package.json pnpm-lock.yaml
+          rm -rf patches
+
+      - name: Generate SBOM of shipped dependencies
+        uses: anchore/sbom-action@v0
+        with:
+          path: sbom-scope
+          format: cyclonedx-json
+          output-file: release-files/sbom.cyclonedx.json
+          # Enables the npm package cataloger so syft walks the installed
+          # node_modules tree instead of falling back to the lock cataloger
+          # (which we already removed inputs for).
+          config: .syft.yaml
+
+      - name: Scan shipped dependencies for vulnerabilities
+        uses: anchore/scan-action@v7
+        with:
+          sbom: release-files/sbom.cyclonedx.json
+          fail-build: true
+          severity-cutoff: high
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "ClaudeWatch ${{ steps.version.outputs.tag }}"
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            release-files/*.dmg
+            release-files/*.zip
+            release-files/*.exe
+            release-files/*.nupkg
+            release-files/RELEASES
+            release-files/*.deb
+            release-files/*.rpm
+            release-files/latest.yml
+            release-files/latest-linux.yml
+            release-files/latest-mac.json
+            release-files/sbom.cyclonedx.json
+
+      # Defence in depth against rare GitHub upload corruption: download what
+      # we just uploaded and re-verify SHA-256 against the local copy. If
+      # anything mismatches we fail loudly so the release can be re-cut, and
+      # we don't ship subtly-broken installers.
+      - name: Verify uploaded artifact integrity
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p verify-files
+          fail=0
+          for f in release-files/*.dmg release-files/*.exe release-files/*.zip \
+                   release-files/*.nupkg release-files/*.deb release-files/*.rpm; do
+            [ -e "$f" ] || continue
+            name=$(basename "$f")
+            url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/${name}"
+            echo "Verifying ${name}..."
+            curl -fL --retry 3 --retry-delay 5 -o "verify-files/${name}" "$url"
+            local_sha=$(shasum -a 256 "$f" | awk '{print $1}')
+            remote_sha=$(shasum -a 256 "verify-files/${name}" | awk '{print $1}')
+            if [ "$local_sha" != "$remote_sha" ]; then
+              echo "::error::Hash mismatch for ${name}: local=${local_sha} remote=${remote_sha}"
+              fail=1
+            fi
+          done
+          rm -rf verify-files
+          exit $fail
+
+  publish-apt-repo:
+    needs: release
+    permissions:
+      contents: write
+    uses: ./.github/workflows/publish-apt-repo.yml
+    with:
+      ref_name: ${{ github.ref_name }}
+    secrets:
+      APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+
+  publish-homebrew:
+    needs: release
+    uses: ./.github/workflows/publish-homebrew.yml
+    with:
+      version: ${{ needs.release.outputs.version }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+  # Reclaim Actions artifact storage (free tier: 500 MB) once every consumer
+  # has finished. The artifacts only exist to hand build outputs from the
+  # matrix runners to release / publish-apt-repo / publish-homebrew — after
+  # those jobs complete, they are dead weight that would sit for retention-days.
+  cleanup-artifacts:
+    needs: [release, publish-apt-repo, publish-homebrew]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: geekyeggo/delete-artifact@v6
+        with:
+          name: '*'
+          useGlob: true
+          failOnError: false

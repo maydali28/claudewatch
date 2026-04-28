@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClaudeWatch</title>
+    <!--
+      Modulepreload hint for the dashboard entry. The renderer dynamically
+      imports a window-specific bundle (./app, ./tray-app, ./update-app, ...)
+      from main.tsx; the dashboard is the dominant entry by an order of
+      magnitude, so prefetching it cuts first paint of cold launches without
+      slowing the smaller tray/about windows enough to matter. Vite resolves
+      this hint to the hashed chunk during build.
+    -->
+    <link rel="modulepreload" href="/src/app.tsx" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

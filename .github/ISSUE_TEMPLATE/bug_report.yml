@@ -1,0 +1,52 @@
+name: Bug Report
+description: Report a bug in ClaudeWatch
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill out as much as you can.
+
+  - type: input
+    id: version
+    attributes:
+      label: ClaudeWatch version
+      placeholder: "e.g. 0.9.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows
+        - Linux
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug description
+      description: What happened? What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ClaudeWatch
+        2. Click on …
+        3. …
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste logs from Help → Show Logs (remove any sensitive info)
+      render: text
