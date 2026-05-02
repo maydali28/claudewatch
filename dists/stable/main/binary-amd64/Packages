@@ -1,0 +1,19 @@
+Package: claudewatch
+Version: 1.0.0
+Architecture: amd64
+Maintainer: may.mohamedali28@gmail.com
+Installed-Size: 362585
+Depends: libgtk-3-0, libnotify4, libnss3, xdg-utils, libatspi2.0-0, libdrm2, libgbm1, libxcb-dri3-0, kde-cli-tools | kde-runtime | trash-cli | libglib2.0-bin | gvfs-bin
+Recommends: pulseaudio | libasound2
+Suggests: gir1.2-gnomekeyring-1.0, libgnome-keyring0, lsb-release
+Filename: pool/main/c/claudewatch/claudewatch_1.0.0_amd64.deb
+Size: 95876224
+MD5sum: d6963c270225a067f075cb8b9ba0c46c
+SHA1: cd28176fa557b2d121e741a295c23b0f08fb8461
+SHA256: 4c2708799e14c44ab4f039fecc74776d95533719a8f9d46840211fd724919972
+Section: utils
+Priority: optional
+Homepage: https://github.com/maydali28/claudewatch
+Description: Claude Code session explorer (macOS, Windows, Linux)
+ Claude Code session explorer (macOS, Windows, Linux)
+

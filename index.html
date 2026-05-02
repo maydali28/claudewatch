@@ -1,0 +1,11 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ClaudeWatch APT repository</title>
+<h1>ClaudeWatch APT repository</h1>
+<p>Add this repo and install:</p>
+<pre>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://maydali28.github.io/claudewatch/pubkey.gpg | sudo gpg --dearmor -o /etc/apt/keyrings/claudewatch.gpg
+echo "deb [signed-by=/etc/apt/keyrings/claudewatch.gpg] https://maydali28.github.io/claudewatch stable main" | sudo tee /etc/apt/sources.list.d/claudewatch.list
+sudo apt update
+sudo apt install claudewatch</pre>
+<p>Source: <a href="https://github.com/maydali28/claudewatch">github.com/maydali28/claudewatch</a></p>

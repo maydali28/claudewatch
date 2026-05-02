@@ -1,0 +1,30 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64
+Codename: stable
+Components: main
+Date: Sat, 02 May 2026 00:34:54 +0000
+Description: ClaudeWatch APT repository
+Label: ClaudeWatch
+Origin: ClaudeWatch
+Suite: stable
+MD5Sum:
+ 2f118b462f7dcacc69388e3fc7352b54              833 main/binary-amd64/Packages
+ e4a24d0bca9d45539efe5c51a0b8dd83              548 main/binary-amd64/Packages.gz
+SHA1:
+ 957115d57bb2963029d9a79bdaeb9e3a57a3c084              833 main/binary-amd64/Packages
+ 3d5c630646b0a25049e00640e46df3dc522b5fb9              548 main/binary-amd64/Packages.gz
+SHA256:
+ 9ad4f093f921d6d4ec4ba8f5a633c805300865b7d5fcb1e09a7d4413f05a410d              833 main/binary-amd64/Packages
+ 70b886c6a8ca94d8fa624cd561c27228159b9f1b030f0420c27541b402db705e              548 main/binary-amd64/Packages.gz
+SHA512:
+ de62f8142630af3fc0903a5a988384abfc4e8a00a11e7f1838c847e739b4e427c4cf13ba90aa16342e33d3a0c80630345ef06e55248c5b044f462aa8e9451b63              833 main/binary-amd64/Packages
+ e97cb93194f4d7f879738d1c46460064351189c709295247cb2fc5d378fb473d966a8b0bcc8a6999f6552b485ea3657284e4e3a06bbd289fc98690cc4a06d029              548 main/binary-amd64/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYKAB0WIQTdbyvbYL0HoINvxHqkiBz5+3ckOgUCafVGrgAKCRCkiBz5+3ck
+OrwUAQDELmCr9R/o0r5YVMFdqSxtEBGMljC/w+a4s3pHdzm+0wD/YVS0vjuRi9fE
+q/wXu3FJ1c9yBTcC3ckyFDimN6kWkgA=
+=FcJR
+-----END PGP SIGNATURE-----
