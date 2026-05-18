@@ -86,7 +86,7 @@
   "dependencies": {
     "@sentry/electron": "^7.12.0",
     "chokidar": "^5.0.0",
-    "electron-log": "^5.4.3",
+    "electron-log": "^5.4.4",
     "electron-store": "^11.0.2",
     "electron-updater": "^6.8.3",
     "semver": "^7.7.4",
@@ -141,7 +141,7 @@
     "cz-conventional-changelog": "^3.3.0",
     "date-fns": "^4.1.0",
     "dependency-cruiser": "^17.3.10",
-    "electron": "^41.3.0",
+    "electron": "^42.1.0",
     "electron-vite": "^5.0.0",
     "eslint": "^9.39.4",
     "eslint-plugin-jsx-a11y": "^6.10.2",
