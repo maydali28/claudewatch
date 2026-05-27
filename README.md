@@ -100,8 +100,6 @@ The app runs as a standard Electron process. On macOS it appears only in the men
 
 ### macOS
 
-> **Note:** The macOS build is not yet Apple-notarized (Developer Program enrollment is in progress). Homebrew strips the quarantine flag automatically, so the recommended path below works out of the box. If you download the `.dmg` directly you will need one extra command — see [Direct download](#direct-download).
-
 #### Homebrew (recommended)
 
 ```bash
@@ -111,13 +109,7 @@ brew install --cask claudewatch
 
 #### Direct download
 
-Download the `.dmg` from the [latest release](https://github.com/maydali28/claudewatch/releases/latest), drag the app to `/Applications`, then run this **once** to clear the macOS quarantine flag:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/ClaudeWatch.app
-```
-
-Without this step, macOS will refuse to open the app with a "ClaudeWatch is damaged" message because the build is not yet notarized. The Homebrew install path above does this for you automatically.
+Download the `.dmg` from the [latest release](https://github.com/maydali28/claudewatch/releases/latest) and drag the app to `/Applications`.
 
 #### Updating
 
@@ -302,18 +294,39 @@ Open `.env.local` and fill in your values. The file is gitignored — never comm
 
 Variables are baked into the app bundle at build time by `electron-vite`'s `define` — there is no `process.env` access in the shipped binary. The authoritative reference is [`.env.example`](.env.example).
 
-The following secrets must be set in your GitHub repository (**Settings → Secrets and variables → Actions**) and are never stored in `.env` files:
+The following secrets must be set in your GitHub repository (**Settings → Secrets and variables → Actions**) and are never stored in `.env` files.
+
+**Build-time configuration** (read by `pnpm make` on every platform):
 
 | Secret | Purpose |
 |--------|---------|
 | `MAIN_VITE_SENTRY_DSN` | Sentry DSN for crash reports |
 | `MAIN_VITE_RELEASE_SERVER_URL` | Auto-updater release feed URL |
 | `MAIN_VITE_GITHUB_RELEASES_URL` | GitHub releases base URL for manifest verification |
+| `MAIN_VITE_BREW_CASK_NAME` | Homebrew cask name shown in the in-app upgrade hint |
 | `VITE_WEBSITE_URL` | Project website URL |
 | `VITE_REPO_URL` | GitHub repository URL |
 | `HOMEBREW_TAP_TOKEN` | PAT with write access to the Homebrew tap repo |
-| `CSC_LINK` | Code-signing certificate (`.p12`) path — macOS/Windows only |
-| `CSC_KEY_PASSWORD` | Password for the code-signing certificate |
+| `APT_GPG_PRIVATE_KEY` | GPG private key used to sign the APT repository metadata |
+
+**macOS code-signing and notarization** (consumed only on the `macos-14` runner — see [`.github/workflows/release.yml`](.github/workflows/release.yml)):
+
+| Secret | Purpose |
+|--------|---------|
+| `MACOS_CERTIFICATE` | base64-encoded `.p12` export of the Developer ID Application certificate |
+| `MACOS_CERTIFICATE_PWD` | password used when exporting the `.p12` |
+| `APPLE_API_KEY` | base64-encoded `AuthKey_XXXX.p8` from App Store Connect (used by `notarytool`) |
+| `APPLE_API_KEY_ID` | App Store Connect API Key ID (10 chars) |
+| `APPLE_API_ISSUER` | App Store Connect Issuer ID (UUID) |
+
+The keychain password is generated per-run inside the workflow and is not a stored secret. The signing identity (`Developer ID Application: ... (TEAMID)`) is read from the imported certificate at build time and exported as `APPLE_SIGNING_IDENTITY`, which [`forge.config.ts`](forge.config.ts) uses to pin the exact identity. If `APPLE_SIGNING_IDENTITY` is unset, the macOS build is produced unsigned — this is the correct behavior for local builds and is what gates the entire signing path.
+
+To produce the base64 inputs locally:
+
+```bash
+base64 -i DeveloperIDApplication.p12 | pbcopy   # → MACOS_CERTIFICATE
+base64 -i AuthKey_XXXX.p8 | pbcopy              # → APPLE_API_KEY
+```
 
 CI secrets override the defaults baked into `.env` at build time.
 
@@ -328,18 +341,6 @@ This starts the electron-vite dev server with hot reload for both the main proce
 ---
 
 ## Troubleshooting
-
-### macOS
-
-#### "ClaudeWatch is damaged and can't be opened" / "cannot be opened because the developer cannot be verified"
-
-The macOS build is currently **not notarized with Apple**, so on first launch Gatekeeper will quarantine the app and refuse to open it. To remove the quarantine flag, run once after installation:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/ClaudeWatch.app
-```
-
-Then open the app normally. You only need to do this once per install (and once again after each update if you keep seeing the warning). Notarization is on the roadmap — once it ships, this step will no longer be required.
 
 ### Linux
 
