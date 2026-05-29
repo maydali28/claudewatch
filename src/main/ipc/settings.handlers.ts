@@ -1,9 +1,10 @@
-import { ipcMain, app } from 'electron'
+import { ipcMain } from 'electron'
 import { CHANNELS } from '@shared/ipc/channels'
 import { ok, err, toSafeError } from '@shared/ipc/contracts'
 import { validate, SettingsSetSchema } from '@shared/ipc/schemas'
 import { Preferences } from '@main/store/preferences'
 import { setSentryEnabled, captureHandlerException } from '@main/services/sentry'
+import { setAutostart } from '@main/services/autostart'
 import { broadcastToRenderers } from '@main/window-manager'
 
 export function registerSettingsHandlers(): void {
@@ -22,7 +23,7 @@ export function registerSettingsHandlers(): void {
       Preferences.set(settingsPatch)
 
       if (typeof settingsPatch.launchAtLogin === 'boolean') {
-        app.setLoginItemSettings({ openAtLogin: settingsPatch.launchAtLogin })
+        await setAutostart(settingsPatch.launchAtLogin)
       }
 
       if (typeof settingsPatch.sentryEnabled === 'boolean') {
