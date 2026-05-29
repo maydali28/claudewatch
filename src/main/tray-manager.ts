@@ -1,20 +1,8 @@
-import { BrowserWindow, Tray, Menu, nativeImage, app, shell, screen } from 'electron'
+import { BrowserWindow, Tray, Menu, nativeImage, app, shell } from 'electron'
 import { join } from 'path'
 import { createTrayPopoverWindow, positionPopoverUnderTray } from './window-manager'
 
 let tray: Tray | null = null
-
-function isCursorOverTray(): boolean {
-  if (!tray) return false
-  const bounds = tray.getBounds()
-  // tray.getBounds() returns zeroed values on Linux where the menubar API
-  // is unreliable — treat as "no, not over tray" so blur still hides.
-  if (bounds.width === 0 || bounds.height === 0) return false
-  const { x, y } = screen.getCursorScreenPoint()
-  return (
-    x >= bounds.x && x <= bounds.x + bounds.width && y >= bounds.y && y <= bounds.y + bounds.height
-  )
-}
 
 // ─── Icon helpers ─────────────────────────────────────────────────────────────
 
@@ -53,11 +41,14 @@ function buildTrayIcon(hasAlert = false): Electron.NativeImage {
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
 
-function buildContextMenu(mainWindow: BrowserWindow): Electron.Menu {
+function buildContextMenu(mainWindow: BrowserWindow, popover: BrowserWindow): Electron.Menu {
   return Menu.buildFromTemplate([
     {
       label: 'Open Dashboard',
       click: () => {
+        if (!popover.isDestroyed() && popover.isVisible()) {
+          popover.hide()
+        }
         if (process.platform === 'darwin') {
           app.dock?.show()
         } else {
@@ -94,13 +85,23 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
   tray = new Tray(buildTrayIcon())
   tray.setToolTip('ClaudeWatch')
 
-  // Do NOT call setContextMenu — on macOS that makes left-click show the menu
-  // instead of (or in addition to) our popover, causing a double-popup.
-  const contextMenu = buildContextMenu(mainWindow)
-
   // Create (but don't show) tray popover window up-front so it loads in the
   // background and pops instantly when the user clicks the tray icon.
   const popover = createTrayPopoverWindow()
+
+  // macOS: set the panel's window level to 'pop-up-menu' — the documented
+  // level for menubar-style popovers. Keeps the panel above regular windows
+  // but below system overlays (Notification Center, Mission Control).
+  if (process.platform === 'darwin') {
+    popover.setAlwaysOnTop(true, 'pop-up-menu')
+  }
+
+  // Do NOT call setContextMenu on macOS/Windows — it makes left-click show the
+  // menu instead of (or in addition to) our popover, causing a double-popup.
+  // (Linux uses setContextMenu via the platform branch further down — see
+  // there for the explanation.) The menu is built after the popover so the
+  // "Open Dashboard" handler can dismiss the popover.
+  const contextMenu = buildContextMenu(mainWindow, popover)
 
   // Auto-dismiss model: the popover hides when it loses focus to anything
   // outside our own windows. Two subtleties make this non-trivial:
@@ -108,9 +109,9 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
   // 1. Re-opening race — clicking the tray while the popover is open fires
   //    `blur` *before* the tray `click` handler. A naive "hide on blur,
   //    toggle on click" sees `isVisible() === false` in the click handler
-  //    and re-opens the popover the user just dismissed. Solved by
-  //    `isCursorOverTray()`: skip the blur-hide while the cursor is on the
-  //    tray and let the click handler own the toggle.
+  //    and re-opens the popover the user just dismissed. Solved here by an
+  //    explicit `ignoreNextBlur` flag set by the click handler whenever it
+  //    initiates a hide — the blur handler consumes and clears the flag.
   //
   // 2. Show/focus is not atomic on Linux — under many X11 and Wayland
   //    compositors the popover transitions through a transient unfocused
@@ -122,9 +123,10 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
   //    with show(), so the gate is unnecessary there — and on macOS the
   //    popover is a `panel` shown via showInactive(), which doesn't always
   //    fire a real `focus` event, so applying the gate would suppress
-  //    every dismissal. Hence the platform check.
+  //    every dismissal.
   const requiresFocusGate = process.platform === 'linux'
   let hasBeenFocused = !requiresFocusGate
+  let ignoreNextBlur = false
 
   popover.on('focus', () => {
     hasBeenFocused = true
@@ -132,10 +134,16 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
 
   popover.on('hide', () => {
     hasBeenFocused = !requiresFocusGate
+    ignoreNextBlur = false
   })
 
   popover.on('blur', () => {
     if (popover.isDestroyed() || !popover.isVisible()) return
+
+    if (ignoreNextBlur) {
+      ignoreNextBlur = false
+      return
+    }
 
     // Linux only: wait for the popover to actually take focus before
     // honouring blur, otherwise transient unfocused states during show()
@@ -148,16 +156,13 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
     const focusedIsOwn = ownWindows.some((w) => w.isFocused())
     if (focusedIsOwn) return
 
-    // Don't hide if the cursor is over the tray icon — the click handler
-    // will toggle the popover off in the next event loop tick.
-    if (isCursorOverTray()) return
-
     popover.hide()
   })
 
   tray.on('click', (_event, trayBounds) => {
     if (popover.isDestroyed()) return
     if (popover.isVisible()) {
+      ignoreNextBlur = true
       popover.hide()
       return
     }
@@ -175,10 +180,23 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
     }
   })
 
-  // Right-click (and two-finger tap on macOS trackpad) shows context menu
-  tray.on('right-click', () => {
-    tray!.popUpContextMenu(contextMenu)
-  })
+  // Context menu binding diverges by platform:
+  // - Linux (AppIndicator): the `right-click` event never fires. The menu must
+  //   be registered via setContextMenu(), which routes the secondary click
+  //   automatically. As a side effect, `tray.on('click', ...)` may not fire on
+  //   some Linux desktops once a context menu is set — but our popover is
+  //   non-essential on Linux (the dashboard is reachable via the menu), so
+  //   the trade is acceptable.
+  // - macOS / Windows: use `right-click` so a single tray.setContextMenu() call
+  //   doesn't intercept left-click, which would replace our custom popover
+  //   with the OS menu.
+  if (process.platform === 'linux') {
+    tray.setContextMenu(contextMenu)
+  } else {
+    tray.on('right-click', () => {
+      tray!.popUpContextMenu(contextMenu)
+    })
+  }
 
   return tray
 }
