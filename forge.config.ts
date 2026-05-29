@@ -7,6 +7,33 @@ import { MakerSquirrel } from '@electron-forge/maker-squirrel'
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives'
 import { PublisherGithub } from '@electron-forge/publisher-github'
 
+// macOS signing is opt-in via env: a release runner sets APPLE_SIGNING_IDENTITY
+// (the exact "Developer ID Application: ... (TEAMID)" string) plus the three
+// notarytool credentials. Local builds and CI without the cert produce an
+// unsigned .app, which is correct for forks and PR builds.
+const macSigning = process.env['APPLE_SIGNING_IDENTITY']
+  ? {
+      osxSign: {
+        identity: process.env['APPLE_SIGNING_IDENTITY'],
+        optionsForFile: () => ({
+          hardenedRuntime: true,
+          entitlements: 'resources/entitlements.mac.plist',
+          'entitlements-inherit': 'resources/entitlements.mac.plist',
+          'signature-flags': 'library',
+        }),
+      },
+      ...(process.env['APPLE_API_KEY']
+        ? {
+            osxNotarize: {
+              appleApiKey: process.env['APPLE_API_KEY'],
+              appleApiKeyId: process.env['APPLE_API_KEY_ID']!,
+              appleApiIssuer: process.env['APPLE_API_ISSUER']!,
+            },
+          }
+        : {}),
+    }
+  : {}
+
 const config: ForgeConfig = {
   // Forge outputs packaged artifacts to dist/ so it doesn't conflict with
   // electron-vite's build output in out/ (forge auto-ignores its own outDir).
@@ -20,6 +47,7 @@ const config: ForgeConfig = {
     asar: {
       unpack: '{node_modules/chokidar/**/*,node_modules/fsevents/**/*}',
     },
+    ...macSigning,
     // Forge hardcodes ignore:[/^\/out\//g] but our electron-vite builds into out/.
     // Since we set outDir:'dist', forge no longer needs to exclude out/.
     //
