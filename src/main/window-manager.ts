@@ -375,19 +375,36 @@ export function createOrShowOnboardingWindow(launchAtLogin: boolean): BrowserWin
 
 /**
  * Position the tray popover window directly below a tray icon.
- * trayBounds comes from tray.getBounds() (only reliable on macOS/Windows).
+ *
+ * trayBounds comes from tray.getBounds(). On Linux (AppIndicator) this
+ * frequently returns a zero-sized rect because the indicator API doesn't
+ * expose icon geometry — in that case we fall back to the cursor position
+ * on the display under the cursor, which is the closest approximation of
+ * where the user just clicked.
  */
 export function positionPopoverUnderTray(win: BrowserWindow, trayBounds: Electron.Rectangle): void {
   const { width: popW, height: popH } = win.getBounds()
-  const display = screen.getDisplayNearestPoint({
-    x: trayBounds.x,
-    y: trayBounds.y,
-  })
+
+  const useFallback = trayBounds.width === 0 || trayBounds.height === 0
+  const anchor = useFallback ? screen.getCursorScreenPoint() : { x: trayBounds.x, y: trayBounds.y }
+
+  const display = screen.getDisplayNearestPoint(anchor)
   const { bounds: dBounds } = display
 
-  // Center horizontally over tray icon, snap below it
-  let x = Math.round(trayBounds.x + trayBounds.width / 2 - popW / 2)
-  let y = Math.round(trayBounds.y + trayBounds.height + 4)
+  let x: number
+  let y: number
+
+  if (useFallback) {
+    // No tray geometry — center the popover horizontally under the cursor and
+    // pin it to the top of the display (where the menu bar / panel typically
+    // lives on Linux desktops).
+    x = Math.round(anchor.x - popW / 2)
+    y = dBounds.y + 4
+  } else {
+    // Center horizontally over tray icon, snap below it
+    x = Math.round(trayBounds.x + trayBounds.width / 2 - popW / 2)
+    y = Math.round(trayBounds.y + trayBounds.height + 4)
+  }
 
   // Keep within display bounds
   x = Math.max(dBounds.x, Math.min(x, dBounds.x + dBounds.width - popW))
