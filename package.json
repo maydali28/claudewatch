@@ -1,6 +1,6 @@
 {
   "name": "claudewatch",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Claude Code session explorer (macOS, Windows, Linux)",
   "main": "out/main/index.js",
   "author": {
@@ -37,7 +37,11 @@
       "tar@<=7.5.10": ">=7.5.11",
       "@xmldom/xmldom@<=0.7.999": ">=0.8.1",
       "rimraf@<6": ">=6.0.1",
-      "@tootallnate/once@<3": ">=3.0.1"
+      "@tootallnate/once@<3": ">=3.0.1",
+      "fast-uri@<=3.1.0": ">=3.1.1",
+      "fast-uri@<=3.1.1": ">=3.1.2",
+      "brace-expansion@>=5.0.0 <5.0.6": ">=5.0.6",
+      "tmp@<0.2.6": ">=0.2.6"
     },
     "patchedDependencies": {
       "appdmg@0.6.6": "patches/appdmg@0.6.6.patch"
@@ -67,7 +71,8 @@
     "changelog": "node scripts/generate-changelog.mjs",
     "changelog:all": "node scripts/generate-changelog.mjs --all",
     "release": "node scripts/release.mjs",
-    "prepare": "husky"
+    "prepare": "husky",
+    "postinstall": "node node_modules/electron/install.js"
   },
   "lint-staged": {
     "src/**/*.{ts,tsx}": [
@@ -152,7 +157,7 @@
     "lucide-react": "^1.14.0",
     "node-gyp": "^12.3.0",
     "prettier": "^3.8.3",
-   "react": "^19.2.6",
+    "react": "^19.2.6",
     "react-day-picker": "^10.0.1",
     "react-dom": "^19.2.6",
     "react-markdown": "^10.1.0",
