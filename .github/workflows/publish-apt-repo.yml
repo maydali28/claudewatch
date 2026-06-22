@@ -34,7 +34,7 @@ jobs:
       # existing apt-repo state (lives on gh-pages). Two checkouts into
       # separate paths.
       - name: Checkout source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           path: source
 
@@ -44,7 +44,7 @@ jobs:
       # If the branch does not exist yet, the next step initialises one.
       - name: Checkout existing gh-pages tree
         id: checkout-pages
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: gh-pages
           path: apt-repo
