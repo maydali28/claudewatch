@@ -148,19 +148,26 @@ async function getProjectDetails(
     readProjectCwd(projectDirName),
   ])
 
-  const displayName = projectDisplayName(realCwd ?? decodedPath)
+  // `decodeProjectId` is lossy: it turns every "-" into "/", so directories whose
+  // name contains hyphens decode to the wrong path (and thus the wrong display name).
+  // Prefer a real cwd from the session records — the same source the tray uses — so the
+  // dashboard project name matches the tray. Sessions are sorted most-recent-first.
+  const sessionCwd = sessions.map((s) => s.projectPath).find((p) => p && p !== decodedPath)
+  const resolvedCwd = realCwd ?? sessionCwd ?? null
+  const projectPath = resolvedCwd ?? decodedPath
+  const displayName = projectDisplayName(projectPath)
 
-  const [localSkills, localClaudeMd] = realCwd
+  const [localSkills, localClaudeMd] = resolvedCwd
     ? await Promise.all([
-        readSkillsFromDir(path.join(realCwd, '.claude', 'skills')),
-        fs.promises.readFile(path.join(realCwd, 'CLAUDE.md'), 'utf-8').catch(() => null),
+        readSkillsFromDir(path.join(resolvedCwd, '.claude', 'skills')),
+        fs.promises.readFile(path.join(resolvedCwd, 'CLAUDE.md'), 'utf-8').catch(() => null),
       ])
     : [[], null]
 
   return {
     id: projectDirName,
     name: displayName,
-    path: realCwd ?? decodedPath,
+    path: projectPath,
     sessions,
     sessionCount: sessions.length,
     localSkills,
