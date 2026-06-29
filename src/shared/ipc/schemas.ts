@@ -77,8 +77,7 @@ export const LintRunSchema = z.object({ projectId: projectId.optional() }).optio
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
-const PricingProviderSchema = z.enum(['anthropic', 'vertex-global', 'vertex-regional'])
-const VertexRegionSchema = z.enum(['us-east5', 'europe-west1', 'asia-southeast1'])
+const PricingProviderSchema = z.enum(['anthropic'])
 const ThemeSchema = z.enum(['light', 'dark', 'system'])
 const RedactionSchema = z.enum(['none', 'mask', 'remove'])
 
@@ -93,7 +92,6 @@ const WindowBoundsSchema = z.object({
 export const SettingsSetSchema = z
   .object({
     pricingProvider: PricingProviderSchema,
-    pricingRegion: VertexRegionSchema,
     pricingOverrides: z.record(
       z.string(),
       z.object({

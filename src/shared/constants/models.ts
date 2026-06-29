@@ -11,7 +11,12 @@ export function getModelFamily(model: string | null | undefined): ModelFamily {
   if (!model) return 'unknown'
   const m = model.toLowerCase()
 
+  // ── Fable / Mythos ──────────────────────────────────────────────────────────
+  if (m.includes('fable-5')) return 'fable-5'
+  if (m.includes('mythos-5')) return 'mythos-5'
+
   // ── Opus ──────────────────────────────────────────────────────────────────
+  if (m.includes('opus-4-8')) return 'opus-4-8'
   if (m.includes('opus-4-7')) return 'opus-4-7'
   if (m.includes('opus-4-6')) return 'opus-4-6'
   if (m.includes('opus-4-5')) return 'opus-4-5'

@@ -30,8 +30,7 @@ async function getStoreCtor(): Promise<ElectronStoreCtor> {
 // ─── Zod schema ───────────────────────────────────────────────────────────────
 
 const AppPreferencesSchema = z.object({
-  pricingProvider: z.enum(['anthropic', 'vertex-global', 'vertex-regional']),
-  pricingRegion: z.enum(['us-east5', 'europe-west1', 'asia-southeast1']),
+  pricingProvider: z.enum(['anthropic']),
   pricingOverrides: z
     .record(
       z.string(),
