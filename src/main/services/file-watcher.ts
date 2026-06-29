@@ -193,7 +193,7 @@ export class FileWatcher {
 
     try {
       const preferences = Preferences.get()
-      const pricingTable = getPricingTable(preferences.pricingProvider, preferences.pricingRegion)
+      const pricingTable = getPricingTable(preferences.pricingProvider)
       const sessionSummary = await parseSessionMetadata(
         filePath,
         sessionId,

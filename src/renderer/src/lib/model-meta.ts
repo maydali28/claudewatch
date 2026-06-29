@@ -10,7 +10,19 @@ interface ModelMeta {
 }
 
 const META: Record<ModelFamily, ModelMeta> = {
-  // ── Opus 4.7 / 4.6 / 4.5 — reds ────────────────────────────────────────────
+  // ── Fable 5 / Mythos 5 — premium amber / fuchsia ─────────────────────────────
+  'fable-5': {
+    label: 'Fable 5',
+    badgeClass: 'bg-amber-500/10 text-amber-500',
+    color: '#f59e0b',
+  },
+  'mythos-5': {
+    label: 'Mythos 5',
+    badgeClass: 'bg-fuchsia-500/10 text-fuchsia-500',
+    color: '#d946ef',
+  },
+  // ── Opus 4.8 / 4.7 / 4.6 / 4.5 — reds ───────────────────────────────────────
+  'opus-4-8': { label: 'Opus 4.8', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-7': { label: 'Opus 4.7', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-6': { label: 'Opus 4.6', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-5': { label: 'Opus 4.5', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },

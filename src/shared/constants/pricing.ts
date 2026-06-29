@@ -1,16 +1,16 @@
-import type {
-  ModelPricing,
-  ModelFamily,
-  PricingProvider,
-  VertexRegion,
-} from '@shared/types/pricing'
+import type { ModelPricing, ModelFamily, PricingProvider } from '@shared/types/pricing'
 
 // ─── Anthropic API Pricing (per million tokens) ───────────────────────────────
 // Source: platform.claude.com/docs/en/about-claude/pricing
 // Cache 5m write = 1.25x base input. Cache 1h write = 2x base input. Cache read = 0.1x base input.
 
 export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
-  // ── Opus 4.7 / 4.6 / 4.5 — $5 input / $25 output ────────────────────────
+  // ── Fable 5 / Mythos 5 — $10 input / $50 output ──────────────────────────
+  'fable-5': { input: 10.0, output: 50.0, cacheRead: 1.0, cache5m: 12.5, cache1h: 20.0 },
+  'mythos-5': { input: 10.0, output: 50.0, cacheRead: 1.0, cache5m: 12.5, cache1h: 20.0 },
+
+  // ── Opus 4.8 / 4.7 / 4.6 / 4.5 — $5 input / $25 output ──────────────────
+  'opus-4-8': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
   'opus-4-7': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
   'opus-4-6': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
   'opus-4-5': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
@@ -39,38 +39,12 @@ export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   unknown: { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
 }
 
-// Vertex global uses the same rates as Anthropic direct
-export const VERTEX_GLOBAL_PRICING = ANTHROPIC_PRICING
-
-// Vertex regional applies a 10% surcharge on all token tiers
-const REGIONAL_SURCHARGE = 1.1
-
-export const VERTEX_REGIONAL_PRICING: Record<ModelFamily, ModelPricing> = Object.fromEntries(
-  (Object.entries(ANTHROPIC_PRICING) as [ModelFamily, ModelPricing][]).map(([family, p]) => [
-    family,
-    {
-      input: p.input * REGIONAL_SURCHARGE,
-      output: p.output * REGIONAL_SURCHARGE,
-      cacheRead: p.cacheRead * REGIONAL_SURCHARGE,
-      cache5m: p.cache5m * REGIONAL_SURCHARGE,
-      cache1h: p.cache1h * REGIONAL_SURCHARGE,
-    },
-  ])
-) as Record<ModelFamily, ModelPricing>
-
 // ─── Lookup function ──────────────────────────────────────────────────────────
 
-export function getPricingTable(
-  provider: PricingProvider,
-  _region?: VertexRegion
-): Record<ModelFamily, ModelPricing> {
+export function getPricingTable(provider: PricingProvider): Record<ModelFamily, ModelPricing> {
   switch (provider) {
     case 'anthropic':
       return ANTHROPIC_PRICING
-    case 'vertex-global':
-      return VERTEX_GLOBAL_PRICING
-    case 'vertex-regional':
-      return VERTEX_REGIONAL_PRICING
   }
 }
 

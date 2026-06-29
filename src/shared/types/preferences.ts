@@ -1,15 +1,9 @@
-import type {
-  ModelFamily,
-  ModelPricing,
-  PricingProvider,
-  VertexRegion,
-} from '@shared/types/pricing'
+import type { ModelFamily, ModelPricing, PricingProvider } from '@shared/types/pricing'
 
 // ─── App Preferences (stored in electron-store) ───────────────────────────────
 
 export interface AppPreferences {
   pricingProvider: PricingProvider
-  pricingRegion: VertexRegion
   pricingOverrides: Partial<Record<ModelFamily, Partial<ModelPricing>>>
   costAlertThreshold?: number
   secretScanEnabled: boolean
@@ -28,7 +22,6 @@ export interface AppPreferences {
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   pricingProvider: 'anthropic',
-  pricingRegion: 'us-east5',
   pricingOverrides: {},
   secretScanEnabled: true,
   redactionLevel: 'mask',
