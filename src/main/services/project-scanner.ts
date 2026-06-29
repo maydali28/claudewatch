@@ -1,10 +1,10 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import * as os from 'os'
 import type { Project } from '@shared/types/project'
 import type { SessionSummary } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { decodeProjectId, projectDisplayName } from '@shared/utils/decode-project-id'
+import { getClaudeDir, getProjectsDirPath } from '@main/lib/claude-paths'
 import { parseSessionMetadata } from './session-parser'
 import { readSkillsFromDir } from './config-service'
 import { getCachedSummary, pruneCachedSummaries, setCachedSummary } from './metadata-cache'
@@ -14,17 +14,6 @@ import { pLimit } from '@main/lib/p-limit'
 // is CPU-bound (JSON.parse + per-record arithmetic), so going above the core
 // count buys nothing and inflates RSS by holding more streams open at once.
 const SCAN_CONCURRENCY = 6
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-export function getClaudeDir(): string {
-  return path.join(os.homedir(), '.claude')
-}
-
-export function getProjectsDirPath(): string {
-  const claudeDir = getClaudeDir()
-  return path.join(claudeDir, 'projects')
-}
 
 // ─── scanProjects ─────────────────────────────────────────────────────────────
 

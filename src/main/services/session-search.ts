@@ -2,7 +2,7 @@ import * as fs from 'fs'
 import * as readline from 'readline'
 import type { SessionSearchResult } from '@shared/types/session'
 import { assertSafePath } from '@main/lib/safe-path'
-import { getProjectsDirPath } from './project-scanner'
+import { getProjectsDirPath } from '@main/lib/claude-paths'
 
 interface SearchRequest {
   query: string

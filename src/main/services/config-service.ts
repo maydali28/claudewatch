@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { getClaudeDir } from './project-scanner'
+import { getClaudeDir } from '@main/lib/claude-paths'
 import type {
   ExtendedConfig,
   HookEventGroup,
