@@ -16,7 +16,7 @@ export { sharedEstimateCost as estimateCost, getModelFamily }
 // applies any per-model overrides configured in preferences.
 
 export function getActivePricingTable(prefs: AppPreferences): Record<ModelFamily, ModelPricing> {
-  const base = sharedGetPricingTable(prefs.pricingProvider, prefs.pricingRegion)
+  const base = sharedGetPricingTable(prefs.pricingProvider)
 
   // Shallow-clone so we don't mutate the shared constant
   const table: Record<ModelFamily, ModelPricing> = { ...base }

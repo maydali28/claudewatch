@@ -11,7 +11,7 @@ import {
 } from '@shared/ipc/schemas'
 import type { SessionSummary } from '@shared/types/session'
 import { Preferences } from '@main/store/preferences'
-import { getProjectsDirPath } from '@main/services/project-scanner'
+import { getProjectsDirPath } from '@main/lib/claude-paths'
 import { assertSafePath } from '@main/lib/safe-path'
 import { parseSessionFull } from '@main/services/session-parser'
 import { sessionCache } from '@shared/utils'

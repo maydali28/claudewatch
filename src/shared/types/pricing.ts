@@ -8,14 +8,16 @@ export interface ModelPricing {
   cache1h: number
 }
 
-// ─── Providers & Regions ──────────────────────────────────────────────────────
+// ─── Providers ────────────────────────────────────────────────────────────────
 
-export type PricingProvider = 'anthropic' | 'vertex-global' | 'vertex-regional'
-
-export type VertexRegion = 'us-east5' | 'europe-west1' | 'asia-southeast1'
+export type PricingProvider = 'anthropic'
 
 export type ModelFamily =
-  // Opus 4.7 / 4.6 / 4.5 — $5/$25
+  // Fable 5 / Mythos 5 — $10/$50
+  | 'fable-5'
+  | 'mythos-5'
+  // Opus 4.8 / 4.7 / 4.6 / 4.5 — $5/$25
+  | 'opus-4-8'
   | 'opus-4-7'
   | 'opus-4-6'
   | 'opus-4-5'

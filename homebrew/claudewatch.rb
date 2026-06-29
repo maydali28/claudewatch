@@ -9,7 +9,7 @@ cask "claudewatch" do
   homepage "https://github.com/maydali28/claudewatch"
   auto_updates true
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "ClaudeWatch.app"
 

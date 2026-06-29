@@ -10,18 +10,11 @@ import {
   SelectValue,
 } from '@renderer/components/ui/select'
 import { useSettingsStore } from '@renderer/store/settings.store'
+import { getModelMeta } from '@renderer/lib/model-meta'
 import { ANTHROPIC_PRICING, getPricingTable } from '@shared/constants/pricing'
-import type { PricingProvider, VertexRegion, ModelFamily, ModelPricing } from '@shared/types'
+import type { PricingProvider, ModelFamily, ModelPricing } from '@shared/types'
 const PROVIDERS: { value: PricingProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic API' },
-  { value: 'vertex-global', label: 'Vertex AI (Global)' },
-  { value: 'vertex-regional', label: 'Vertex AI (Regional)' },
-]
-
-const REGIONS: { value: VertexRegion; label: string }[] = [
-  { value: 'us-east5', label: 'US East 5 (Ohio)' },
-  { value: 'europe-west1', label: 'Europe West 1 (Belgium)' },
-  { value: 'asia-southeast1', label: 'Asia Southeast 1 (Singapore)' },
 ]
 
 const MODEL_FAMILIES = Object.keys(ANTHROPIC_PRICING).filter(
@@ -32,7 +25,7 @@ export default function PricingSettings(): React.JSX.Element {
   const { prefs, updatePref } = useSettingsStore()
   const [overridesOpen, setOverridesOpen] = useState(false)
 
-  const table = getPricingTable(prefs.pricingProvider, prefs.pricingRegion)
+  const table = getPricingTable(prefs.pricingProvider)
 
   function handleOverride(family: ModelFamily, field: keyof ModelPricing, raw: string) {
     const num = parseFloat(raw)
@@ -68,30 +61,6 @@ export default function PricingSettings(): React.JSX.Element {
             </SelectContent>
           </Select>
         </div>
-
-        {prefs.pricingProvider === 'vertex-regional' && (
-          <div>
-            <Label htmlFor="region-select">Region</Label>
-            <p className="text-xs text-muted-foreground mb-2">
-              Regional Vertex AI applies a 10% surcharge over global rates.
-            </p>
-            <Select
-              value={prefs.pricingRegion}
-              onValueChange={(v) => updatePref('pricingRegion', v as VertexRegion)}
-            >
-              <SelectTrigger id="region-select">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {REGIONS.map((r) => (
-                  <SelectItem key={r.value} value={r.value}>
-                    {r.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
       </div>
 
       {/* Live pricing preview */}
@@ -113,7 +82,9 @@ export default function PricingSettings(): React.JSX.Element {
                 if (!row) return null
                 return (
                   <tr key={family} className={i % 2 === 0 ? 'bg-background' : 'bg-muted/20'}>
-                    <td className="px-3 py-1.5 font-mono text-muted-foreground">{family}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">
+                      {getModelMeta(family).label}
+                    </td>
                     <td className="px-3 py-1.5 text-right">${row.input.toFixed(2)}</td>
                     <td className="px-3 py-1.5 text-right">${row.output.toFixed(2)}</td>
                     <td className="px-3 py-1.5 text-right">${row.cacheRead.toFixed(2)}</td>
@@ -150,7 +121,7 @@ export default function PricingSettings(): React.JSX.Element {
               if (!base) return null
               return (
                 <div key={family} className="space-y-1.5">
-                  <p className="text-xs font-mono font-medium">{family}</p>
+                  <p className="text-xs font-medium">{getModelMeta(family).label}</p>
                   <div className="grid grid-cols-2 gap-2">
                     {(['input', 'output', 'cacheRead'] as (keyof ModelPricing)[]).map((field) => (
                       <div key={field}>
