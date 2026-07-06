@@ -146,7 +146,7 @@
     "@vitest/coverage-v8": "^4.1.5",
     "@vitest/ui": "^4.1.5",
     "clsx": "^2.1.1",
-    "commitizen": "^4.3.1",
+    "commitizen": "^4.3.2",
     "conventional-changelog": "^7.2.0",
     "conventional-changelog-conventionalcommits": "^9.3.1",
     "cz-conventional-changelog": "^3.3.0",
