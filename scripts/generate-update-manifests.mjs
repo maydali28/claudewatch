@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generate update manifests (latest.yml, latest-linux.yml, latest-mac.json)
+// Generate update manifests (latest.yml, latest-linux.yml, latest-mac.yml)
 // for a release. Reads artifacts from --dir, writes manifests back into the
 // same dir.
 //
@@ -71,23 +71,34 @@ if (linuxPkgs.length) {
   fs.writeFileSync(path.join(dir, 'latest-linux.yml'), lines.join('\n'))
 }
 
-// macOS — polled by in-app update check.
-// We pin the SHA-512 of every macOS artifact so the client can verify
-// the download before launching the installer. Without this pin the
-// app would trust whatever bytes the update server hands back, which
-// breaks our "verify what we ship" posture (see release-step
-// "Verify uploaded artifact integrity" below for the same idea
-// applied to the GitHub upload itself).
-const macArtifacts = files.filter(
-  (f) => /\.(dmg|zip)$/i.test(f) && /mac|darwin|arm64|x64/i.test(f)
+// macOS — electron-updater (Squirrel.Mac), same generic feed as Windows/Linux.
+// The signed + notarized .zip is the auto-update payload; the .dmg is for fresh
+// installs only, so the manifest references the zip. electron-updater fetches
+// latest-mac.yml from the feed, verifies the sha512 pinned below before applying
+// the download, and Squirrel.Mac additionally requires a valid Developer ID
+// signature. We pin every artifact's SHA-512 to keep our "verify what we ship"
+// posture (see the "Verify uploaded artifact integrity" release step for the
+// same idea applied to the GitHub upload itself).
+//
+// CI builds one arch per release (the macos runner's native arch), so `files`
+// normally holds a single zip. If a multi-arch build ever lands here, every zip
+// is listed and electron-updater selects the one matching the running arch.
+//
+// Match the macOS zip by its `darwin`/`mac`/`osx` token and explicitly exclude
+// the Windows zip — forge names it `...-win32-x64-...zip`, whose bare `x64`
+// would otherwise be mistaken for a mac arch and listed as a mac update file.
+// (Exclude on `win32`/`windows`, not bare `win` — "darwin" itself ends in "win".)
+const macZips = files.filter(
+  (f) => /\.zip$/i.test(f) && /(darwin|osx|mac)/i.test(f) && !/win32|windows/i.test(f)
 )
-const macArtifactsManifest = macArtifacts.map((f) => ({
-  name: f,
-  url: `${ghBase}/${f}`,
-  sha512: sha512b64(f),
-  size: fileSize(f),
-}))
-fs.writeFileSync(
-  path.join(dir, 'latest-mac.json'),
-  JSON.stringify({ version, releaseDate: now, artifacts: macArtifactsManifest }, null, 2)
-)
+if (macZips.length) {
+  const lines = [`version: ${version}`, `files:`]
+  for (const f of macZips) {
+    lines.push(`  - url: ${ghBase}/${f}`, `    sha512: ${sha512b64(f)}`, `    size: ${fileSize(f)}`)
+  }
+  // `path` + top-level `sha512` are the legacy single-file pointer electron-updater
+  // still reads; point them at the first (host-arch) zip.
+  const primary = macZips[0]
+  lines.push(`path: ${ghBase}/${primary}`, `sha512: ${sha512b64(primary)}`, `releaseDate: '${now}'`)
+  fs.writeFileSync(path.join(dir, 'latest-mac.yml'), lines.join('\n'))
+}

@@ -1,14 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import {
-  Download,
-  Zap,
-  CheckCircle,
-  AlertCircle,
-  Loader2,
-  ExternalLink,
-  RefreshCw,
-  Sparkles,
-} from 'lucide-react'
+import { Download, Zap, CheckCircle, AlertCircle, Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
@@ -50,14 +41,16 @@ function UpdateAvailable({
 }): React.JSX.Element {
   const [dl, setDl] = useState<DownloadState>({ phase: 'idle' })
 
-  async function handleBrewUpgrade(): Promise<void> {
-    const result = await ipc.updates.brewUpgrade()
-    if (result.ok) {
-      onClose()
-    } else {
-      setDl({ phase: 'error', message: result.error })
-    }
-  }
+  // Reflect electron-updater's download-progress events in the bar. Only bump
+  // while actively downloading so a late-arriving event can't resurrect the bar
+  // after the download finished or errored.
+  useEffect(() => {
+    return ipc.on<{ percent: number }>(CHANNELS.PUSH_UPDATE_DOWNLOAD_PROGRESS, ({ percent }) => {
+      setDl((prev) =>
+        prev.phase === 'downloading' ? { phase: 'downloading', progress: percent } : prev
+      )
+    })
+  }, [])
 
   async function handleDownload(): Promise<void> {
     setDl({ phase: 'downloading', progress: 0 })
@@ -105,18 +98,12 @@ function UpdateAvailable({
       )}
 
       {/* Actions */}
-      {dl.phase === 'idle' &&
-        (info.isMacBrew ? (
-          <Button size="sm" className="w-full" onClick={handleBrewUpgrade}>
-            <ExternalLink className="h-4 w-4" />
-            Upgrade via Homebrew
-          </Button>
-        ) : (
-          <Button size="sm" className="w-full" onClick={handleDownload}>
-            <Download className="h-4 w-4" />
-            Download &amp; Install
-          </Button>
-        ))}
+      {dl.phase === 'idle' && (
+        <Button size="sm" className="w-full" onClick={handleDownload}>
+          <Download className="h-4 w-4" />
+          Download &amp; Install
+        </Button>
+      )}
 
       {dl.phase === 'downloading' && (
         <div className="space-y-2">

@@ -285,7 +285,7 @@ jobs:
             release-files/*.rpm
             release-files/latest.yml
             release-files/latest-linux.yml
-            release-files/latest-mac.json
+            release-files/latest-mac.yml
             release-files/sbom.cyclonedx.json
 
       # Defence in depth against rare GitHub upload corruption: download what
