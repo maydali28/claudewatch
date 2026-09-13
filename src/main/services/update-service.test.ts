@@ -14,7 +14,7 @@ vi.mock('electron-log', () => ({
 }))
 vi.mock('@main/window-manager', () => ({ broadcastToRenderers: () => {} }))
 
-const { parseGithubRepo } = await import('./update-service')
+const { parseGithubRepo, htmlReleaseNotesToMarkdown } = await import('./update-service')
 
 describe('parseGithubRepo', () => {
   // Regression guard for the 1.2.0 updater outage: the feed was pointed at the
@@ -57,5 +57,56 @@ describe('parseGithubRepo', () => {
     expect(parseGithubRepo('')).toBeNull()
     expect(parseGithubRepo('https://github.com/maydali28')).toBeNull()
     expect(parseGithubRepo('not a url')).toBeNull()
+  })
+})
+
+describe('htmlReleaseNotesToMarkdown', () => {
+  it('converts the exact notes 1.2.1 displayed as raw tags', () => {
+    // Verbatim from electron-updater's GitHub provider, which reads the
+    // releases Atom feed. The update window showed these tags literally.
+    const feed =
+      '<h3>Bug Fixes</h3> <ul> ' +
+      '<li><strong>deps:</strong> clear the 12 tar advisories, verified against a real package build</li> ' +
+      '<li><strong>update:</strong> point the updater at github releases, not the hazel server</li> ' +
+      '</ul>'
+
+    expect(htmlReleaseNotesToMarkdown(feed)).toBe(
+      [
+        '### Bug Fixes',
+        '',
+        '- **deps:** clear the 12 tar advisories, verified against a real package build',
+        '- **update:** point the updater at github releases, not the hazel server',
+      ].join('\n')
+    )
+  })
+
+  it('leaves plain text alone, which is what Hazel returns on Linux', () => {
+    const plain = 'Fixed the tray icon.\n\nAlso faster startup.'
+    expect(htmlReleaseNotesToMarkdown(plain)).toBe(plain)
+  })
+
+  it('keeps markdown that is already markdown untouched', () => {
+    const md = '### Bug Fixes\n\n- **deps:** bump everything'
+    expect(htmlReleaseNotesToMarkdown(md)).toBe(md)
+  })
+
+  it('converts links, emphasis and inline code', () => {
+    expect(htmlReleaseNotesToMarkdown('<p>See <a href="https://x.dev">docs</a>.</p>')).toBe(
+      'See [docs](https://x.dev).'
+    )
+    expect(htmlReleaseNotesToMarkdown('<p><em>soon</em> and <code>npm i</code></p>')).toBe(
+      '*soon* and `npm i`'
+    )
+  })
+
+  it('maps heading levels and decodes entities', () => {
+    expect(htmlReleaseNotesToMarkdown('<h1>A</h1><h4>B</h4>')).toBe('# A\n\n#### B')
+    expect(htmlReleaseNotesToMarkdown('<p>a &amp; b &lt;c&gt; &quot;d&quot;</p>')).toBe(
+      'a & b <c> "d"'
+    )
+  })
+
+  it('drops tags it does not translate rather than printing them', () => {
+    expect(htmlReleaseNotesToMarkdown('<div class="x"><span>kept</span></div>')).toBe('kept')
   })
 })
