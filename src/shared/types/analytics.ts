@@ -231,7 +231,7 @@ export interface SessionHealthSummary {
 
 // ─── Date Range ───────────────────────────────────────────────────────────────
 
-export type DateRangePreset = 'today' | '7d' | '30d' | '90d' | 'all'
+export type DateRangePreset = 'today' | '7d' | '30d' | 'all'
 
 export interface CustomDateRange {
   preset: 'custom'

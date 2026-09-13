@@ -35,7 +35,6 @@ const QUICK_RANGES: { label: string; value: DateRangePreset }[] = [
   { label: 'Today', value: 'today' },
   { label: '7d', value: '7d' },
   { label: '30d', value: '30d' },
-  { label: '90d', value: '90d' },
   { label: 'All', value: 'all' },
 ]
 

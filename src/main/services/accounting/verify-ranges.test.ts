@@ -9,6 +9,7 @@ import { parseSessionMetadata } from '@main/services/parsers/metadata-parser'
 import { computeAnalytics } from '@main/services/analytics-engine'
 import type { Project } from '@shared/types/project'
 import type { SessionSummary } from '@shared/types/session'
+import type { DateRange } from '@shared/types/analytics'
 
 /**
  * Checks the date-scoped analytics against the transcripts themselves.
@@ -40,6 +41,16 @@ function transcripts(root: string): string[] {
   }
   walk(root, 0)
   return found
+}
+
+/**
+ * A date range covering the last N days. 30 days has a preset; 90 no longer
+ * does, so it is expressed as the equivalent custom window — the arithmetic
+ * under test is the same either way.
+ */
+function rangeForDays(days: number): DateRange {
+  if (days === 30) return '30d'
+  return { preset: 'custom', from: windowStart(days), to: toDateKey(new Date()) }
 }
 
 /** First day of an N-day window ending today, as a local YYYY-MM-DD key. */
@@ -124,7 +135,7 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
           { tokens: 0, cost: 0, models: new Set<string>() }
         )
 
-      const actual = computeAnalytics(summaries, projects, `${days}d`, ANTHROPIC_PRICING)
+      const actual = computeAnalytics(summaries, projects, rangeForDays(days), ANTHROPIC_PRICING)
       const activeDays = [...byDay.keys()].filter((d) => d >= start).length
 
       console.log(
@@ -276,7 +287,7 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
         .filter((t) => t.durationMs > 0)
         .filter((t) => !t.assistantTimestamp || toDateKey(t.assistantTimestamp) >= start).length
 
-      const actual = computeAnalytics(summaries, [], `${days}d`, ANTHROPIC_PRICING)
+      const actual = computeAnalytics(summaries, [], rangeForDays(days), ANTHROPIC_PRICING)
       const counted = actual.latencyAnalytics.histogram.reduce((n, b) => n + b.count, 0)
 
       console.log(`\n  ${days}d latency turns  expected ${expected}  actual ${counted}`)
@@ -299,7 +310,7 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
     }
 
     const d30 = computeAnalytics(summaries, [], '30d', ANTHROPIC_PRICING)
-    const d90 = computeAnalytics(summaries, [], '90d', ANTHROPIC_PRICING)
+    const d90 = computeAnalytics(summaries, [], rangeForDays(90), ANTHROPIC_PRICING)
 
     expect(d30.totalTokens).toBeLessThanOrEqual(d90.totalTokens)
     expect(d30.totalCost).toBeLessThanOrEqual(d90.totalCost + 1e-9)
