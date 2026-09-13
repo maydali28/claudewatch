@@ -111,6 +111,38 @@ describe('ReparseScheduler — changes during an in-flight parse', () => {
   })
 })
 
+/**
+ * `schedule` fires the parse without awaiting it, so a rejection thrown by the
+ * parse had nowhere to land. Node terminates the process on an unhandled
+ * rejection by default, meaning one unreadable transcript could take the whole
+ * main process down with it.
+ */
+describe('ReparseScheduler — parse failures', () => {
+  it('reports a failed parse rather than leaving the rejection unhandled', async () => {
+    const boom = new Error('parse blew up')
+    const run = vi.fn().mockRejectedValue(boom)
+    const onError = vi.fn()
+    const scheduler = new ReparseScheduler(run, DEBOUNCE, onError)
+
+    scheduler.schedule('a.jsonl')
+    await vi.advanceTimersByTimeAsync(DEBOUNCE)
+
+    expect(onError).toHaveBeenCalledWith('a.jsonl', boom)
+  })
+
+  it('keeps scheduling that file after a failure', async () => {
+    const run = vi.fn().mockRejectedValue(new Error('parse blew up'))
+    const scheduler = new ReparseScheduler(run, DEBOUNCE, vi.fn())
+
+    scheduler.schedule('a.jsonl')
+    await vi.advanceTimersByTimeAsync(DEBOUNCE)
+    scheduler.schedule('a.jsonl')
+    await vi.advanceTimersByTimeAsync(DEBOUNCE)
+
+    expect(run).toHaveBeenCalledTimes(2)
+  })
+})
+
 describe('ReparseScheduler — stop', () => {
   it('cancels pending work', async () => {
     const run = vi.fn().mockResolvedValue(undefined)

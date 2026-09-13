@@ -16,7 +16,14 @@ export class ReparseScheduler {
 
   constructor(
     private readonly run: (filePath: string) => Promise<void>,
-    private readonly debounceMs: number
+    private readonly debounceMs: number,
+    /**
+     * Where a failed parse is reported. The parse is fired and forgotten, so
+     * without this the rejection has nowhere to land — and Node terminates the
+     * process on an unhandled rejection, which would let one unreadable
+     * transcript take the main process down.
+     */
+    private readonly onError: (filePath: string, error: unknown) => void = () => {}
   ) {}
 
   schedule(filePath: string): void {
@@ -45,6 +52,8 @@ export class ReparseScheduler {
     this.inFlight.add(filePath)
     try {
       await this.run(filePath)
+    } catch (error) {
+      this.onError(filePath, error)
     } finally {
       this.inFlight.delete(filePath)
       // Catch up on anything that arrived mid-parse. A failed parse still

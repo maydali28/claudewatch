@@ -80,7 +80,8 @@ export class FileWatcher {
     this.deps = deps
     this.scheduler = new ReparseScheduler(
       (filePath) => this.processFileChange(filePath),
-      FILE_WATCHER_DEBOUNCE_MS
+      FILE_WATCHER_DEBOUNCE_MS,
+      (filePath, error) => log.error(`Failed to re-parse ${path.basename(filePath)}:`, error)
     )
   }
 
