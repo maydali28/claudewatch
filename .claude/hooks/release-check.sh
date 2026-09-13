@@ -473,6 +473,15 @@ case "$MODE" in
     # the words does not trip the gate. Plain `git tag` (listing) and pushes of
     # ordinary branches are left alone.
     SEG='(^|[;&|])[[:space:]]*'
+    # Deleting a tag is not a release action, so none of the readiness checks
+    # apply to it — and they actively misfire, since "the tag exists on origin"
+    # is the precondition for a delete rather than a problem. Whoever deletes a
+    # tag is responsible for confirming nothing consumed it (a published
+    # Release, a Homebrew cask, an APT pool entry).
+    DELETE_RE="${SEG}git[[:space:]]+(tag[[:space:]]+(-d|--delete)|push[[:space:]].*([[:space:]](--delete|-d)([[:space:]]|$)|[[:space:]]:refs/tags/|[[:space:]]:v[0-9]))"
+    if printf '%s\n' "$SCAN" | grep -qE "$DELETE_RE"; then
+      exit 0
+    fi
     # Step 4 of the flow: create the tag. It must not exist yet.
     CREATE_RE="${SEG}git[[:space:]]+tag[[:space:]]+(-a|-s|-m|-f|v?[0-9])"
     # Step 5: push it. It must already exist.

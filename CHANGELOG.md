@@ -1,3 +1,10 @@
+## 1.2.2 (2026-09-13)
+
+
+### Bug Fixes
+
+* **tooling:** do not gate tag deletions in the release check
+* **update:** stop offering an update to the installed version
 ## 1.2.1 (2026-09-13)
 
 
