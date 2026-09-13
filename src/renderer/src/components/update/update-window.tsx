@@ -60,7 +60,21 @@ function UpdateAvailable({ info }: { info: UpdateInfo }): React.JSX.Element {
   }
 
   async function handleInstall(): Promise<void> {
-    await ipc.updates.install()
+    // The result was previously discarded, so a failed install looked exactly
+    // like a successful one: the button did nothing and said nothing. Surface
+    // it the same way handleDownload does.
+    //
+    // On success this window goes away with the app, so there is no success
+    // state to render — anything we get back here means the install did not
+    // start.
+    try {
+      const result = await ipc.updates.install()
+      if (!result.ok) {
+        setDl({ phase: 'error', message: result.error })
+      }
+    } catch (err) {
+      setDl({ phase: 'error', message: String(err) })
+    }
   }
 
   return (

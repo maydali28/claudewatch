@@ -1,3 +1,9 @@
+## 1.2.6 (2026-09-13)
+
+
+### Bug Fixes
+
+* **update:** quit on before-quit-for-update so the install can proceed
 ## 1.2.5 (2026-09-13)
 
 
