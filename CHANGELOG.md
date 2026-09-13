@@ -1,3 +1,9 @@
+## 1.2.8 (2026-09-13)
+
+
+### Bug Fixes
+
+* **update:** exit the tray app so shipit can finish the install
 ## 1.2.7 (2026-09-13)
 
 
