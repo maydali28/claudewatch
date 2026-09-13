@@ -251,6 +251,39 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
     expect(single.dailyUsage.map((d) => d.date)).toEqual([oneDay])
   }, 240_000)
 
+  it('latency counts only turns that happened inside the window', async () => {
+    const { parseSessionMetadata } = await import('@main/services/parsers/metadata-parser')
+    const { computeAnalytics } = await import('@main/services/analytics-engine')
+    const parents = transcripts(root).filter((f) => !f.includes(`${path.sep}subagents${path.sep}`))
+
+    const summaries: SessionSummary[] = []
+    for (const file of parents) {
+      summaries.push(
+        await parseSessionMetadata(
+          file,
+          path.basename(file, '.jsonl'),
+          path.basename(path.dirname(file)),
+          ANTHROPIC_PRICING
+        )
+      )
+    }
+
+    for (const days of [30, 90] as const) {
+      const start = windowStart(days)
+      // Oracle: count the turns whose own timestamp falls in the window.
+      const expected = summaries
+        .flatMap((s) => s.turnDurations ?? [])
+        .filter((t) => t.durationMs > 0)
+        .filter((t) => !t.assistantTimestamp || toDateKey(t.assistantTimestamp) >= start).length
+
+      const actual = computeAnalytics(summaries, [], `${days}d`, ANTHROPIC_PRICING)
+      const counted = actual.latencyAnalytics.histogram.reduce((n, b) => n + b.count, 0)
+
+      console.log(`\n  ${days}d latency turns  expected ${expected}  actual ${counted}`)
+      expect(counted).toBe(expected)
+    }
+  }, 240_000)
+
   it('a narrower window is a strict subset of a wider one', async () => {
     const files = transcripts(root).filter((f) => !f.includes(`${path.sep}subagents${path.sep}`))
     const summaries: SessionSummary[] = []

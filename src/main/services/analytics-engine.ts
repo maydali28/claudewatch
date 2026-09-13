@@ -523,7 +523,20 @@ function computeDailyModelCost(
 
 // ─── computeLatencyAnalytics ──────────────────────────────────────────────────
 
-function computeLatencyAnalytics(sessions: SessionSummary[]): LatencyAnalytics {
+/**
+ * Latency for turns that happened inside the period.
+ *
+ * Turn durations carry their own timestamp, so they belong to the day they
+ * occurred on. Counting every turn of any session merely *active* in the range
+ * put a fortnight of latency behind a one-day selection — the same mistake as
+ * attributing a session's whole history to its last day. A turn with no
+ * timestamp is kept: dropping it would silently lose data.
+ */
+function computeLatencyAnalytics(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string
+): LatencyAnalytics {
   const allDurations: number[] = []
   const postCompactionDurations: number[] = []
   const normalDurations: number[] = []
@@ -532,6 +545,10 @@ function computeLatencyAnalytics(sessions: SessionSummary[]): LatencyAnalytics {
   for (const s of sessions) {
     for (const td of s.turnDurations ?? []) {
       if (td.durationMs <= 0) continue
+      if (td.assistantTimestamp) {
+        const day = toDateKey(td.assistantTimestamp)
+        if (day < fromKey || day > toKey) continue
+      }
       allDurations.push(td.durationMs)
       if (td.isPostCompaction) {
         postCompactionDurations.push(td.durationMs)
@@ -802,7 +819,7 @@ export function computeAnalytics(
   const cacheAnalytics = computeCacheAnalytics(filtered, dailyUsage, pricingTable, fromKey, toKey)
   const modelEfficiency = computeModelEfficiency(filtered, pricingTable)
   const dailyModelCost = computeDailyModelCost(filtered, fromKey, toKey)
-  const latencyAnalytics = computeLatencyAnalytics(filtered)
+  const latencyAnalytics = computeLatencyAnalytics(filtered, fromKey, toKey)
   const effortAnalytics = computeEffortAnalytics(filtered, pricingTable)
   const parallelToolAnalytics = computeParallelToolAnalytics(filtered)
   const sessionHealthSummary = computeSessionHealthSummary(filtered)
