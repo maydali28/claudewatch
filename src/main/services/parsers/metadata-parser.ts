@@ -281,7 +281,9 @@ function processAssistantRecord(
   )
 
   if (model) {
-    accumulateModelBreakdown(model, usage, cache5m, cache1h, cost, acc)
+    // `cost` is null for an unrecognised model. Until the ledger replaces this
+    // parser it contributes nothing rather than a fabricated fallback rate.
+    accumulateModelBreakdown(model, usage, cache5m, cache1h, cost ?? 0, acc)
   }
 
   accumulateBlockMetrics(blocks, raw, usage, acc)

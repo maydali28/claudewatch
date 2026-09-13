@@ -84,15 +84,18 @@ async function parseSingleSubagent(
         const family = getModelFamily(model)
         const cache5m = usage.cacheCreation?.ephemeral5mInputTokens ?? 0
         const cache1h = usage.cacheCreation?.ephemeral1hInputTokens ?? 0
-        const turnCost = estimateCost(
-          family,
-          usage.inputTokens,
-          usage.outputTokens,
-          usage.cacheReadInputTokens,
-          cache5m,
-          cache1h,
-          pricingTable
-        )
+        // null for an unrecognised model; contributes nothing rather than a
+        // fabricated fallback rate. Removed when the ledger replaces this parser.
+        const turnCost =
+          estimateCost(
+            family,
+            usage.inputTokens,
+            usage.outputTokens,
+            usage.cacheReadInputTokens,
+            cache5m,
+            cache1h,
+            pricingTable
+          ) ?? 0
         estimatedCost += turnCost
 
         if (model) {

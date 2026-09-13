@@ -1,41 +1,56 @@
 import type { ModelFamily } from '@shared/types/pricing'
 
 // ─── Model Family Detection ───────────────────────────────────────────────────
-// Maps a raw model string (e.g. "claude-opus-4-5-20250120") → a ModelFamily key
+// Maps a raw model string (e.g. "claude-opus-4-5-20251101") → a ModelFamily key
 // that indexes into the pricing table.
 //
-// More-specific version patterns are checked before broader ones to avoid
-// false matches (e.g. "opus-4" must not absorb "opus-4-5").
+// This is an exact registry, not a substring matcher. A substring matcher
+// cannot distinguish a model it knows from a model that merely resembles one:
+// `includes('opus-4')` silently classifies a future `claude-opus-4-9` as the
+// base Opus 4 release and bills it at that model's rates. An unrecognised ID
+// must surface as `unknown` — visible and unpriced — rather than as a
+// plausible-looking wrong answer.
+
+const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
+  // ── Fable / Mythos ────────────────────────────────────────────────────────
+  'claude-fable-5-1': 'fable-5-1',
+  'claude-mythos-5-1': 'mythos-5-1',
+  'claude-fable-5': 'fable-5',
+  'claude-mythos-5': 'mythos-5',
+
+  // ── Opus ──────────────────────────────────────────────────────────────────
+  'claude-opus-5': 'opus-5',
+  'claude-opus-4-8': 'opus-4-8',
+  'claude-opus-4-7': 'opus-4-7',
+  'claude-opus-4-6': 'opus-4-6',
+  'claude-opus-4-5': 'opus-4-5',
+  'claude-opus-4-1': 'opus-4-1',
+  'claude-opus-4': 'opus-4',
+
+  // ── Sonnet ────────────────────────────────────────────────────────────────
+  'claude-sonnet-5': 'sonnet-5',
+  'claude-sonnet-4-6': 'sonnet-4-6',
+  'claude-sonnet-4-5': 'sonnet-4-5',
+  'claude-sonnet-4': 'sonnet-4',
+
+  // ── Haiku ─────────────────────────────────────────────────────────────────
+  'claude-haiku-4-5': 'haiku-4-5',
+
+  // ── Legacy IDs, which order the version before the family ─────────────────
+  'claude-3-7-sonnet': 'sonnet-3-7',
+  'claude-3-5-sonnet': 'sonnet-3-5',
+  'claude-3-5-haiku': 'haiku-3-5',
+  'claude-3-opus': 'opus-3',
+  'claude-3-haiku': 'haiku-3',
+}
+
+/** Trailing dated snapshot, e.g. `-20251101` (Claude API) or `@20251101` (Vertex). */
+const DATE_SUFFIX = /[-@]\d{8}$/
 
 export function getModelFamily(model: string | null | undefined): ModelFamily {
   if (!model) return 'unknown'
-  const m = model.toLowerCase()
-
-  // ── Fable / Mythos ──────────────────────────────────────────────────────────
-  if (m.includes('fable-5')) return 'fable-5'
-  if (m.includes('mythos-5')) return 'mythos-5'
-
-  // ── Opus ──────────────────────────────────────────────────────────────────
-  if (m.includes('opus-4-8')) return 'opus-4-8'
-  if (m.includes('opus-4-7')) return 'opus-4-7'
-  if (m.includes('opus-4-6')) return 'opus-4-6'
-  if (m.includes('opus-4-5')) return 'opus-4-5'
-  if (m.includes('opus-4-1')) return 'opus-4-1'
-  if (m.includes('opus-4')) return 'opus-4' // base Opus 4 release (no minor version)
-  if (m.includes('opus-3')) return 'opus-3'
-
-  // ── Sonnet ────────────────────────────────────────────────────────────────
-  if (m.includes('sonnet-4-6')) return 'sonnet-4-6'
-  if (m.includes('sonnet-4-5')) return 'sonnet-4-5'
-  if (m.includes('sonnet-3-7')) return 'sonnet-3-7'
-  if (m.includes('sonnet-4')) return 'sonnet-4' // base Sonnet 4 release (no minor version)
-
-  // ── Haiku ─────────────────────────────────────────────────────────────────
-  if (m.includes('haiku-4-5')) return 'haiku-4-5'
-  if (m.includes('haiku-3-5')) return 'haiku-3-5'
-  if (m.includes('haiku-3')) return 'haiku-3'
-
-  return 'unknown'
+  const normalized = model.toLowerCase().replace(DATE_SUFFIX, '')
+  return EXACT_MODEL_FAMILIES[normalized] ?? 'unknown'
 }
 
 // ─── Tool Category Mapping ────────────────────────────────────────────────────
