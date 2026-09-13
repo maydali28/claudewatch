@@ -112,13 +112,19 @@ export function getMainWindow(): BrowserWindow | null {
 /**
  * Send a push event to every renderer surface that displays live session data.
  *
- * Today that's the dashboard window and the tray popover window. Add new
- * surfaces here when they need push updates — services should never call
- * `webContents.send` on individual windows for broadcast-style events, or the
- * tray will silently go stale again.
+ * Today that's the dashboard window, the tray popover window and the update
+ * window. Add new surfaces here when they need push updates — services should
+ * never call `webContents.send` on individual windows for broadcast-style
+ * events, or the tray will silently go stale again.
+ *
+ * The update window was missing from this list, which is why its download
+ * progress bar never moved: update-service broadcasts
+ * PUSH_UPDATE_DOWNLOAD_PROGRESS, but the only window subscribed to it was not
+ * being sent to. The bar sat at 0% for the whole download and then jumped
+ * straight to "ready to install".
  */
 export function broadcastToRenderers(channel: string, payload: unknown): void {
-  for (const win of [getDashboardWindow(), getTrayPopoverWindow()]) {
+  for (const win of [getDashboardWindow(), getTrayPopoverWindow(), getUpdateWindow()]) {
     if (win && !win.isDestroyed()) {
       win.webContents.send(channel, payload)
     }
