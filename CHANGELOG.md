@@ -1,3 +1,9 @@
+## 1.2.9 (2026-09-13)
+
+
+### Bug Fixes
+
+* **update:** show real download progress in the update window
 ## 1.2.8 (2026-09-13)
 
 

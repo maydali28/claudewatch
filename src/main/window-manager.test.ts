@@ -201,3 +201,40 @@ describe('createTrayPopoverWindow', () => {
     expect(mod.getTrayPopoverWindow()).toBeNull()
   })
 })
+
+// ─── broadcastToRenderers ─────────────────────────────────────────────────────
+
+describe('broadcastToRenderers', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    appListeners.clear()
+  })
+
+  it('reaches the update window, so its download progress bar actually moves', async () => {
+    const mod = await import('./window-manager')
+    const updateWin = mod.createOrShowUpdateWindow(null) as unknown as FakeWindow
+
+    mod.broadcastToRenderers('push:update-download-progress', { percent: 42 })
+
+    expect(updateWin.webContents.send).toHaveBeenCalledWith('push:update-download-progress', {
+      percent: 42,
+    })
+  })
+
+  it('still reaches the tray popover', async () => {
+    const mod = await import('./window-manager')
+    const popover = mod.createTrayPopoverWindow() as unknown as FakeWindow
+
+    mod.broadcastToRenderers('push:today-stats', { total: 1 })
+
+    expect(popover.webContents.send).toHaveBeenCalledWith('push:today-stats', { total: 1 })
+  })
+
+  it('skips destroyed windows', async () => {
+    const mod = await import('./window-manager')
+    const updateWin = mod.createOrShowUpdateWindow(null) as unknown as FakeWindow
+    updateWin.emit('closed')
+
+    expect(() => mod.broadcastToRenderers('push:today-stats', {})).not.toThrow()
+  })
+})
