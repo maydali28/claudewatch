@@ -1,6 +1,6 @@
 {
   "name": "claudewatch",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Claude Code session explorer (macOS, Windows, Linux)",
   "main": "out/main/index.js",
   "author": {
@@ -51,7 +51,7 @@
       "ip-address@>=10.0.0 <10.3.1": ">=10.3.1 <11",
       "nanoid@>=3.0.0 <3.3.18": ">=3.3.18 <4",
       "postcss@>=8.0.0 <8.5.23": ">=8.5.23 <9",
-      "tar@>=7.0.0 <7.5.21": ">=7.5.21 <8",
+      "tar@<7.5.21": ">=7.5.21 <8",
       "undici@<8.9.0": ">=8.9.0"
     },
     "patchedDependencies": {

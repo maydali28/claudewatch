@@ -7,9 +7,19 @@ export const AppConfig = {
   /** Sentry DSN for crash reports and user feedback. Empty string = Sentry disabled. */
   sentryDsn: process.env.MAIN_VITE_SENTRY_DSN ?? '',
 
-  /** Base URL for the auto-updater release feed. Empty string = updates disabled. */
+  /**
+   * Hazel deployment backing the Linux update check only. It answers
+   * `/update/:platform/:version` and serves no static files, so it must not be
+   * used as an electron-updater feed. Empty string = Linux updates disabled.
+   */
   releaseServerUrl: process.env.MAIN_VITE_RELEASE_SERVER_URL ?? '',
 
-  /** GitHub releases base URL for fetching release manifests. */
+  /**
+   * GitHub repository URL that hosts our releases, e.g.
+   * `https://github.com/<owner>/<repo>/releases/download`. macOS and Windows
+   * updates read `latest-mac.yml` / `latest.yml` from its GitHub Release
+   * assets, so owner and repo are parsed out of this. Empty or non-GitHub =
+   * macOS and Windows auto-updates disabled.
+   */
   githubReleasesUrl: process.env.MAIN_VITE_GITHUB_RELEASES_URL ?? '',
 } as const
