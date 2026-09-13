@@ -39,6 +39,8 @@ export interface ModelUsageRow {
 
 export interface DayBucket extends UsageTotals {
   day: string
+  /** Cost from parent responses alone, excluding subagents. */
+  parentEstimatedCost: number
   /** Families actually used on this day — not the session's lifetime models. */
   families: ModelFamily[]
   /** Per-model usage for this day, so model charts can be date-scoped. */
@@ -150,12 +152,19 @@ export function projectUsage(entries: ResponseEntry[]): UsageProjection {
 
     let bucket = byDay.get(e.dayLocal)
     if (!bucket) {
-      bucket = { day: e.dayLocal, families: [], models: [], ...emptyTotals() }
+      bucket = {
+        day: e.dayLocal,
+        families: [],
+        models: [],
+        parentEstimatedCost: 0,
+        ...emptyTotals(),
+      }
       byDay.set(e.dayLocal, bucket)
       dayFamilies.set(e.dayLocal, new Set())
       dayModels.set(e.dayLocal, new Map())
     }
     add(bucket, e)
+    if (e.kind === 'parent' && e.costUsd !== null) bucket.parentEstimatedCost += e.costUsd
     dayFamilies.get(e.dayLocal)!.add(e.modelFamily)
     accumulateModel(dayModels.get(e.dayLocal)!, e)
   }

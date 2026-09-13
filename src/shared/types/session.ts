@@ -282,6 +282,15 @@ export interface SessionDayUsage {
   responseCount: number
   /** Messages exchanged on this day, user and assistant. */
   messageCount: number
+  /**
+   * Parent-only cost. Effort is recorded for parent turns, so attributing
+   * effort cost needs the parent's share rather than the combined figure.
+   */
+  parentEstimatedCost: number
+  /** Compaction events that happened on this day. */
+  compactions: number
+  /** Context tokens cleared by those compactions. */
+  tokensRemovedByCompaction: number
   models: SessionDayModelUsage[]
 }
 

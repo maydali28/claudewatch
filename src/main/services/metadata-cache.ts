@@ -30,7 +30,7 @@ interface CacheFile {
   entries: Record<string, CachedEntry>
 }
 
-const CACHE_VERSION = 3
+const CACHE_VERSION = 4
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

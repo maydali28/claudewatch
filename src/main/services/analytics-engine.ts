@@ -210,6 +210,8 @@ function buildModelUsage(sessions: SessionSummary[], fromKey: string, toKey: str
   return [...byFamily.values()].sort((a, b) => b.turnCount - a.turnCount)
 }
 
+const TOP_COMPACTION_LIMIT = 15
+
 // ─── computeCacheAnalytics ────────────────────────────────────────────────────
 
 function computeCacheAnalytics(
@@ -274,7 +276,13 @@ function computeCacheAnalytics(
     }
   }
 
-  const actualCost = sessions.reduce((s, sess) => s + sess.estimatedCost, 0)
+  // The period's cost, so the cache tab cannot contradict the overview beside
+  // it. Summing session lifetimes here reported $11 against a $1 total on a
+  // one-day selection.
+  let actualCost = 0
+  for (const s of sessions) {
+    for (const d of daysInRange(s, fromKey, toKey)) actualCost += d.estimatedCost
+  }
   const hypotheticalUncachedCost = actualCost + costSavings
 
   // Average reuse rate: how many times each cache write was reused on average
@@ -379,43 +387,55 @@ function computeCacheAnalytics(
     }
   }
 
-  // Compaction analytics
-  const compactionSessions = sessions.filter((s) => s.compactionCount > 0)
-  const totalCompactions = compactionSessions.reduce((s, sess) => s + sess.compactionCount, 0)
-  const totalTokensRemoved = sessions.reduce(
-    (s, sess) => s + (sess.totalTokensRemovedByCompaction ?? 0),
-    0
-  )
+  // Compaction analytics, scoped to the period. Compaction events carry their
+  // own timestamps, so a session that compacted last week does not belong
+  // behind today's selection.
+  interface CompactionRollup {
+    session: SessionSummary
+    compactions: number
+    tokensRemoved: number
+  }
+  const compactionRollups: CompactionRollup[] = []
+  for (const s of sessions) {
+    let compactions = 0
+    let tokensRemoved = 0
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      compactions += d.compactions
+      tokensRemoved += d.tokensRemovedByCompaction
+    }
+    if (compactions > 0) compactionRollups.push({ session: s, compactions, tokensRemoved })
+  }
+
+  const totalCompactions = compactionRollups.reduce((n, r) => n + r.compactions, 0)
+  const totalTokensRemoved = compactionRollups.reduce((n, r) => n + r.tokensRemoved, 0)
   const avgTokensRemovedPerSession =
-    compactionSessions.length > 0 ? totalTokensRemoved / compactionSessions.length : 0
+    compactionRollups.length > 0 ? totalTokensRemoved / compactionRollups.length : 0
 
-  const topCompactionSessions: SessionCompactionEntry[] = compactionSessions
-    .map((s): SessionCompactionEntry => {
-      const family = getModelFamily(s.primaryModel)
-      const p = pricingTable[family] ?? pricingTable['unknown']
-      const removed = s.totalTokensRemovedByCompaction ?? 0
-      return {
-        id: s.id,
-        sessionTitle: s.title,
-        compactionCount: s.compactionCount,
-        totalTokensRemoved: removed,
-        peakContextTokens: removed > 0 ? Math.round(removed / s.compactionCount) : 0,
-        estimatedCostAvoided: (removed / 1_000_000) * p.input,
-        primaryModel: s.primaryModel,
-      }
-    })
-    .sort((a, b) => b.totalTokensRemoved - a.totalTokensRemoved)
-    .slice(0, 15)
+  // Cost avoided is priced from the session's dominant model: compaction
+  // clears context rather than producing tokens, so the cleared tokens cannot
+  // be attributed to a specific model. Unrecognised models avoid nothing
+  // rather than a guessed amount.
+  const costAvoidedFor = (r: CompactionRollup): number => {
+    const family = getModelFamily(r.session.dominantModel ?? r.session.primaryModel)
+    const p = pricingTable[family]
+    if (family === 'unknown' || !p) return 0
+    return (r.tokensRemoved / 1_000_000) * p.input
+  }
 
-  const estimatedCostAvoided =
-    topCompactionSessions.reduce((s, e) => s + e.estimatedCostAvoided, 0) +
-    compactionSessions
-      .filter((_, i) => i >= 15)
-      .reduce((s, sess) => {
-        const family = getModelFamily(sess.primaryModel)
-        const p = pricingTable[family] ?? pricingTable['unknown']
-        return s + ((sess.totalTokensRemovedByCompaction ?? 0) / 1_000_000) * p.input
-      }, 0)
+  const ranked = [...compactionRollups].sort((a, b) => b.tokensRemoved - a.tokensRemoved)
+  const topCompactionSessions: SessionCompactionEntry[] = ranked
+    .slice(0, TOP_COMPACTION_LIMIT)
+    .map((r) => ({
+      id: r.session.id,
+      sessionTitle: r.session.title,
+      compactionCount: r.compactions,
+      totalTokensRemoved: r.tokensRemoved,
+      peakContextTokens: r.compactions > 0 ? Math.round(r.tokensRemoved / r.compactions) : 0,
+      estimatedCostAvoided: costAvoidedFor(r),
+      primaryModel: r.session.dominantModel ?? r.session.primaryModel,
+    }))
+
+  const estimatedCostAvoided = ranked.reduce((n, r) => n + costAvoidedFor(r), 0)
 
   const compactionAnalytics: CompactionAnalytics = {
     totalCompactions,
@@ -446,9 +466,17 @@ function computeCacheAnalytics(
 
 // ─── computeModelEfficiency ───────────────────────────────────────────────────
 
+/**
+ * Per-model efficiency for the selected period.
+ *
+ * Read each session's lifetime breakdown, so the efficiency table disagreed
+ * with the turn-distribution chart on the same tab whenever a range was
+ * narrower than a session's life.
+ */
 function computeModelEfficiency(
   sessions: SessionSummary[],
-  _pricingTable: Record<ModelFamily, ModelPricing>
+  fromKey: string,
+  toKey: string
 ): ModelEfficiencyRow[] {
   const byFamily = new Map<
     string,
@@ -460,19 +488,20 @@ function computeModelEfficiency(
   >()
 
   for (const s of sessions) {
-    for (const bd of s.modelBreakdown) {
-      const family = getModelFamily(bd.model)
-      const existing = byFamily.get(family)
-      if (existing) {
-        existing.turnCount += bd.turnCount
-        existing.totalOutputTokens += bd.outputTokens
-        existing.totalCost += bd.estimatedCost
-      } else {
-        byFamily.set(family, {
-          turnCount: bd.turnCount,
-          totalOutputTokens: bd.outputTokens,
-          totalCost: bd.estimatedCost,
-        })
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      for (const m of d.models) {
+        const existing = byFamily.get(m.family)
+        if (existing) {
+          existing.turnCount += m.turnCount
+          existing.totalOutputTokens += m.outputTokens
+          existing.totalCost += m.estimatedCost
+        } else {
+          byFamily.set(m.family, {
+            turnCount: m.turnCount,
+            totalOutputTokens: m.outputTokens,
+            totalCost: m.estimatedCost,
+          })
+        }
       }
     }
   }
@@ -610,9 +639,17 @@ function computeLatencyAnalytics(
 
 // ─── computeEffortAnalytics ───────────────────────────────────────────────────
 
+/**
+ * Effort is recorded per session, not per turn, so its distribution cannot be
+ * split by day — a session active in the period contributes its whole
+ * distribution. Its *cost*, however, is attributed from the period only:
+ * charging a one-day view for a fortnight of spend made the effort tab
+ * contradict the overview.
+ */
 function computeEffortAnalytics(
   sessions: SessionSummary[],
-  _pricingTable: Record<ModelFamily, ModelPricing>
+  fromKey: string,
+  toKey: string
 ): EffortAnalytics {
   const totals = { low: 0, medium: 0, high: 0, ultrathink: 0 }
   const costs: Record<EffortLevel, number> = { low: 0, medium: 0, high: 0, ultrathink: 0 }
@@ -626,8 +663,11 @@ function computeEffortAnalytics(
 
     // Cost attribution: use parent-session-only cost (exclude subagent rollup) so
     // the proportional split stays consistent with the parent effort distribution.
-    const subagentCost = s.subagents.reduce((sum, a) => sum + a.estimatedCost, 0)
-    const parentCost = s.estimatedCost - subagentCost
+    // Parent-only, and only for days inside the period.
+    const parentCost = daysInRange(s, fromKey, toKey).reduce(
+      (sum, d) => sum + d.parentEstimatedCost,
+      0
+    )
 
     const total = ed.low + ed.medium + ed.high + ed.ultrathink
     if (total > 0 && parentCost > 0) {
@@ -817,10 +857,10 @@ export function computeAnalytics(
   const projectCosts = buildProjectCosts(filtered, projects, fromKey, toKey)
   const modelUsage = buildModelUsage(filtered, fromKey, toKey)
   const cacheAnalytics = computeCacheAnalytics(filtered, dailyUsage, pricingTable, fromKey, toKey)
-  const modelEfficiency = computeModelEfficiency(filtered, pricingTable)
+  const modelEfficiency = computeModelEfficiency(filtered, fromKey, toKey)
   const dailyModelCost = computeDailyModelCost(filtered, fromKey, toKey)
   const latencyAnalytics = computeLatencyAnalytics(filtered, fromKey, toKey)
-  const effortAnalytics = computeEffortAnalytics(filtered, pricingTable)
+  const effortAnalytics = computeEffortAnalytics(filtered, fromKey, toKey)
   const parallelToolAnalytics = computeParallelToolAnalytics(filtered)
   const sessionHealthSummary = computeSessionHealthSummary(filtered)
 

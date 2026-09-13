@@ -288,6 +288,18 @@ function buildSessionSummary(
     unpricedResponses,
   } = usage.combined
 
+  // Compaction events carry their own timestamps, so they belong to the day
+  // they happened on rather than to the session as a whole.
+  const compactionsByDay = new Map<string, { count: number; tokens: number }>()
+  for (const event of acc.compactionEvents) {
+    if (!event.timestamp) continue
+    const key = toDateKey(event.timestamp)
+    const entry = compactionsByDay.get(key) ?? { count: 0, tokens: 0 }
+    entry.count++
+    entry.tokens += event.preTokens ?? 0
+    compactionsByDay.set(key, entry)
+  }
+
   return {
     id: sessionId,
     projectId,
@@ -346,6 +358,9 @@ function buildSessionSummary(
       // Falls back to the response count for days that only a subagent was
       // active on — the parent transcript records no message there.
       messageCount: acc.messagesByDay.get(d.day) ?? d.responseCount,
+      parentEstimatedCost: d.parentEstimatedCost,
+      compactions: compactionsByDay.get(d.day)?.count ?? 0,
+      tokensRemovedByCompaction: compactionsByDay.get(d.day)?.tokens ?? 0,
       models: d.models.map((m) => ({
         model: m.model,
         family: m.family,

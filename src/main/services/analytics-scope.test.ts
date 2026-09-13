@@ -23,6 +23,9 @@ function day(over: Partial<SessionDayUsage> & { day: string }): SessionDayUsage 
     estimatedCost: 1,
     responseCount: 1,
     messageCount: 1,
+    parentEstimatedCost: 0,
+    compactions: 0,
+    tokensRemovedByCompaction: 0,
     models: [],
     ...over,
   }
