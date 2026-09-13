@@ -1,3 +1,9 @@
+## 1.2.5 (2026-09-13)
+
+
+### Bug Fixes
+
+* **update:** write file names, not urls, in the update manifests
 ## 1.2.4 (2026-09-13)
 
 
