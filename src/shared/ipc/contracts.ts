@@ -139,10 +139,6 @@ export interface IPCContracts {
     request: void
     response: Result<void>
   }
-  'updates:brew-upgrade': {
-    request: void
-    response: Result<void>
-  }
   'tray:open-dashboard': {
     request: { sessionId?: string; projectId?: string }
     response: Result<void>

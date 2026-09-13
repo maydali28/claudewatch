@@ -12,7 +12,4 @@ export const AppConfig = {
 
   /** GitHub releases base URL for fetching release manifests. */
   githubReleasesUrl: process.env.MAIN_VITE_GITHUB_RELEASES_URL ?? '',
-
-  /** Homebrew cask name used in the `brew upgrade --cask <name>` command. */
-  brewCaskName: process.env.MAIN_VITE_BREW_CASK_NAME ?? '',
 } as const

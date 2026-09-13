@@ -10,6 +10,7 @@ Thanks for your interest in contributing. This document is the long-form version
 - [Coding Conventions](#coding-conventions)
 - [Commit Messages](#commit-messages)
 - [Pull Requests](#pull-requests)
+- [Releasing](#releasing)
 - [Reporting Issues](#reporting-issues)
 - [Reporting Security Vulnerabilities](#reporting-security-vulnerabilities)
 
@@ -133,6 +134,42 @@ If you'd rather not memorise the format, run `pnpm commit` — it launches an in
 6. **CI must be green.** PRs with failing typecheck, lint, format, test, build, depcruise, or bundle-size jobs will not be reviewed.
 
 7. **Expect feedback.** Reviews focus on correctness, security, and architectural fit. Address comments by pushing new commits — don't force-push until the review is approved.
+
+## Releasing
+
+Releases follow gitflow, and the version is bumped **by hand**: feature branches merge into `develop`, `develop` merges into `main` via PR, and a version tag on that merge commit triggers the build.
+
+1. **Bump `version` in `package.json` yourself**, on your feature/chore branch or directly on `develop`, and commit it. Run `pnpm changelog` and commit `CHANGELOG.md` in the same breath so the release notes match the version.
+2. Merge that branch into `develop`.
+3. Merge `develop` into `main` via PR. `commitlint` runs on the PR; CI (`ci.yml`) runs on the push. The resulting merge commit on `main` is what gets tagged.
+4. On an up-to-date, clean `main`, tag it with exactly the version already in `package.json`:
+
+   ```bash
+   git checkout main && git pull
+   git tag -a v1.2.3 -m "Release v1.2.3"   # v1.2.3 == package.json version
+   git push origin v1.2.3
+   ```
+
+5. The tag push runs [release.yml](.github/workflows/release.yml): macOS (signed + notarized), Windows and Linux builds, update manifests for the in-app updater, an SBOM with a vulnerability scan that fails the release on high severity, the GitHub Release with notes taken from the top `CHANGELOG.md` section, then the Homebrew cask and the signed APT repository.
+
+**The tag name must equal the `version` in `package.json` at the tagged commit.** The in-app updater feed, the Homebrew cask and the generated update manifests are all keyed on that agreement.
+
+There is **no back-merge** from `main` into `develop`: the bump travelled to `main` through `develop`, so both branches already carry it.
+
+`pnpm release` ([scripts/release.mjs](scripts/release.mjs)) automates a *different* flow — it bumps, regenerates the changelog, commits `chore(release): vX.Y.Z` and tags, all on `main`. It has never been used here, and running it would leave `main` with a bump commit `develop` never sees.
+
+The Release workflow does **not** run typecheck, lint, or tests, so make sure CI on `main` is green before tagging.
+
+### Claude Code release helpers
+
+The repo ships project-level Claude Code hooks in [.claude/settings.json](.claude/settings.json), backed by [.claude/hooks/release-check.sh](.claude/hooks/release-check.sh):
+
+- **Release gate** (`PreToolUse` on Bash): before a tag is created or pushed, the hook checks that you are on `main`, the tree is clean, `main` is in sync with origin, `origin/develop` is fully merged, the tag name matches `package.json`, the version is not already tagged, `CHANGELOG.md` leads with that version, the pipeline placeholder files are intact, and typecheck/lint/format/depcruise/test pass. It blocks the command while any of that fails. It also blocks `pnpm release` and `pnpm publish`, since this repo does not use the scripted flow.
+- **Readiness context** (`UserPromptSubmit`): when a prompt mentions releasing, a git-only snapshot of the same report is injected so Claude starts from the real state.
+- **Version-bump note** (`PreToolUse` on Edit/Write): informational only. Editing the `version` in `package.json` or `CHANGELOG.md` adds a reminder of what the value must line up with. It never blocks — bumping by hand is the process.
+- **`/release-prep`**: a slash command that prints the report, runs the full gate (including `dedupe --check`, `build`, and `size-check`), summarizes the unreleased commits, and lists the exact commands to run.
+
+You can also run the report directly: `.claude/hooks/release-check.sh report --full`.
 
 ## Reporting Issues
 

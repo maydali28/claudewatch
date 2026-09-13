@@ -41,7 +41,6 @@ export const CHANNELS = {
   UPDATES_CHECK: 'updates:check',
   UPDATES_DOWNLOAD: 'updates:download',
   UPDATES_INSTALL: 'updates:install',
-  UPDATES_BREW_UPGRADE: 'updates:brew-upgrade',
 
   // Tray
   TRAY_OPEN_DASHBOARD: 'tray:open-dashboard',
@@ -67,6 +66,7 @@ export const CHANNELS = {
   PUSH_CONFIG_CHANGED: 'push:config-changed',
   PUSH_SECRETS_DETECTED: 'push:secrets-detected',
   PUSH_UPDATE_AVAILABLE: 'push:update-available',
+  PUSH_UPDATE_DOWNLOAD_PROGRESS: 'push:update-download-progress',
   PUSH_UPDATE_SERVICE_ERROR: 'push:update-service-error',
   PUSH_TODAY_STATS: 'push:today-stats',
   PUSH_NAVIGATE_SESSION: 'push:navigate-session',
@@ -95,6 +95,7 @@ export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_CONFIG_CHANGED'
   | 'PUSH_SECRETS_DETECTED'
   | 'PUSH_UPDATE_AVAILABLE'
+  | 'PUSH_UPDATE_DOWNLOAD_PROGRESS'
   | 'PUSH_UPDATE_SERVICE_ERROR'
   | 'PUSH_TODAY_STATS'
   | 'PUSH_NAVIGATE_SESSION'

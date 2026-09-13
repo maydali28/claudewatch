@@ -34,6 +34,4 @@ export interface UpdateInfo {
   version: string
   releaseNotes?: string
   releaseDate?: string
-  /** true on macOS — update is handled via `brew upgrade --cask claudewatch` */
-  isMacBrew: boolean
 }

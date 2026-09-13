@@ -12,6 +12,7 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
 import { ipc } from '@renderer/lib/ipc-client'
+import { CHANNELS } from '@shared/ipc/channels'
 import { AppLinks } from '@renderer/lib/app-links'
 import type { UpdateInfo } from '@shared/types'
 import appIcon from '@renderer/assets/claudewatch-ring.svg'
@@ -24,7 +25,6 @@ type UpdateState =
   | { phase: 'available'; info: UpdateInfo }
   | { phase: 'downloading'; progress: number }
   | { phase: 'ready' }
-  | { phase: 'brew-launched' }
   | { phase: 'error'; message: string }
 
 export default function AboutPanel(): React.JSX.Element {
@@ -34,6 +34,17 @@ export default function AboutPanel(): React.JSX.Element {
   useEffect(() => {
     ipc.app.getVersion().then((result) => {
       if (result.ok) setAppVersion(result.data)
+    })
+  }, [])
+
+  // Reflect electron-updater's download-progress events in the bar. Only bump
+  // while actively downloading so a late-arriving event can't resurrect the bar
+  // after the download finished or errored.
+  useEffect(() => {
+    return ipc.on<{ percent: number }>(CHANNELS.PUSH_UPDATE_DOWNLOAD_PROGRESS, ({ percent }) => {
+      setUpdate((prev) =>
+        prev.phase === 'downloading' ? { phase: 'downloading', progress: percent } : prev
+      )
     })
   }, [])
 
@@ -52,15 +63,6 @@ export default function AboutPanel(): React.JSX.Element {
       }
     } catch (err) {
       setUpdate({ phase: 'error', message: String(err) })
-    }
-  }
-
-  async function handleBrewUpgrade(): Promise<void> {
-    const result = await ipc.updates.brewUpgrade()
-    if (result.ok) {
-      setUpdate({ phase: 'brew-launched' })
-    } else {
-      setUpdate({ phase: 'error', message: result.error })
     }
   }
 
@@ -147,17 +149,10 @@ export default function AboutPanel(): React.JSX.Element {
                 <MarkdownRenderer content={update.info.releaseNotes} className="text-xs" />
               </div>
             )}
-            {update.info.isMacBrew ? (
-              <Button size="sm" onClick={handleBrewUpgrade}>
-                <ExternalLink className="h-4 w-4" />
-                Upgrade via Homebrew
-              </Button>
-            ) : (
-              <Button size="sm" onClick={handleDownload}>
-                <Download className="h-4 w-4" />
-                Download update
-              </Button>
-            )}
+            <Button size="sm" onClick={handleDownload}>
+              <Download className="h-4 w-4" />
+              Download update
+            </Button>
           </div>
         )}
 
@@ -181,13 +176,6 @@ export default function AboutPanel(): React.JSX.Element {
               <Zap className="h-4 w-4" />
               Install &amp; Restart
             </Button>
-          </div>
-        )}
-
-        {update.phase === 'brew-launched' && (
-          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-            <CheckCircle className="h-4 w-4" />
-            Terminal opened — follow Homebrew&apos;s instructions to complete.
           </div>
         )}
 
