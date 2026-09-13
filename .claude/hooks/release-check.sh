@@ -176,8 +176,15 @@ collect_git_state() {
     pending="$(git rev-list --count HEAD..origin/develop 2>/dev/null || echo 0)"
     if [ "$pending" = "0" ]; then
       ok "origin/develop fully merged into $BRANCH"
+    elif [ -z "$(git diff HEAD origin/develop 2>/dev/null)" ]; then
+      # Counting commits is the wrong test on its own. A hotfix merges one
+      # branch into both main and develop, so develop ends up with a merge
+      # commit main will never contain — while the two trees are identical and
+      # nothing is missing from the release. Only a real content difference
+      # should block a tag.
+      ok "origin/develop is $pending commit(s) ahead of $BRANCH but the trees are identical (hotfix merged into both)"
     else
-      fail "origin/develop has $pending commit(s) not in $BRANCH — merge the develop → $BRANCH PR before tagging"
+      fail "origin/develop has $pending commit(s) not in $BRANCH and the trees differ — merge the develop → $BRANCH PR before tagging"
     fi
   fi
 
