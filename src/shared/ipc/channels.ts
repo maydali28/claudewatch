@@ -43,6 +43,7 @@ export const CHANNELS = {
   UPDATES_INSTALL: 'updates:install',
 
   // Tray
+  TRAY_GET_SNAPSHOT: 'tray:get-snapshot',
   TRAY_OPEN_DASHBOARD: 'tray:open-dashboard',
   TRAY_SHOW_ABOUT: 'tray:show-about',
   TRAY_SHOW_UPDATE: 'tray:show-update',

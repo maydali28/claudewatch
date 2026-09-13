@@ -86,6 +86,28 @@ function rul002(filePath: string, content: string): LintResult[] {
 
 // ─── RUL003 — Glob matches no files ──────────────────────────────────────────
 
+/**
+ * Paths under `cwd` matching a glob pattern, or an empty array if the pattern
+ * matches nothing or the directory cannot be read.
+ *
+ * `fs.glob` is callback-based. The previous implementation called it without a
+ * callback and treated the result as a promise, which threw into a swallowing
+ * catch — so every pattern looked like it matched nothing. Since RUL003 only
+ * reports patterns that match nothing, that turned the rule into a silent
+ * no-op. `fs.promises.glob` (Node 22+) yields matches as an async iterator.
+ */
+export async function findGlobMatches(pattern: string, cwd: string): Promise<string[]> {
+  const found: string[] = []
+  try {
+    for await (const entry of fs.promises.glob(pattern, { cwd })) {
+      found.push(typeof entry === 'string' ? entry : String(entry))
+    }
+  } catch {
+    return []
+  }
+  return found
+}
+
 async function rul003(
   filePath: string,
   content: string,
@@ -103,17 +125,7 @@ async function rul003(
       if (validateGlob(pattern) !== null) continue // skip invalid globs
 
       try {
-        const { glob } = await import('fs')
-        const found = await new Promise<string[]>((resolve, reject) => {
-          const _entries: string[] = []
-          // Use Node.js glob (v22+) or fallback
-          if (typeof (fs as { glob?: unknown }).glob === 'function') {
-            const g = glob(pattern, { cwd: projectRoot })
-            g.then(resolve).catch(reject)
-          } else {
-            resolve([]) // skip if glob not available
-          }
-        })
+        const found = await findGlobMatches(pattern, projectRoot)
 
         if (found.length === 0) {
           results.push({

@@ -84,7 +84,7 @@ function DailyHitRatioChart({
         <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => v.slice(5)} />
         <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} tickFormatter={(v: number) => `${v}%`} />
         <Tooltip
-          formatter={(v: number) => [`${v}%`, 'Hit Ratio']}
+          formatter={(v) => [`${Number(v)}%`, 'Hit Ratio']}
           contentStyle={{ fontSize: 11 }}
         />
         <Line
@@ -127,7 +127,7 @@ function ModelSavingsChart({ data }: { data: ModelCacheSavings[] }): React.JSX.E
           tickFormatter={(v: string) => (v.length > 16 ? v.slice(-16) : v)}
         />
         <Tooltip
-          formatter={(v: number) => [formatCost(v), 'Savings']}
+          formatter={(v) => [formatCost(Number(v)), 'Savings']}
           contentStyle={{ fontSize: 11 }}
         />
         <Bar dataKey="totalSavings" radius={[0, 2, 2, 0]}>

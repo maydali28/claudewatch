@@ -248,9 +248,9 @@ export default function TimelinePanel(): React.JSX.Element {
                           <p className="text-xs text-muted-foreground">{block.projectName}</p>
                           <div className="flex gap-3 text-xs">
                             <span>{formatCost(block.session.estimatedCost)}</span>
-                            {block.session.primaryModel && (
+                            {block.session.dominantModel && (
                               <span className="text-muted-foreground">
-                                {block.session.primaryModel}
+                                {block.session.dominantModel}
                               </span>
                             )}
                           </div>

@@ -19,9 +19,6 @@ export function resolveDateRange(range: DateRange): { from: Date; to: Date } {
       case '30d':
         from.setDate(from.getDate() - 29)
         break
-      case '90d':
-        from.setDate(from.getDate() - 89)
-        break
       case 'all':
         return { from: new Date(0), to }
     }

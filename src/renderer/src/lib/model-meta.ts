@@ -10,6 +10,17 @@ interface ModelMeta {
 }
 
 const META: Record<ModelFamily, ModelMeta> = {
+  // ── Fable 5.1 / Mythos 5.1 — premium amber / fuchsia ─────────────────────────
+  'fable-5-1': {
+    label: 'Fable 5.1',
+    badgeClass: 'bg-amber-500/10 text-amber-500',
+    color: '#f59e0b',
+  },
+  'mythos-5-1': {
+    label: 'Mythos 5.1',
+    badgeClass: 'bg-fuchsia-500/10 text-fuchsia-500',
+    color: '#d946ef',
+  },
   // ── Fable 5 / Mythos 5 — premium amber / fuchsia ─────────────────────────────
   'fable-5': {
     label: 'Fable 5',
@@ -21,7 +32,8 @@ const META: Record<ModelFamily, ModelMeta> = {
     badgeClass: 'bg-fuchsia-500/10 text-fuchsia-500',
     color: '#d946ef',
   },
-  // ── Opus 4.8 / 4.7 / 4.6 / 4.5 — reds ───────────────────────────────────────
+  // ── Opus 5 / 4.8 / 4.7 / 4.6 / 4.5 — reds ───────────────────────────────────
+  'opus-5': { label: 'Opus 5', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-8': { label: 'Opus 4.8', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-7': { label: 'Opus 4.7', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-6': { label: 'Opus 4.6', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
@@ -35,6 +47,11 @@ const META: Record<ModelFamily, ModelMeta> = {
   'opus-4': { label: 'Opus 4', badgeClass: 'bg-orange-500/10 text-orange-500', color: '#f97316' },
   'opus-3': { label: 'Opus 3', badgeClass: 'bg-orange-400/10 text-orange-400', color: '#fb923c' },
   // ── Sonnet — indigos ─────────────────────────────────────────────────────────
+  'sonnet-5': {
+    label: 'Sonnet 5',
+    badgeClass: 'bg-indigo-500/10 text-indigo-500',
+    color: '#6366f1',
+  },
   'sonnet-4-6': {
     label: 'Sonnet 4.6',
     badgeClass: 'bg-indigo-500/10 text-indigo-500',
@@ -52,6 +69,11 @@ const META: Record<ModelFamily, ModelMeta> = {
   },
   'sonnet-3-7': {
     label: 'Sonnet 3.7',
+    badgeClass: 'bg-violet-400/10 text-violet-400',
+    color: '#a78bfa',
+  },
+  'sonnet-3-5': {
+    label: 'Sonnet 3.5',
     badgeClass: 'bg-violet-400/10 text-violet-400',
     color: '#a78bfa',
   },

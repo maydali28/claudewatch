@@ -37,7 +37,7 @@ export function DailyUsageChart({ data }: Props): React.JSX.Element {
           className="fill-muted-foreground"
         />
         <Tooltip
-          formatter={(v: number, name: string) => [formatTokens(v), name]}
+          formatter={(v, name) => [formatTokens(Number(v)), String(name)]}
           contentStyle={{ fontSize: 11 }}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} />

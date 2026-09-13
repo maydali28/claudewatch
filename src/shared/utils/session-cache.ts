@@ -31,21 +31,31 @@ export class SessionCache {
   set(sessionId: string, session: ParsedSession): void {
     const bytes = estimateSessionBytes(session)
 
-    if (this.cache.has(sessionId)) {
-      const old = this.cache.get(sessionId)!
-      this.totalBytes -= old.bytes
+    // Drop any existing entry first: its bytes must not be counted twice, and
+    // it must not be eligible as an eviction victim for its own replacement.
+    const existing = this.cache.get(sessionId)
+    if (existing) {
+      this.totalBytes -= existing.bytes
       this.cache.delete(sessionId)
-    } else {
-      while (
-        this.cache.size >= this.capacity ||
-        (this.totalBytes + bytes > this.maxBytes && this.cache.size > 0)
-      ) {
-        const lruKey = this.cache.keys().next().value
-        if (lruKey === undefined) break
-        const lruEntry = this.cache.get(lruKey)!
-        this.totalBytes -= lruEntry.bytes
-        this.cache.delete(lruKey)
-      }
+    }
+
+    // An entry larger than the whole cap cannot be held without breaking the
+    // bound the cap exists to provide. Refuse it rather than evict everything
+    // and then blow the limit anyway; the caller re-parses on the next read.
+    if (bytes > this.maxBytes) return
+
+    // Evict until the new entry fits. This runs for replacements too — skipping
+    // it there is what let a session growing mid-stream sit permanently over
+    // the cap.
+    while (
+      this.cache.size > 0 &&
+      (this.cache.size >= this.capacity || this.totalBytes + bytes > this.maxBytes)
+    ) {
+      const lruKey = this.cache.keys().next().value
+      if (lruKey === undefined) break
+      const lruEntry = this.cache.get(lruKey)!
+      this.totalBytes -= lruEntry.bytes
+      this.cache.delete(lruKey)
     }
 
     this.cache.set(sessionId, { session, bytes })
@@ -63,6 +73,11 @@ export class SessionCache {
   clear(): void {
     this.cache.clear()
     this.totalBytes = 0
+  }
+
+  /** Estimated bytes currently held. Exposed so the cap can be asserted. */
+  get totalBytesUsed(): number {
+    return this.totalBytes
   }
 
   get size(): number {

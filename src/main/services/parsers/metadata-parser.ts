@@ -10,14 +10,12 @@ import type {
   CompactionEvent,
   ParallelToolGroup,
   SessionErrorDetail,
-  ModelTokenBreakdown,
   SessionObservability,
   EffortDistribution,
 } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
-import { getModelFamily } from '@shared/constants/models'
-import { estimateCost } from '@shared/constants/pricing'
 import { decodeProjectId } from '@shared/utils/decode-project-id'
+import { toDateKey } from '@shared/utils/date-ranges'
 import {
   IDLE_GAP_MS,
   MAX_TURN_DURATION_MS,
@@ -33,6 +31,8 @@ import {
   parseTokenUsage,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
+import { createResponseAccumulator } from '@main/services/accounting/ledger'
+import { projectUsage, type UsageProjection } from '@main/services/accounting/projection'
 
 interface MetadataAccumulator {
   // Identity
@@ -63,13 +63,13 @@ interface MetadataAccumulator {
   parallelToolCallCount: number
   maxParallelDegree: number
 
+  /** Messages per local day, so daily series report real per-day activity. */
+  messagesByDay: Map<string, number>
+
   // Turn tracking
   lastMessageTimestamp: string | undefined
   turnIndex: number
   turnsSinceLastCompaction: number
-
-  // Per-model breakdown
-  modelBreakdownMap: Map<string, ModelTokenBreakdown>
 }
 
 function createMetadataAccumulator(sessionId: string): MetadataAccumulator {
@@ -94,10 +94,10 @@ function createMetadataAccumulator(sessionId: string): MetadataAccumulator {
     isWorktreeSession: false,
     parallelToolCallCount: 0,
     maxParallelDegree: 0,
+    messagesByDay: new Map(),
     lastMessageTimestamp: undefined,
     turnIndex: 0,
     turnsSinceLastCompaction: 0,
-    modelBreakdownMap: new Map(),
   }
 }
 
@@ -136,42 +136,18 @@ function processCompactionBoundary(raw: RawRecord, acc: MetadataAccumulator): vo
   acc.turnsSinceLastCompaction = 0
 }
 
+function countMessageOnDay(raw: RawRecord, acc: MetadataAccumulator): void {
+  if (!raw.timestamp) return
+  const day = toDateKey(raw.timestamp)
+  acc.messagesByDay.set(day, (acc.messagesByDay.get(day) ?? 0) + 1)
+}
+
 function processUserRecord(_raw: RawRecord, acc: MetadataAccumulator): void {
   acc.messageCount++
+  countMessageOnDay(_raw, acc)
   acc.lastMessageTimestamp = _raw.timestamp
   acc.turnIndex++
   acc.turnsSinceLastCompaction++
-}
-
-function accumulateModelBreakdown(
-  model: string,
-  usage: TokenUsage,
-  cache5m: number,
-  cache1h: number,
-  cost: number,
-  acc: MetadataAccumulator
-): void {
-  const existing = acc.modelBreakdownMap.get(model)
-  if (existing) {
-    existing.inputTokens += usage.inputTokens
-    existing.outputTokens += usage.outputTokens
-    existing.cacheReadTokens += usage.cacheReadInputTokens
-    existing.cacheCreation5mTokens += cache5m
-    existing.cacheCreation1hTokens += cache1h
-    existing.estimatedCost += cost
-    existing.turnCount++
-  } else {
-    acc.modelBreakdownMap.set(model, {
-      model,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cacheReadTokens: usage.cacheReadInputTokens,
-      cacheCreation5mTokens: cache5m,
-      cacheCreation1hTokens: cache1h,
-      estimatedCost: cost,
-      turnCount: 1,
-    })
-  }
 }
 
 function accumulateBlockMetrics(
@@ -257,34 +233,15 @@ function accumulateBlockMetrics(
   }
 }
 
-function processAssistantRecord(
-  raw: RawRecord,
-  acc: MetadataAccumulator,
-  pricingTable: Record<ModelFamily, ModelPricing>
-): void {
+/**
+ * Non-usage metrics only. Tokens, cost and model attribution come from the
+ * ledger, which counts once per API response rather than once per record —
+ * accumulating them here as well would reintroduce the overcount.
+ */
+function processAssistantRecord(raw: RawRecord, acc: MetadataAccumulator): void {
   acc.messageCount++
-
-  const blocks = getRawBlocks(raw)
-  const model = raw.message?.model
-  const usage = parseTokenUsage(raw)
-  const family = getModelFamily(model)
-  const cache5m = usage.cacheCreation?.ephemeral5mInputTokens ?? 0
-  const cache1h = usage.cacheCreation?.ephemeral1hInputTokens ?? 0
-  const cost = estimateCost(
-    family,
-    usage.inputTokens,
-    usage.outputTokens,
-    usage.cacheReadInputTokens,
-    cache5m,
-    cache1h,
-    pricingTable
-  )
-
-  if (model) {
-    accumulateModelBreakdown(model, usage, cache5m, cache1h, cost, acc)
-  }
-
-  accumulateBlockMetrics(blocks, raw, usage, acc)
+  countMessageOnDay(raw, acc)
+  accumulateBlockMetrics(getRawBlocks(raw), raw, parseTokenUsage(raw), acc)
 }
 
 function buildObservability(acc: MetadataAccumulator): SessionObservability {
@@ -317,31 +274,30 @@ function buildObservability(acc: MetadataAccumulator): SessionObservability {
 function buildSessionSummary(
   sessionId: string,
   projectId: string,
-  acc: MetadataAccumulator
+  acc: MetadataAccumulator,
+  usage: UsageProjection
 ): SessionSummary {
-  let totalInputTokens = 0
-  let totalOutputTokens = 0
-  let totalCacheReadTokens = 0
-  let totalCacheCreation5mTokens = 0
-  let totalCacheCreation1hTokens = 0
-  let estimatedCost = 0
+  const {
+    inputTokens: totalInputTokens,
+    outputTokens: totalOutputTokens,
+    cacheReadTokens: totalCacheReadTokens,
+    cacheWrite5m: totalCacheCreation5mTokens,
+    cacheWrite1h: totalCacheCreation1hTokens,
+    cacheWriteTotal,
+    estimatedCost,
+    unpricedResponses,
+  } = usage.combined
 
-  for (const breakdown of acc.modelBreakdownMap.values()) {
-    totalInputTokens += breakdown.inputTokens
-    totalOutputTokens += breakdown.outputTokens
-    totalCacheReadTokens += breakdown.cacheReadTokens
-    totalCacheCreation5mTokens += breakdown.cacheCreation5mTokens
-    totalCacheCreation1hTokens += breakdown.cacheCreation1hTokens
-    estimatedCost += breakdown.estimatedCost
-  }
-
-  let primaryModel: string | undefined
-  let maxTurns = 0
-  for (const [model, breakdown] of acc.modelBreakdownMap) {
-    if (breakdown.turnCount > maxTurns) {
-      maxTurns = breakdown.turnCount
-      primaryModel = model
-    }
+  // Compaction events carry their own timestamps, so they belong to the day
+  // they happened on rather than to the session as a whole.
+  const compactionsByDay = new Map<string, { count: number; tokens: number }>()
+  for (const event of acc.compactionEvents) {
+    if (!event.timestamp) continue
+    const key = toDateKey(event.timestamp)
+    const entry = compactionsByDay.get(key) ?? { count: 0, tokens: 0 }
+    entry.count++
+    entry.tokens += event.preTokens ?? 0
+    compactionsByDay.set(key, entry)
   }
 
   return {
@@ -354,11 +310,16 @@ function buildSessionSummary(
     lastTimestamp: acc.lastTimestamp ?? '',
     messageCount: acc.messageCount,
     parentMessageCount: acc.messageCount,
-    primaryModel,
+    latestModel: usage.latestParentModel,
+    dominantModel: usage.dominantParentModel,
+    modelsUsed: usage.modelsUsed,
+    unpricedResponses,
     totalInputTokens,
     totalOutputTokens,
     totalCacheReadTokens,
-    totalCacheCreationTokens: totalCacheCreation5mTokens + totalCacheCreation1hTokens,
+    // The flat counter, not the sum of tiers — an unsplit legacy write has no
+    // tiers and would otherwise vanish from the total.
+    totalCacheCreationTokens: cacheWriteTotal,
     totalCacheCreation5mTokens,
     totalCacheCreation1hTokens,
     compactionCount: acc.compactionCount,
@@ -369,11 +330,38 @@ function buildSessionSummary(
     turnDurations: acc.turnDurations,
     estimatedCost,
     hasError: acc.hasError,
-    modelBreakdown: Array.from(acc.modelBreakdownMap.values()),
     toolCallCount: acc.toolCallCount,
     observability: buildObservability(acc),
     tags: acc.parallelToolCallCount > 0 ? ['parallel-threads'] : [],
     subagents: [],
+    dailyUsage: usage.byDay.map((d) => ({
+      day: d.day,
+      inputTokens: d.inputTokens,
+      outputTokens: d.outputTokens,
+      cacheReadTokens: d.cacheReadTokens,
+      cacheCreation5mTokens: d.cacheWrite5m,
+      cacheCreation1hTokens: d.cacheWrite1h,
+      cacheCreationTokens: d.cacheWriteTotal,
+      estimatedCost: d.estimatedCost,
+      responseCount: d.responseCount,
+      // Falls back to the response count for days that only a subagent was
+      // active on — the parent transcript records no message there.
+      messageCount: acc.messagesByDay.get(d.day) ?? d.responseCount,
+      parentEstimatedCost: d.parentEstimatedCost,
+      compactions: compactionsByDay.get(d.day)?.count ?? 0,
+      tokensRemovedByCompaction: compactionsByDay.get(d.day)?.tokens ?? 0,
+      models: d.models.map((m) => ({
+        model: m.model,
+        family: m.family,
+        inputTokens: m.inputTokens,
+        outputTokens: m.outputTokens,
+        cacheReadTokens: m.cacheReadTokens,
+        cacheCreation5mTokens: m.cacheWrite5m,
+        cacheCreation1hTokens: m.cacheWrite1h,
+        estimatedCost: m.estimatedCost ?? 0,
+        turnCount: m.turnCount,
+      })),
+    })),
   }
 }
 
@@ -393,6 +381,14 @@ export async function parseSessionMetadata(
 ): Promise<SessionSummary> {
   const seenUuids = new Set<string>()
   const acc = createMetadataAccumulator(sessionId)
+  // Usage is accounted by the ledger, from this same pass. The accumulator
+  // below collects only the non-usage metadata (timings, tool calls,
+  // compaction, errors) that the ledger does not describe.
+  const ledger = createResponseAccumulator(
+    filePath,
+    { kind: 'parent', projectId, sessionId },
+    pricingTable
+  )
 
   const rl = readline.createInterface({
     input: fs.createReadStream(filePath),
@@ -434,48 +430,31 @@ export async function parseSessionMetadata(
       acc.lastMessageTimestamp = raw.timestamp
     }
 
+    ledger.add(raw)
+
     if (raw.type === 'assistant' && !isSyntheticAssistant(raw)) {
-      processAssistantRecord(raw, acc, pricingTable)
+      processAssistantRecord(raw, acc)
     }
   }
 
-  const summary = buildSessionSummary(sessionId, projectId, acc)
-  summary.subagents = await parseSubagents(filePath, pricingTable)
+  // Subagent turns are separate API calls the parent transcript never records,
+  // so their usage is rolled in. Rolling up through the ledger rather than by
+  // hand is what makes every category reconcile: the previous version added
+  // input, output, cost and cache writes but silently omitted cache reads, so a
+  // session's totals disagreed with its own model breakdown.
+  const { summaries, entries: childEntries } = await parseSubagents(
+    filePath,
+    sessionId,
+    projectId,
+    pricingTable
+  )
 
-  // Roll subagent API costs into session totals — subagent turns are separate
-  // API calls not reflected in the parent session's message.usage fields.
-  for (const sub of summary.subagents) {
-    summary.totalInputTokens += sub.totalInputTokens
-    summary.totalOutputTokens += sub.totalOutputTokens
-    summary.estimatedCost += sub.estimatedCost
-    summary.messageCount += sub.messageCount
-    for (const bd of sub.modelBreakdown) {
-      const existing = summary.modelBreakdown.find((m) => m.model === bd.model)
-      if (existing) {
-        existing.inputTokens += bd.inputTokens
-        existing.outputTokens += bd.outputTokens
-        existing.cacheReadTokens += bd.cacheReadTokens
-        existing.cacheCreation5mTokens += bd.cacheCreation5mTokens
-        existing.cacheCreation1hTokens += bd.cacheCreation1hTokens
-        existing.estimatedCost += bd.estimatedCost
-        existing.turnCount += bd.turnCount
-      } else {
-        summary.modelBreakdown.push({ ...bd })
-      }
-    }
-    summary.totalCacheCreationTokens += sub.modelBreakdown.reduce(
-      (s, bd) => s + bd.cacheCreation5mTokens + bd.cacheCreation1hTokens,
-      0
-    )
-    summary.totalCacheCreation5mTokens += sub.modelBreakdown.reduce(
-      (s, bd) => s + bd.cacheCreation5mTokens,
-      0
-    )
-    summary.totalCacheCreation1hTokens += sub.modelBreakdown.reduce(
-      (s, bd) => s + bd.cacheCreation1hTokens,
-      0
-    )
-  }
+  const usage = projectUsage([...ledger.entries(), ...childEntries])
+  const summary = buildSessionSummary(sessionId, projectId, acc, usage)
+
+  summary.subagents = summaries
+  summary.parentMessageCount = acc.messageCount
+  summary.messageCount = acc.messageCount + summaries.reduce((s, x) => s + x.messageCount, 0)
 
   return summary
 }

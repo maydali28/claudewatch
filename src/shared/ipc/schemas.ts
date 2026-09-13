@@ -8,7 +8,7 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD')
 
 // ─── Date-range schema (mirrors DateRange union from analytics.ts) ─────────────
 
-const DateRangePresetSchema = z.enum(['today', '7d', '30d', '90d', 'all'])
+const DateRangePresetSchema = z.enum(['today', '7d', '30d', 'all'])
 
 const CustomDateRangeSchema = z
   .object({

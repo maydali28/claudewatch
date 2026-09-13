@@ -48,7 +48,7 @@ function ModelTokensChart({ data }: Pick<Props, 'data'>): React.JSX.Element {
         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
         <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatTokens(v)} />
         <Tooltip
-          formatter={(v: number, name: string) => [formatTokens(v), name]}
+          formatter={(v, name) => [formatTokens(Number(v)), String(name)]}
           contentStyle={{ fontSize: 11 }}
         />
         <Legend wrapperStyle={{ fontSize: 11 }} />
@@ -80,7 +80,7 @@ function ModelCostBars({ data }: Pick<Props, 'data'>): React.JSX.Element {
         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
         <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatCost(v)} />
         <Tooltip
-          formatter={(v: number) => [formatCost(v), 'Cost']}
+          formatter={(v) => [formatCost(Number(v)), 'Cost']}
           contentStyle={{ fontSize: 11 }}
         />
         <Bar dataKey="cost" radius={[2, 2, 0, 0]}>

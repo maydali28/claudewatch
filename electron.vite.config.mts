@@ -12,6 +12,20 @@ export default defineConfig({
     define: Object.fromEntries(
       Object.entries(mainEnv).map(([k, v]) => [`process.env.${k}`, JSON.stringify(v)])
     ),
+    build: {
+      rollupOptions: {
+        // The accounting worker is a second entry emitted beside the main one,
+        // so `new Worker(join(__dirname, 'accounting-worker.js'))` resolves in
+        // development and in a packaged app alike.
+        input: {
+          index: resolve('src/main/index.ts'),
+          'accounting-worker': resolve('src/main/services/accounting/worker-entry.ts'),
+        },
+        output: {
+          entryFileNames: '[name].js',
+        },
+      },
+    },
     resolve: {
       alias: {
         '@shared': resolve('src/shared'),

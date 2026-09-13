@@ -11,6 +11,10 @@ import {
   createOrShowOnboardingWindow,
 } from '@main/window-manager'
 import { checkForUpdate } from '@main/services/update-service'
+import { buildTraySnapshot } from '@main/services/tray-snapshot'
+import { getOrScanProjects } from './sessions.handlers'
+import { getActivePricingTable } from '@main/services/pricing-engine'
+import { Preferences } from '@main/store/preferences'
 
 /**
  * Handle tray:open-dashboard — show and focus the main dashboard window.
@@ -18,6 +22,20 @@ import { checkForUpdate } from '@main/services/update-service'
  * getMainWindow is injected to avoid circular imports.
  */
 export function registerTrayHandlers(getMainWindow: () => BrowserWindow | null): void {
+  // ── tray:get-snapshot ──────────────────────────────────────────────────────
+  // Reads the shared scan rather than forcing discovery: the tray polls every
+  // 30 seconds, and making that re-walk every transcript on disk was the single
+  // most expensive thing the app did routinely.
+  ipcMain.handle(CHANNELS.TRAY_GET_SNAPSHOT, async () => {
+    try {
+      const projects = await getOrScanProjects()
+      return ok(buildTraySnapshot(projects, getActivePricingTable(Preferences.get())))
+    } catch (e) {
+      captureHandlerException(e)
+      return err(toSafeError(e), 'TRAY_SNAPSHOT_FAILED')
+    }
+  })
+
   ipcMain.handle(CHANNELS.TRAY_OPEN_DASHBOARD, (_event, raw) => {
     try {
       const navigationTarget = validate(TrayOpenDashboardSchema, raw)

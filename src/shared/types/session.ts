@@ -1,3 +1,5 @@
+import type { ModelFamily } from './pricing'
+
 // ─── Record Types ─────────────────────────────────────────────────────────────
 
 export type RecordType =
@@ -111,6 +113,14 @@ export interface RawRecord {
     preTokens?: number
     timestamp?: string
   }
+  /**
+   * Effort level recorded by Claude Code for this turn. Distinct from the
+   * effort the app infers from output length — this is what was configured,
+   * not what we guessed. Unfamiliar values are preserved as written.
+   */
+  effort?: string
+  /** Present on newer records; useful for provenance and reconciliation. */
+  requestId?: string
 }
 
 // ─── Parsed Record (clean, typed) ─────────────────────────────────────────────
@@ -233,6 +243,57 @@ export interface SubagentSummary {
   modelBreakdown: ModelTokenBreakdown[]
 }
 
+// ─── Per-day usage ────────────────────────────────────────────────────────────
+
+/**
+ * Usage attributed to the calendar day it actually occurred on, derived from
+ * each response's own timestamp.
+ *
+ * Analytics previously bucketed a session's entire lifetime on its last active
+ * day, so resuming yesterday's session today moved yesterday's tokens — and
+ * yesterday's models — into today. Carrying the split on the summary lets the
+ * dashboard answer date-scoped questions without re-reading transcripts.
+ */
+export interface SessionDayModelUsage {
+  /** Exact model string as written. */
+  model: string
+  family: ModelFamily
+  inputTokens: number
+  outputTokens: number
+  /** Needed to price cache savings at this model's own rate, not a proxy's. */
+  cacheReadTokens: number
+  cacheCreation5mTokens: number
+  cacheCreation1hTokens: number
+  estimatedCost: number
+  turnCount: number
+}
+
+export interface SessionDayUsage {
+  /** Local calendar day, `YYYY-MM-DD`. */
+  day: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreation5mTokens: number
+  cacheCreation1hTokens: number
+  cacheCreationTokens: number
+  estimatedCost: number
+  /** Billable API responses on this day. */
+  responseCount: number
+  /** Messages exchanged on this day, user and assistant. */
+  messageCount: number
+  /**
+   * Parent-only cost. Effort is recorded for parent turns, so attributing
+   * effort cost needs the parent's share rather than the combined figure.
+   */
+  parentEstimatedCost: number
+  /** Compaction events that happened on this day. */
+  compactions: number
+  /** Context tokens cleared by those compactions. */
+  tokensRemovedByCompaction: number
+  models: SessionDayModelUsage[]
+}
+
 // ─── Session Summary (lightweight, for sidebar) ───────────────────────────────
 
 export interface SessionSummary {
@@ -245,7 +306,18 @@ export interface SessionSummary {
   lastTimestamp: string
   messageCount: number // parent + subagent messages combined
   parentMessageCount: number // parent session messages only (matches session details panel)
-  primaryModel?: string
+  /**
+   * Model of the most recent *parent* response. This is what a live badge
+   * should show: switching model mid-session updates it immediately, and a
+   * subagent on another model never replaces it.
+   */
+  latestModel?: string
+  /** Parent model with the most responses across the session's life. */
+  dominantModel?: string
+  /** Every exact model seen in this session, parent and subagents. */
+  modelsUsed: string[]
+  /** Responses whose model is unrecognised and therefore excluded from cost. */
+  unpricedResponses: number
   totalInputTokens: number
   totalOutputTokens: number
   totalCacheReadTokens: number
@@ -257,11 +329,16 @@ export interface SessionSummary {
   turnDurations: TurnDuration[]
   estimatedCost: number
   hasError: boolean
-  modelBreakdown: ModelTokenBreakdown[]
   toolCallCount: number
   observability: SessionObservability
   tags?: string[]
   subagents: SubagentSummary[]
+  /**
+   * Usage split by the day it happened, parent and subagents combined. Every
+   * date-scoped figure in analytics is derived from this rather than from the
+   * session's last timestamp.
+   */
+  dailyUsage: SessionDayUsage[]
 }
 
 // ─── Session Metadata ─────────────────────────────────────────────────────────
