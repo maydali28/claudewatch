@@ -255,13 +255,24 @@ function computeCacheAnalytics(
   const hitRatioDenominator = totalFreshInputTokens + totalCacheReadTokens + totalCacheWriteTokens
   const hitRatio = hitRatioDenominator > 0 ? totalCacheReadTokens / hitRatioDenominator : 0
 
-  // Hypothetical uncached cost vs actual
-  // Cost savings = what we saved by reading from cache instead of paying full input price
-  // Approximate: savings = cache_read_tokens * (avg_input_rate - cache_read_rate)
-  // Use sonnet as a proxy for average
-  const sonnetPricing = pricingTable['sonnet-4-6'] ?? pricingTable['unknown']
-  const savingsPerMTok = sonnetPricing.input - sonnetPricing.cacheRead
-  const costSavings = (totalCacheReadTokens / 1_000_000) * savingsPerMTok
+  // What cache reads saved, priced at each model's own rate.
+  //
+  // This used Sonnet 4.6 as a stand-in for every model. On a mixed-model
+  // session that is wrong even when the token counts are right — an Opus read
+  // saves $4.50/MTok where a Sonnet read saves $2.70. An unrecognised model
+  // saves nothing here rather than a guessed amount, matching how its cost is
+  // left unpriced.
+  let costSavings = 0
+  for (const s of sessions) {
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      for (const m of d.models) {
+        if (m.family === 'unknown') continue
+        const p = pricingTable[m.family]
+        if (!p) continue
+        costSavings += (m.cacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
+      }
+    }
+  }
 
   const actualCost = sessions.reduce((s, sess) => s + sess.estimatedCost, 0)
   const hypotheticalUncachedCost = actualCost + costSavings
@@ -292,63 +303,81 @@ function computeCacheAnalytics(
     }
   }
 
-  // Per-session efficiency — same formula: read / (input + read + creation)
+  // Per-session efficiency, scoped to the period and priced from the models the
+  // session actually ran — not from whichever model it used most.
   const sessionEfficiency: SessionCacheEfficiency[] = sessions
-    .filter((s) => s.totalCacheReadTokens + s.totalCacheCreationTokens > 0)
     .map((s) => {
-      const denominator = s.totalInputTokens + s.totalCacheReadTokens + s.totalCacheCreationTokens
-      const hitR = denominator > 0 ? s.totalCacheReadTokens / denominator : 0
-      const family = getModelFamily(s.primaryModel)
-      const p = pricingTable[family] ?? pricingTable['unknown']
-      const savings = (s.totalCacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
+      const days = daysInRange(s, fromKey, toKey)
+      let input = 0
+      let reads = 0
+      let writes = 0
+      let savings = 0
+      for (const d of days) {
+        input += d.inputTokens
+        reads += d.cacheReadTokens
+        writes += d.cacheCreationTokens
+        for (const m of d.models) {
+          if (m.family === 'unknown') continue
+          const p = pricingTable[m.family]
+          if (!p) continue
+          savings += (m.cacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
+        }
+      }
+      const denominator = input + reads + writes
       return {
         id: s.id,
         sessionId: s.id,
         sessionTitle: s.title,
-        hitRatio: hitR,
-        cacheReadTokens: s.totalCacheReadTokens,
-        cacheWriteTokens: s.totalCacheCreationTokens,
+        hitRatio: denominator > 0 ? reads / denominator : 0,
+        cacheReadTokens: reads,
+        cacheWriteTokens: writes,
         savingsAmount: savings,
-        primaryModel: s.primaryModel,
+        primaryModel: s.latestModel ?? s.primaryModel,
       }
     })
+    .filter((e) => e.cacheReadTokens + e.cacheWriteTokens > 0)
     .sort((a, b) => b.cacheReadTokens - a.cacheReadTokens)
     .slice(0, 20)
 
-  // Model savings breakdown
+  // Model savings breakdown, over the selected period.
   const modelSavingsMap = new Map<string, ModelCacheSavings>()
   for (const s of sessions) {
-    for (const bd of s.modelBreakdown) {
-      const family = getModelFamily(bd.model)
-      const p = pricingTable[family] ?? pricingTable['unknown']
-      const savings = (bd.cacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
-      const existing = modelSavingsMap.get(family)
-      if (existing) {
-        existing.cacheReadTokens += bd.cacheReadTokens
-        existing.totalSavings += savings
-      } else {
-        modelSavingsMap.set(family, {
-          id: family,
-          model: family,
-          cacheReadTokens: bd.cacheReadTokens,
-          savingsPerMTok: p.input - p.cacheRead,
-          totalSavings: savings,
-        })
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      for (const m of d.models) {
+        const p = pricingTable[m.family]
+        const perMTok = m.family === 'unknown' || !p ? 0 : p.input - p.cacheRead
+        const savings = (m.cacheReadTokens / 1_000_000) * perMTok
+        const existing = modelSavingsMap.get(m.family)
+        if (existing) {
+          existing.cacheReadTokens += m.cacheReadTokens
+          existing.totalSavings += savings
+        } else {
+          modelSavingsMap.set(m.family, {
+            id: m.family,
+            model: m.family,
+            cacheReadTokens: m.cacheReadTokens,
+            savingsPerMTok: perMTok,
+            totalSavings: savings,
+          })
+        }
       }
     }
   }
 
-  // Tier cost breakdown
-  const cost5m = sessions.reduce((s, sess) => {
-    const family = getModelFamily(sess.primaryModel)
-    const p = pricingTable[family] ?? pricingTable['unknown']
-    return s + (sess.totalCacheCreation5mTokens / 1_000_000) * p.cache5m
-  }, 0)
-  const cost1h = sessions.reduce((s, sess) => {
-    const family = getModelFamily(sess.primaryModel)
-    const p = pricingTable[family] ?? pricingTable['unknown']
-    return s + (sess.totalCacheCreation1hTokens / 1_000_000) * p.cache1h
-  }, 0)
+  // Tier cost breakdown, priced per model rather than at the session's
+  // most-used model — a 5m write on Opus costs more than one on Haiku.
+  let cost5m = 0
+  let cost1h = 0
+  for (const s of sessions) {
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      for (const m of d.models) {
+        const p = pricingTable[m.family]
+        if (m.family === 'unknown' || !p) continue
+        cost5m += (m.cacheCreation5mTokens / 1_000_000) * p.cache5m
+        cost1h += (m.cacheCreation1hTokens / 1_000_000) * p.cache1h
+      }
+    }
+  }
 
   // Compaction analytics
   const compactionSessions = sessions.filter((s) => s.compactionCount > 0)

@@ -260,6 +260,10 @@ export interface SessionDayModelUsage {
   family: ModelFamily
   inputTokens: number
   outputTokens: number
+  /** Needed to price cache savings at this model's own rate, not a proxy's. */
+  cacheReadTokens: number
+  cacheCreation5mTokens: number
+  cacheCreation1hTokens: number
   estimatedCost: number
   turnCount: number
 }

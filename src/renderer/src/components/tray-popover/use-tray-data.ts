@@ -4,6 +4,7 @@ import type { AnalyticsData, SessionSummary } from '@shared/types'
 import type { UpdateInfo } from '@shared/types/project'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
+import { buildWeeklyUsage } from './weekly-usage'
 
 const ACTIVE_SESSION_MS = 60_000
 const REFRESH_INTERVAL_MS = 30_000
@@ -184,13 +185,10 @@ export function useTrayData(): TrayData {
     projectCount: todayAnalytics?.projectCosts.length ?? 0,
   }
 
-  // Use input + output only — matches the dashboard's per-project totalTokens
-  // and the tray hero "Tokens today" (cache reads are excluded).
-  const weeklyUsage = (weeklyAnalytics?.dailyUsage ?? []).slice(-7).map((d) => ({
-    date: d.date,
-    cost: d.estimatedCost,
-    tokens: d.inputTokens + d.outputTokens,
-  }))
+  // Seven real calendar days, quiet ones included as zeros, so "today" and
+  // "yesterday" are actually those days rather than the last two that happened
+  // to have activity.
+  const weeklyUsage = buildWeeklyUsage(weeklyAnalytics?.dailyUsage ?? [])
 
   const { activeSessions, recentSessions } = flattenSessions(allSessions)
 

@@ -101,6 +101,9 @@ const SPLIT_SESSION = session('s1', [
         family: 'opus-5',
         inputTokens: 300,
         outputTokens: 30,
+        cacheReadTokens: 0,
+        cacheCreation5mTokens: 0,
+        cacheCreation1hTokens: 0,
         estimatedCost: 3,
         turnCount: 2,
       },
@@ -119,6 +122,9 @@ const SPLIT_SESSION = session('s1', [
         family: 'sonnet-5',
         inputTokens: 30,
         outputTokens: 3,
+        cacheReadTokens: 0,
+        cacheCreation5mTokens: 0,
+        cacheCreation1hTokens: 0,
         estimatedCost: 1,
         turnCount: 1,
       },
@@ -258,6 +264,116 @@ describe('computeAnalytics — project costs are a breakdown of the period', () 
     const summed = a.projectCosts.reduce((s, p) => s + p.totalTokens, 0)
     expect(summed).toBe(a.totalTokens)
     expect(summed).toBe(330)
+  })
+})
+
+/**
+ * Cache savings were priced with Sonnet 4.6 as a stand-in for every model, and
+ * per-session savings with whichever model the session used most. Both are
+ * wrong for a mixed-model session even when the token counts are right.
+ *
+ * The report's fixture: 100 cache-read tokens on Sonnet, 900 on Opus. At each
+ * model's own rate that is $0.00432; the Sonnet proxy reported $0.00270.
+ */
+describe('computeAnalytics — cache savings use each model’s own rate', () => {
+  const MIXED = session('mixed', [
+    day({
+      day: '2026-09-08',
+      cacheReadTokens: 1000,
+      models: [
+        {
+          model: 'claude-sonnet-4-6',
+          family: 'sonnet-4-6',
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 100,
+          cacheCreation5mTokens: 0,
+          cacheCreation1hTokens: 0,
+          estimatedCost: 0,
+          turnCount: 1,
+        },
+        {
+          model: 'claude-opus-4-6',
+          family: 'opus-4-6',
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 900,
+          cacheCreation5mTokens: 0,
+          cacheCreation1hTokens: 0,
+          estimatedCost: 0,
+          turnCount: 1,
+        },
+      ],
+    }),
+  ])
+
+  it('sums savings at each model’s rate rather than a single proxy', () => {
+    const a = computeAnalytics(
+      [MIXED],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-08', to: '2026-09-08' },
+      ANTHROPIC_PRICING
+    )
+
+    // sonnet: 100 * (3 - 0.3) + opus: 900 * (5 - 0.5), per million
+    expect(a.cacheAnalytics.costSavings).toBeCloseTo(0.00432, 10)
+  })
+
+  it('breaks savings down per model at that model’s rate', () => {
+    const a = computeAnalytics(
+      [MIXED],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-08', to: '2026-09-08' },
+      ANTHROPIC_PRICING
+    )
+
+    const byModel = Object.fromEntries(
+      a.cacheAnalytics.modelSavings.map((m) => [m.model, m.totalSavings])
+    )
+    expect(byModel['sonnet-4-6']).toBeCloseTo(0.00027, 10)
+    expect(byModel['opus-4-6']).toBeCloseTo(0.00405, 10)
+  })
+
+  it('prices a session’s savings from the models it actually used', () => {
+    const a = computeAnalytics(
+      [MIXED],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-08', to: '2026-09-08' },
+      ANTHROPIC_PRICING
+    )
+
+    expect(a.cacheAnalytics.sessionEfficiency[0].savingsAmount).toBeCloseTo(0.00432, 10)
+  })
+
+  it('does not invent savings for an unpriced model', () => {
+    const unknownOnly = session('unknown-only', [
+      day({
+        day: '2026-09-08',
+        cacheReadTokens: 1_000_000,
+        models: [
+          {
+            model: 'claude-future-9',
+            family: 'unknown',
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 1_000_000,
+            cacheCreation5mTokens: 0,
+            cacheCreation1hTokens: 0,
+            estimatedCost: 0,
+            turnCount: 1,
+          },
+        ],
+      }),
+    ])
+
+    const a = computeAnalytics(
+      [unknownOnly],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-08', to: '2026-09-08' },
+      ANTHROPIC_PRICING
+    )
+
+    expect(a.cacheAnalytics.costSavings).toBe(0)
   })
 })
 
