@@ -103,6 +103,52 @@ describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
     expect(unknownModels.size).toBe(0)
   }, 120_000)
 
+  /**
+   * The end-to-end oracle: what the app displays must equal what the ledger
+   * says. Session summaries are built from parent transcripts and roll their
+   * subagents in, so summing them across every project must reproduce the
+   * ledger total over every file — parents and children alike.
+   */
+  it('session summaries reconcile with the ledger across the whole history', async () => {
+    const { parseSessionMetadata } = await import('@main/services/parsers/metadata-parser')
+    const parents = transcripts(root).filter((f) => !f.includes(`${path.sep}subagents${path.sep}`))
+
+    let ledgerCost = 0
+    let ledgerOutput = 0
+    for (const file of transcripts(root)) {
+      const { entries } = await ingestFile(
+        file,
+        { kind: 'parent', projectId: 'p', sessionId: 's' },
+        ANTHROPIC_PRICING
+      )
+      for (const e of entries) {
+        ledgerCost += e.costUsd ?? 0
+        ledgerOutput += e.outputTokens
+      }
+    }
+
+    let summaryCost = 0
+    let summaryOutput = 0
+    for (const file of parents) {
+      const summary = await parseSessionMetadata(
+        file,
+        path.basename(file, '.jsonl'),
+        path.basename(path.dirname(file)),
+        ANTHROPIC_PRICING
+      )
+      summaryCost += summary.estimatedCost
+      summaryOutput += summary.totalOutputTokens
+    }
+
+    console.log(
+      `\n  summaries $${summaryCost.toFixed(2)} / ${summaryOutput.toLocaleString()} output` +
+        `\n  ledger    $${ledgerCost.toFixed(2)} / ${ledgerOutput.toLocaleString()} output`
+    )
+
+    expect(summaryOutput).toBe(ledgerOutput)
+    expect(summaryCost).toBeCloseTo(ledgerCost, 6)
+  }, 180_000)
+
   it('is idempotent on the largest transcript', async () => {
     const files = transcripts(root)
     const largest = files

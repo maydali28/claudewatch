@@ -65,3 +65,12 @@ export const ERROR_SNIPPET_MAX_CHARS = 200
  * thousands of tokens from flooding the alert pipeline.
  */
 export const SECRET_SCAN_MAX_PER_PATTERN = 3
+
+// ─── Subagent parsing ─────────────────────────────────────────────────────────
+
+/**
+ * Cap on subagent transcripts parsed concurrently for one session. A single
+ * session can spawn hundreds; an unbounded fan-out opens that many file
+ * handles at once and starves the event loop.
+ */
+export const SUBAGENT_PARSE_CONCURRENCY = 6

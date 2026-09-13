@@ -266,7 +266,12 @@ export async function parseSessionFull(
     }
   }
 
-  const subagents = await parseSubagents(filePath, pricingTable)
+  const { summaries: subagents } = await parseSubagents(
+    filePath,
+    sessionId,
+    projectId,
+    pricingTable
+  )
 
   let subagentInputTokens = 0
   let subagentOutputTokens = 0

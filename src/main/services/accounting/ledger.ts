@@ -187,21 +187,92 @@ function toEntry(
   }
 }
 
+export interface ResponseAccumulator {
+  /** Feed one raw transcript record. Non-billable records are ignored. */
+  add(raw: RawRecord): void
+  /** Deduplicated responses seen so far. */
+  entries(): ResponseEntry[]
+}
+
+/**
+ * Accumulates billable responses from a stream of raw records.
+ *
+ * Exposed separately from `ingestFile` so a caller that is already iterating a
+ * transcript — the metadata parser, which also collects timings, tool calls and
+ * compaction events — can feed the ledger from that same pass instead of
+ * reading every file twice.
+ */
+export function createResponseAccumulator(
+  filePath: string,
+  source: SourceIdentity,
+  pricingTable: Record<ModelFamily, ModelPricing>
+): ResponseAccumulator {
+  const byResponseId = new Map<string, ResponseEntry>()
+  const seenRecordUuids = new Set<string>()
+
+  return {
+    add(raw: RawRecord): void {
+      if (raw.type !== 'assistant') return
+      if (raw.isCompactSummary === true) return
+      if (raw.isVisibleInTranscriptOnly === true) return
+      if (raw.message?.model === '<synthetic>') return
+
+      // A repeated record uuid is the same stored record seen twice, which is a
+      // different thing from two records sharing one response.
+      if (raw.uuid) {
+        if (seenRecordUuids.has(raw.uuid)) return
+        seenRecordUuids.add(raw.uuid)
+      }
+
+      const usage = raw.message?.usage as RawUsage | undefined
+      if (!usage) return
+
+      const entry = toEntry(raw, usage, source, filePath, pricingTable)
+      if (!entry) return
+
+      const existing = byResponseId.get(entry.responseId)
+      if (!existing) {
+        byResponseId.set(entry.responseId, entry)
+        return
+      }
+
+      // Merge, rather than pick. Streaming transcripts — every subagent file in
+      // measured history, 5,780 of 24,661 responses — emit provisional records
+      // whose output_tokens is a placeholder (1, 2, 3) with a null stop_reason,
+      // followed by a final record carrying the real count. Output only ever
+      // grows, so the largest is the completed one; taking the first would
+      // undercount subagent output by orders of magnitude.
+      existing.snapshotCount++
+      if (entry.outputTokens > existing.outputTokens) {
+        existing.outputTokens = entry.outputTokens
+        existing.thinkingTokens = entry.thinkingTokens ?? existing.thinkingTokens
+        existing.costUsd = entry.costUsd
+        existing.iterationsRaw = entry.iterationsRaw ?? existing.iterationsRaw
+      }
+      if (stableUsageFingerprint(existing) !== stableUsageFingerprint(entry)) {
+        existing.usageConflict = true
+      }
+    },
+    entries(): ResponseEntry[] {
+      return [...byResponseId.values()]
+    },
+  }
+}
+
 /**
  * Read one transcript and return its billable responses, deduplicated.
  *
  * Re-ingesting a file replaces its entries wholesale rather than applying a
  * delta, so replay is idempotent by construction — which is what lets "just
  * re-parse it" serve as the recovery path for any inconsistency. A single file
- * costs ~2ms; the whole history ~1.4s.
+ * costs ~2ms; the whole history ~1.1s.
  */
 export async function ingestFile(
   filePath: string,
   source: SourceIdentity,
   pricingTable: Record<ModelFamily, ModelPricing>
 ): Promise<IngestResult> {
-  const byResponseId = new Map<string, ResponseEntry>()
-  const seenRecordUuids = new Set<string>()
+  const accumulator = createResponseAccumulator(filePath, source, pricingTable)
   let malformedLines = 0
 
   const rl = readline.createInterface({
@@ -213,55 +284,12 @@ export async function ingestFile(
     const trimmed = line.trim()
     if (!trimmed) continue
 
-    let raw: RawRecord
     try {
-      raw = JSON.parse(trimmed) as RawRecord
+      accumulator.add(JSON.parse(trimmed) as RawRecord)
     } catch {
       malformedLines++
-      continue
-    }
-
-    if (raw.type !== 'assistant') continue
-    if (raw.isCompactSummary === true) continue
-    if (raw.isVisibleInTranscriptOnly === true) continue
-    if (raw.message?.model === '<synthetic>') continue
-
-    // A repeated record uuid is the same stored record seen twice, which is a
-    // different thing from two records sharing one response.
-    if (raw.uuid) {
-      if (seenRecordUuids.has(raw.uuid)) continue
-      seenRecordUuids.add(raw.uuid)
-    }
-
-    const usage = raw.message?.usage as RawUsage | undefined
-    if (!usage) continue
-
-    const entry = toEntry(raw, usage, source, filePath, pricingTable)
-    if (!entry) continue
-
-    const existing = byResponseId.get(entry.responseId)
-    if (!existing) {
-      byResponseId.set(entry.responseId, entry)
-      continue
-    }
-
-    // Merge, rather than pick. Streaming transcripts — every subagent file in
-    // measured history, 5,780 of 24,649 responses — emit provisional records
-    // whose output_tokens is a placeholder (1, 2, 3) with a null stop_reason,
-    // followed by a final record carrying the real count. Output only ever
-    // grows, so the largest is the completed one; taking the first would
-    // undercount subagent output by orders of magnitude.
-    existing.snapshotCount++
-    if (entry.outputTokens > existing.outputTokens) {
-      existing.outputTokens = entry.outputTokens
-      existing.thinkingTokens = entry.thinkingTokens ?? existing.thinkingTokens
-      existing.costUsd = entry.costUsd
-      existing.iterationsRaw = entry.iterationsRaw ?? existing.iterationsRaw
-    }
-    if (stableUsageFingerprint(existing) !== stableUsageFingerprint(entry)) {
-      existing.usageConflict = true
     }
   }
 
-  return { entries: [...byResponseId.values()], malformedLines }
+  return { entries: accumulator.entries(), malformedLines }
 }
