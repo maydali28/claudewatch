@@ -10,9 +10,30 @@ function makeId(): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const LOOKBACK_SECRETS_DAYS = 30
-const SEC_MIN_MESSAGES = 10
+export const SEC_MIN_MESSAGES = 10
 const SEC_MAX_TOTAL = 20
 const LINES_TO_SCAN = 50
+
+// ─── Eligibility ──────────────────────────────────────────────────────────────
+
+/**
+ * Whether a session is recent and substantial enough to be worth scanning for
+ * leaked secrets.
+ *
+ * This previously summed `userMessageCount` and `assistantMessageCount`, which
+ * are not fields on SessionSummary. Both read as undefined, so the count was
+ * always zero, no session ever cleared the threshold, and the scan silently did
+ * nothing. `messageCount` is the real field and already covers both roles.
+ */
+export function isSecretScanEligible(
+  session: Pick<SessionSummary, 'lastTimestamp' | 'messageCount'>,
+  now: number = Date.now()
+): boolean {
+  const lastActive = new Date(session.lastTimestamp).getTime()
+  if (Number.isNaN(lastActive)) return false
+  const cutoff = now - LOOKBACK_SECRETS_DAYS * 24 * 60 * 60 * 1000
+  return lastActive >= cutoff && session.messageCount >= SEC_MIN_MESSAGES
+}
 
 // ─── secRules ─────────────────────────────────────────────────────────────────
 
@@ -23,12 +44,7 @@ export async function secRules(
   const results: LintResult[] = []
   const { claudeDir, settings } = context
 
-  const cutoff = Date.now() - LOOKBACK_SECRETS_DAYS * 24 * 60 * 60 * 1000
-
-  const eligibleSessions = sessions.filter((s) => {
-    const messageCount = (s.userMessageCount ?? 0) + (s.assistantMessageCount ?? 0)
-    return new Date(s.lastTimestamp).getTime() >= cutoff && messageCount >= SEC_MIN_MESSAGES
-  })
+  const eligibleSessions = sessions.filter((s) => isSecretScanEligible(s))
 
   // Track per-pattern counts across all files for global cap
   const countPerPattern: Record<string, number> = {}
