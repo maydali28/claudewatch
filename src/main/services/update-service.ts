@@ -20,6 +20,29 @@ function getHazelPlatform(): string | null {
   return null
 }
 
+/**
+ * Owner and repo of the GitHub repository that hosts our releases, derived
+ * from the configured releases URL.
+ *
+ * This exists because the two update mechanisms need two different endpoints,
+ * and conflating them broke updates in 1.2.0. `MAIN_VITE_RELEASE_SERVER_URL`
+ * points at a Hazel deployment, which answers `/update/:platform/:version` and
+ * serves no static files. electron-updater instead wants `latest-mac.yml` /
+ * `latest.yml`, which `release.yml` publishes as GitHub Release assets. Asking
+ * Hazel for `latest-mac.yml` returns 404, so every macOS and Windows update
+ * check failed.
+ *
+ * Deriving owner/repo here and using electron-updater's `github` provider ties
+ * the feed to the same place the release workflow publishes, so the two cannot
+ * drift apart again. Pointing a `generic` feed at a hand-written GitHub URL
+ * would reintroduce exactly that risk.
+ */
+export function parseGithubRepo(url: string): { owner: string; repo: string } | null {
+  const match = /^https?:\/\/(?:www\.)?github\.com\/([^/\s]+)\/([^/\s]+)/i.exec(url.trim())
+  if (!match) return null
+  return { owner: match[1], repo: match[2].replace(/\.git$/i, '') }
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 let _latestInfo: UpdateInfo | null = null
@@ -145,18 +168,24 @@ function initAutoUpdater(): void {
   autoUpdater.autoDownload = false
   autoUpdater.autoInstallOnAppQuit = false
 
-  if (!RELEASES_BASE_URL) {
-    log.warn('[UpdateService] MAIN_VITE_RELEASE_SERVER_URL not set — auto-updater disabled')
+  // Note this reads the GitHub releases URL, not the Hazel one: Hazel only
+  // backs the Linux path below and serves no static manifests.
+  const repo = parseGithubRepo(AppConfig.githubReleasesUrl)
+  if (!repo) {
+    log.warn(
+      '[UpdateService] MAIN_VITE_GITHUB_RELEASES_URL is missing or not a github.com URL — auto-updater disabled'
+    )
     pushUpdateServiceError(
-      'The update server URL is not configured. Auto-updates are disabled for this build.'
+      'The update source is not configured for this build. Auto-updates are disabled.'
     )
     return
   }
 
+  log.info('[UpdateService] Update feed: github %s/%s', repo.owner, repo.repo)
   autoUpdater.setFeedURL({
-    provider: 'generic',
-    url: RELEASES_BASE_URL,
-    useMultipleRangeRequest: false,
+    provider: 'github',
+    owner: repo.owner,
+    repo: repo.repo,
   })
 
   autoUpdater.on('update-available', (info) => {

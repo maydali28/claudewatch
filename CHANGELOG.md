@@ -1,3 +1,10 @@
+## 1.2.1 (2026-09-13)
+
+
+### Bug Fixes
+
+* **deps:** clear the 12 tar advisories, verified against a real package build
+* **update:** point the updater at github releases, not the hazel server
 ## 1.2.0 (2026-09-13)
 
 
