@@ -140,6 +140,8 @@ If you'd rather not memorise the format, run `pnpm commit` — it launches an in
 Releases follow gitflow, and the version is bumped **by hand**: feature branches merge into `develop`, `develop` merges into `main` via PR, and a version tag on that merge commit triggers the build.
 
 1. **Bump `version` in `package.json` yourself**, on your feature/chore branch or directly on `develop`, and commit it. Run `pnpm changelog` and commit `CHANGELOG.md` in the same breath so the release notes match the version.
+
+   > **Run `pnpm changelog` against `main`, not `develop`.** Version tags sit on the `develop → main` merge commits, and because nothing is ever merged back from `main`, those commits are not ancestors of `develop`. From `develop` the newest reachable tag is `v1.0.0`, so `conventional-changelog` walks every commit since 1.0.0 and re-lists features that already shipped. Generate the file while `main` is checked out, then carry the result on your branch.
 2. Merge that branch into `develop`.
 3. Merge `develop` into `main` via PR. `commitlint` runs on the PR; CI (`ci.yml`) runs on the push. The resulting merge commit on `main` is what gets tagged.
 4. On an up-to-date, clean `main`, tag it with exactly the version already in `package.json`:
