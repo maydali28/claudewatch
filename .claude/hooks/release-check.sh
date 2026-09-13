@@ -64,8 +64,11 @@ done
 # Set by gate mode when the command names an explicit version (e.g. v1.2.0).
 TARGET_TAG=""
 # Set by gate mode to the kind of release command seen:
-#   manual-tag — creating or pushing a tag, the flow this repo uses
-#   scripted   — pnpm release / pnpm publish / electron-forge publish
+#   create-tag  — `git tag vX.Y.Z`: the tag must NOT exist yet
+#   publish-tag — `git push ... vX.Y.Z`: the tag MUST already exist
+#   scripted    — pnpm release / pnpm publish / electron-forge publish
+# The two tag steps are opposites about whether the tag exists, so they cannot
+# share one set of checks.
 GATE_KIND=""
 
 PASS=()
@@ -91,7 +94,14 @@ collect_git_state() {
     *)           PHASE="feature" ;;
   esac
 
-  LAST_TAG="$(git tag --list 'v*' --sort=-v:refname 2>/dev/null | head -n1)"
+  # When publishing an existing tag, that tag is the release being shipped,
+  # not the previous one — exclude it so "commits since the last release" and
+  # the newer-than-last-tag check still compare against the prior release.
+  if [ "$GATE_KIND" = "publish-tag" ] && [ -n "$TARGET_TAG" ]; then
+    LAST_TAG="$(git tag --list 'v*' --sort=-v:refname 2>/dev/null | grep -vx "$TARGET_TAG" | head -n1)"
+  else
+    LAST_TAG="$(git tag --list 'v*' --sort=-v:refname 2>/dev/null | head -n1)"
+  fi
   LAST_VERSION="${LAST_TAG#v}"
   [ -n "$LAST_VERSION" ] || LAST_VERSION="0.0.0"
 
@@ -226,7 +236,22 @@ collect_git_state() {
     RELEASE_TAG="$TARGET_TAG"
   fi
 
-  if git rev-parse --verify --quiet "refs/tags/v$PKG_VERSION" >/dev/null; then
+  if [ "$GATE_KIND" = "publish-tag" ]; then
+    # Publishing: the tag must already exist locally and must sit on HEAD, so
+    # that what gets built is the commit currently checked out on main.
+    if ! git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG" >/dev/null; then
+      fail "$RELEASE_TAG does not exist locally — create the tag before pushing it"
+    else
+      local tagged_sha head_sha
+      tagged_sha="$(git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG^{commit}")"
+      head_sha="$(git rev-parse --verify --quiet HEAD)"
+      if [ "$tagged_sha" = "$head_sha" ]; then
+        ok "$RELEASE_TAG exists locally and points at HEAD ($(git rev-parse --short HEAD))"
+      else
+        fail "$RELEASE_TAG points at ${tagged_sha:0:7} but HEAD is ${head_sha:0:7} — the release would build a different commit than the one checked out"
+      fi
+    fi
+  elif git rev-parse --verify --quiet "refs/tags/v$PKG_VERSION" >/dev/null; then
     if [ "$PHASE" = "tag" ]; then
       fail "v$PKG_VERSION is already tagged — package.json was not bumped for this release. Bump it (commits since $LAST_TAG suggest $SUGGESTED), merge through develop, then tag."
     else
@@ -448,14 +473,18 @@ case "$MODE" in
     # the words does not trip the gate. Plain `git tag` (listing) and pushes of
     # ordinary branches are left alone.
     SEG='(^|[;&|])[[:space:]]*'
-    # The flow this repo uses: create or push a version tag.
-    MANUAL_RE="${SEG}(git[[:space:]]+tag[[:space:]]+(-a|-s|-m|-f|v?[0-9])|git[[:space:]]+push[[:space:]].*(--tags|--follow-tags|[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+))"
+    # Step 4 of the flow: create the tag. It must not exist yet.
+    CREATE_RE="${SEG}git[[:space:]]+tag[[:space:]]+(-a|-s|-m|-f|v?[0-9])"
+    # Step 5: push it. It must already exist.
+    PUBLISH_RE="${SEG}git[[:space:]]+push[[:space:]].*(--tags|--follow-tags|[[:space:]]v[0-9]+\.[0-9]+\.[0-9]+)"
     # The scripted flow, which this repo has never used.
     SCRIPTED_RE="${SEG}((pnpm|npm run|yarn)[[:space:]]+(release|publish)([[:space:]]|$)|node[[:space:]]+scripts/release\.mjs|(npx[[:space:]]+)?electron-forge[[:space:]]+publish)"
     if printf '%s\n' "$SCAN" | grep -qE "$SCRIPTED_RE"; then
       GATE_KIND="scripted"
-    elif printf '%s\n' "$SCAN" | grep -qE "$MANUAL_RE"; then
-      GATE_KIND="manual-tag"
+    elif printf '%s\n' "$SCAN" | grep -qE "$PUBLISH_RE"; then
+      GATE_KIND="publish-tag"
+    elif printf '%s\n' "$SCAN" | grep -qE "$CREATE_RE"; then
+      GATE_KIND="create-tag"
     else
       exit 0
     fi
