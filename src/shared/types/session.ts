@@ -28,12 +28,7 @@ export interface TokenUsage {
 // ─── Content Blocks ───────────────────────────────────────────────────────────
 
 export type AnyCodableValue =
-  | string
-  | number
-  | boolean
-  | null
-  | AnyCodableValue[]
-  | { [key: string]: AnyCodableValue }
+  string | number | boolean | null | AnyCodableValue[] | { [key: string]: AnyCodableValue }
 
 export interface TextBlock {
   type: 'text'

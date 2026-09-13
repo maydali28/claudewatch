@@ -215,7 +215,13 @@ jobs:
         id: changelog
         run: |
           node scripts/extract-release-notes.mjs > release-notes.md
-          if [ ! -s release-notes.md ]; then
+          # Test for visible content, not for a non-zero file size. The script
+          # always appends a trailing newline, so a section with no entries —
+          # a release made up entirely of hidden commit types, e.g. only chore
+          # — yields a 1-byte file. That passes `-s`, the fallback never fires,
+          # and the release publishes with an empty body.
+          if ! grep -q '[^[:space:]]' release-notes.md; then
+            echo "::warning::changelog section for this release is empty; falling back to the full CHANGELOG"
             cp CHANGELOG.md release-notes.md
           fi
 
