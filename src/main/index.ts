@@ -47,6 +47,13 @@ let fileWatcher: FileWatcher | null = null
 // macOS close-button handler from intercepting the actual quit sequence.
 let isQuitting = false
 
+// How long to let Squirrel hand the install request to ShipIt before we quit,
+// and how long to wait after that before exiting the hard way. The handoff is
+// near-instant in practice (measured well under a second), so these are safety
+// margins, not expected waits.
+const UPDATE_QUIT_HANDOFF_MS = 2_000
+const UPDATE_QUIT_HARD_EXIT_MS = 5_000
+
 function bootstrap(): void {
   // Must run before app.whenReady() — @sentry/electron requires it.
   initSentryEarly()
@@ -226,8 +233,27 @@ function bootstrap(): void {
   //   target app — SQRLInstallerErrorDomain Code=-9 "App Still Running Error"
   //
   // which is why "Install & Restart" appeared to do nothing.
+  //
+  // Setting the flag is necessary but NOT sufficient. ClaudeWatch is a tray app:
+  // `window-all-closed` deliberately does not quit on macOS, and nothing in the
+  // update path ever calls app.quit(). So the windows closed, Squirrel handed
+  // the install request to ShipIt, and then the process simply kept running.
+  // ShipIt waits for the target app to exit, times out, and aborts with the very
+  // same error — which is why "Install & Restart" still did nothing after the
+  // flag alone was added. Quit ourselves once the handoff has had a moment.
   app.on('before-quit-for-update', () => {
     isQuitting = true
+    setTimeout(() => {
+      log.info('Quitting so ShipIt can install the update')
+      app.quit()
+      // app.quit() is cooperative — anything that prevents the quit would leave
+      // ShipIt waiting again. Exiting is strictly better than a silent no-op:
+      // the update is already staged and ShipIt relaunches us afterwards.
+      setTimeout(() => {
+        log.warn('Quit did not complete — exiting so the update can proceed')
+        app.exit(0)
+      }, UPDATE_QUIT_HARD_EXIT_MS)
+    }, UPDATE_QUIT_HANDOFF_MS)
   })
 
   // ─── Keep process alive on all windows closed (tray app) ───────────────────
