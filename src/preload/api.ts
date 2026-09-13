@@ -88,8 +88,6 @@ export const api = {
     download: () => invoke(CHANNELS.UPDATES_DOWNLOAD),
 
     install: () => invoke(CHANNELS.UPDATES_INSTALL),
-
-    brewUpgrade: () => invoke(CHANNELS.UPDATES_BREW_UPGRADE),
   },
 
   // ─── Tray ─────────────────────────────────────────────────────────────────

@@ -173,6 +173,28 @@ export function createTrayPopoverWindow(): BrowserWindow {
   // to consult the tray's bounds to distinguish "user clicked the tray icon"
   // (let the tray click handler toggle) from "user clicked elsewhere" (hide).
 
+  // The popover must never be destroyed while the app runs: no application
+  // menu is set, so Electron's default menu is active and Cmd+W closes the
+  // focused window — which this panel is after popover.focus(). Intercept
+  // close and hide instead; let the real close through during app quit.
+  let quitting = false
+  const markQuitting = (): void => {
+    quitting = true
+  }
+  app.once('before-quit', markQuitting)
+  win.on('close', (event) => {
+    if (!quitting) {
+      event.preventDefault()
+      win.hide()
+    }
+  })
+  win.on('closed', () => {
+    app.removeListener('before-quit', markQuitting)
+    if (trayPopoverWindow === win) {
+      trayPopoverWindow = null
+    }
+  })
+
   // Load tray popover with ?window=tray query param so renderer knows which
   // root component to mount
   if (DEV_SERVER_URL) {
@@ -381,12 +403,25 @@ export function createOrShowOnboardingWindow(launchAtLogin: boolean): BrowserWin
  * expose icon geometry — in that case we fall back to the cursor position
  * on the display under the cursor, which is the closest approximation of
  * where the user just clicked.
+ *
+ * On macOS with multiple displays the status item exists in every display's
+ * menu bar, and the bounds Electron reports may belong to a display other
+ * than the one that was clicked. The cursor is authoritative for where the
+ * click happened, so bounds that resolve to a different display than the
+ * cursor are treated as unreliable and the cursor is used instead.
  */
 export function positionPopoverUnderTray(win: BrowserWindow, trayBounds: Electron.Rectangle): void {
   const { width: popW, height: popH } = win.getBounds()
+  const cursor = screen.getCursorScreenPoint()
 
-  const useFallback = trayBounds.width === 0 || trayBounds.height === 0
-  const anchor = useFallback ? screen.getCursorScreenPoint() : { x: trayBounds.x, y: trayBounds.y }
+  const boundsUsable = trayBounds.width > 0 && trayBounds.height > 0
+  const boundsOnCursorDisplay =
+    boundsUsable &&
+    screen.getDisplayNearestPoint({ x: trayBounds.x, y: trayBounds.y }).id ===
+      screen.getDisplayNearestPoint(cursor).id
+
+  const useFallback = !boundsOnCursorDisplay
+  const anchor = useFallback ? cursor : { x: trayBounds.x, y: trayBounds.y }
 
   const display = screen.getDisplayNearestPoint(anchor)
   const { bounds: dBounds } = display
@@ -395,9 +430,9 @@ export function positionPopoverUnderTray(win: BrowserWindow, trayBounds: Electro
   let y: number
 
   if (useFallback) {
-    // No tray geometry — center the popover horizontally under the cursor and
-    // pin it to the top of the display (where the menu bar / panel typically
-    // lives on Linux desktops).
+    // No trustworthy tray geometry — center the popover horizontally under
+    // the cursor and pin it to the top of the display (where the menu bar /
+    // panel lives).
     x = Math.round(anchor.x - popW / 2)
     y = dBounds.y + 4
   } else {

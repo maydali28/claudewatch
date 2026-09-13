@@ -1,6 +1,10 @@
-import { BrowserWindow, Tray, Menu, nativeImage, app, shell } from 'electron'
+import { BrowserWindow, Tray, Menu, nativeImage, app, screen, shell } from 'electron'
 import { join } from 'path'
-import { createTrayPopoverWindow, positionPopoverUnderTray } from './window-manager'
+import {
+  createTrayPopoverWindow,
+  getTrayPopoverWindow,
+  positionPopoverUnderTray,
+} from './window-manager'
 
 let tray: Tray | null = null
 
@@ -41,14 +45,18 @@ function buildTrayIcon(hasAlert = false): Electron.NativeImage {
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
 
-function buildContextMenu(mainWindow: BrowserWindow, popover: BrowserWindow): Electron.Menu {
+function buildContextMenu(mainWindow: BrowserWindow): Electron.Menu {
   return Menu.buildFromTemplate([
     {
       label: 'Open Dashboard',
       click: () => {
-        if (!popover.isDestroyed() && popover.isVisible()) {
+        // Read the popover through the module-level getter — the instance can
+        // be re-created at runtime, so a captured reference would go stale.
+        const popover = getTrayPopoverWindow()
+        if (popover && !popover.isDestroyed() && popover.isVisible()) {
           popover.hide()
         }
+        if (mainWindow.isDestroyed()) return
         if (process.platform === 'darwin') {
           app.dock?.show()
         } else {
@@ -62,7 +70,9 @@ function buildContextMenu(mainWindow: BrowserWindow, popover: BrowserWindow): El
     {
       label: 'Check for Updates',
       click: () => {
-        mainWindow.webContents.send('push:check-update-request')
+        if (!mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('push:check-update-request')
+        }
       },
     },
     {
@@ -81,27 +91,48 @@ function buildContextMenu(mainWindow: BrowserWindow, popover: BrowserWindow): El
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/**
+ * True when the mouse cursor is currently inside the tray icon's bounds.
+ * Used by the popover blur handler to recognise "this blur was caused by a
+ * click on the tray icon" — in that case the tray `click` handler owns the
+ * toggle. Returns false when the platform reports no usable tray geometry
+ * (e.g. Linux AppIndicator).
+ */
+function isCursorOverTray(): boolean {
+  if (!tray) return false
+  const bounds = tray.getBounds()
+  if (bounds.width === 0 || bounds.height === 0) return false
+  const point = screen.getCursorScreenPoint()
+  return (
+    point.x >= bounds.x &&
+    point.x <= bounds.x + bounds.width &&
+    point.y >= bounds.y &&
+    point.y <= bounds.y + bounds.height
+  )
+}
+
+// Clicking the tray while the popover is open and focused fires `blur`
+// *before* the tray `click` event. When the blur handler can't attribute the
+// blur to a tray click (see isCursorOverTray — tray geometry is unreliable on
+// some platforms/multi-display setups) it hides the popover and records the
+// time here; a tray click arriving within this window ON THE SAME DISPLAY is
+// the second half of that same dismissal and must not re-open the popover.
+// A click from a different display is a summon, not a dismissal — see the
+// click handler.
+const BLUR_TOGGLE_WINDOW_MS = 300
+
+/** Display the window currently occupies, judged by its top-center point. */
+function displayIdOf(win: BrowserWindow): number {
+  const b = win.getBounds()
+  return screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y }).id
+}
+
 export function setupTray(mainWindow: BrowserWindow): Tray {
   tray = new Tray(buildTrayIcon())
   tray.setToolTip('ClaudeWatch')
 
-  // Create (but don't show) tray popover window up-front so it loads in the
-  // background and pops instantly when the user clicks the tray icon.
-  const popover = createTrayPopoverWindow()
-
-  // macOS: set the panel's window level to 'pop-up-menu' — the documented
-  // level for menubar-style popovers. Keeps the panel above regular windows
-  // but below system overlays (Notification Center, Mission Control).
-  if (process.platform === 'darwin') {
-    popover.setAlwaysOnTop(true, 'pop-up-menu')
-  }
-
-  // Do NOT call setContextMenu on macOS/Windows — it makes left-click show the
-  // menu instead of (or in addition to) our popover, causing a double-popup.
-  // (Linux uses setContextMenu via the platform branch further down — see
-  // there for the explanation.) The menu is built after the popover so the
-  // "Open Dashboard" handler can dismiss the popover.
-  const contextMenu = buildContextMenu(mainWindow, popover)
+  let hiddenByBlurAt = 0
+  let hiddenByBlurDisplayId = -1
 
   // Auto-dismiss model: the popover hides when it loses focus to anything
   // outside our own windows. Two subtleties make this non-trivial:
@@ -109,9 +140,11 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
   // 1. Re-opening race — clicking the tray while the popover is open fires
   //    `blur` *before* the tray `click` handler. A naive "hide on blur,
   //    toggle on click" sees `isVisible() === false` in the click handler
-  //    and re-opens the popover the user just dismissed. Solved here by an
-  //    explicit `ignoreNextBlur` flag set by the click handler whenever it
-  //    initiates a hide — the blur handler consumes and clears the flag.
+  //    and re-opens the popover the user just dismissed. Handled twice over:
+  //    the blur handler skips hiding when the cursor is over the tray icon
+  //    (the click handler completes the toggle), and the click handler
+  //    ignores clicks that arrive within BLUR_TOGGLE_WINDOW_MS of a
+  //    blur-initiated hide for the cases where tray geometry lies.
   //
   // 2. Show/focus is not atomic on Linux — under many X11 and Wayland
   //    compositors the popover transitions through a transient unfocused
@@ -124,60 +157,114 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
   //    popover is a `panel` shown via showInactive(), which doesn't always
   //    fire a real `focus` event, so applying the gate would suppress
   //    every dismissal.
-  const requiresFocusGate = process.platform === 'linux'
-  let hasBeenFocused = !requiresFocusGate
-  let ignoreNextBlur = false
+  function initPopover(): BrowserWindow {
+    // Created (but not shown) up-front so it loads in the background and pops
+    // instantly when the user clicks the tray icon.
+    const win = createTrayPopoverWindow()
 
-  popover.on('focus', () => {
-    hasBeenFocused = true
-  })
-
-  popover.on('hide', () => {
-    hasBeenFocused = !requiresFocusGate
-    ignoreNextBlur = false
-  })
-
-  popover.on('blur', () => {
-    if (popover.isDestroyed() || !popover.isVisible()) return
-
-    if (ignoreNextBlur) {
-      ignoreNextBlur = false
-      return
+    // macOS: set the panel's window level to 'pop-up-menu' — the documented
+    // level for menubar-style popovers. Keeps the panel above regular windows
+    // but below system overlays (Notification Center, Mission Control).
+    if (process.platform === 'darwin') {
+      win.setAlwaysOnTop(true, 'pop-up-menu')
     }
 
-    // Linux only: wait for the popover to actually take focus before
-    // honouring blur, otherwise transient unfocused states during show()
-    // dismiss it.
-    if (!hasBeenFocused) return
+    const requiresFocusGate = process.platform === 'linux'
+    let hasBeenFocused = !requiresFocusGate
 
-    // Don't hide if focus moved to one of our own child windows (update /
-    // about / onboarding windows opened from inside the popover).
-    const ownWindows = BrowserWindow.getAllWindows().filter((w) => w.id !== popover.id)
-    const focusedIsOwn = ownWindows.some((w) => w.isFocused())
-    if (focusedIsOwn) return
+    win.on('focus', () => {
+      hasBeenFocused = true
+    })
 
-    popover.hide()
-  })
+    win.on('hide', () => {
+      hasBeenFocused = !requiresFocusGate
+    })
+
+    win.on('blur', () => {
+      if (win.isDestroyed() || !win.isVisible()) return
+
+      // Blur caused by a click on the tray icon — the tray click handler
+      // fires next and owns the toggle. Hiding here would make that click
+      // see a hidden popover and re-open it.
+      if (isCursorOverTray()) return
+
+      // Linux only: wait for the popover to actually take focus before
+      // honouring blur, otherwise transient unfocused states during show()
+      // dismiss it.
+      if (!hasBeenFocused) return
+
+      // Don't hide if focus moved to one of our own child windows (update /
+      // about / onboarding windows opened from inside the popover).
+      const ownWindows = BrowserWindow.getAllWindows().filter((w) => w.id !== win.id)
+      const focusedIsOwn = ownWindows.some((w) => w.isFocused())
+      if (focusedIsOwn) return
+
+      // Remember where the popover was when this blur hid it — the tray
+      // click handler uses it to tell a same-display dismissal apart from a
+      // cross-display summon.
+      hiddenByBlurDisplayId = displayIdOf(win)
+      win.hide()
+      hiddenByBlurAt = Date.now()
+    })
+
+    return win
+  }
+
+  let popover = initPopover()
+
+  // Do NOT call setContextMenu on macOS/Windows — it makes left-click show the
+  // menu instead of (or in addition to) our popover, causing a double-popup.
+  // (Linux uses setContextMenu via the platform branch further down — see
+  // there for the explanation.)
+  const contextMenu = buildContextMenu(mainWindow)
 
   tray.on('click', (_event, trayBounds) => {
-    if (popover.isDestroyed()) return
+    // The popover can still be destroyed by forces outside our control
+    // (e.g. a crashed window). Re-create it instead of leaving the tray dead.
+    if (popover.isDestroyed()) {
+      popover = initPopover()
+    }
+
+    const cursorDisplayId = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).id
+
+    const showPopover = (): void => {
+      positionPopoverUnderTray(popover, trayBounds)
+      // show() on macOS activates the app and can switch Spaces when the app
+      // is hidden from the Dock. showInactive() displays the panel in place
+      // on the current Space without triggering app activation.
+      if (process.platform === 'darwin') {
+        popover.showInactive()
+        popover.focus()
+      } else {
+        popover.show()
+        popover.focus()
+      }
+    }
+
     if (popover.isVisible()) {
-      ignoreNextBlur = true
-      popover.hide()
+      // Toggle-close only applies on the display the popover is on. A click
+      // from another display means "show it here" — reposition instead of
+      // hiding, or the user sees their click do nothing.
+      if (displayIdOf(popover) === cursorDisplayId) {
+        popover.hide()
+        return
+      }
+      showPopover()
       return
     }
 
-    positionPopoverUnderTray(popover, trayBounds)
-    // show() on macOS activates the app and can switch Spaces when the app
-    // is hidden from the Dock. showInactive() displays the panel in place
-    // on the current Space without triggering app activation.
-    if (process.platform === 'darwin') {
-      popover.showInactive()
-      popover.focus()
-    } else {
-      popover.show()
-      popover.focus()
+    // This click's mousedown already dismissed the popover via blur — don't
+    // treat the mouseup as a request to re-open it. Only applies when the
+    // dismissal happened on the display being clicked; a cross-display click
+    // is a summon, not the tail end of a dismissal.
+    if (
+      Date.now() - hiddenByBlurAt < BLUR_TOGGLE_WINDOW_MS &&
+      hiddenByBlurDisplayId === cursorDisplayId
+    ) {
+      return
     }
+
+    showPopover()
   })
 
   // Context menu binding diverges by platform:
