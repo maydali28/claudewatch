@@ -75,6 +75,7 @@
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "verify:accounting": "VERIFY_ACCOUNTING=1 vitest run src/main/services/accounting/verify-real-history.test.ts --reporter=verbose",
     "package": "electron-vite build && electron-forge package",
     "make": "electron-vite build && electron-forge make",
     "publish": "electron-vite build && electron-forge publish",

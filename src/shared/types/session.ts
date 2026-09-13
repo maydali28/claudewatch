@@ -111,6 +111,14 @@ export interface RawRecord {
     preTokens?: number
     timestamp?: string
   }
+  /**
+   * Effort level recorded by Claude Code for this turn. Distinct from the
+   * effort the app infers from output length — this is what was configured,
+   * not what we guessed. Unfamiliar values are preserved as written.
+   */
+  effort?: string
+  /** Present on newer records; useful for provenance and reconciliation. */
+  requestId?: string
 }
 
 // ─── Parsed Record (clean, typed) ─────────────────────────────────────────────
