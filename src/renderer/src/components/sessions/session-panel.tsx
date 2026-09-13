@@ -11,6 +11,7 @@ import {
   Layers,
 } from 'lucide-react'
 import { EmptyState } from '@renderer/components/shared/empty-state'
+import { windowAfterScroll, windowAfterAppend } from './render-window'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { format } from 'date-fns'
 import { useSessionsStore } from '@renderer/store/sessions.store'
@@ -210,6 +211,10 @@ export default function SessionPanel(): React.JSX.Element {
   const detailsPanelRef = useRef<HTMLDivElement>(null)
   const isResizing = useRef(false)
   const isAtBottomRef = useRef(true)
+  // True once the last record has been mounted, which is what distinguishes
+  // "reading the live tail" from "still near the top of a long transcript".
+  const reachedEndRef = useRef(false)
+  const visibleCountRef = useRef(INITIAL_RENDER_BATCH)
   // Upper bound for the render-ahead logic in the scroll handler. Kept in a
   // ref so the handler doesn't need to close over the latest filtered length.
   const totalRecordsRef = useRef(0)
@@ -253,11 +258,17 @@ export default function SessionPanel(): React.JSX.Element {
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     isAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX
     if (isAtBottomRef.current) setShowScrollButton(false)
-    // Eagerly expand the render window when the user scrolls near the rendered
-    // tail. Without this the idle scheduler can't keep up with fast scrolling.
-    if (distanceFromBottom <= RENDER_AHEAD_PX) {
-      setVisibleCount((c) => Math.min(totalRecordsRef.current, c + INCREMENT_RENDER_BATCH))
-    }
+    // Grow the render window as the reader approaches the rendered tail.
+    setVisibleCount((c) =>
+      windowAfterScroll(
+        c,
+        totalRecordsRef.current,
+        distanceFromBottom,
+        INCREMENT_RENDER_BATCH,
+        RENDER_AHEAD_PX
+      )
+    )
+    if (visibleCountRef.current >= totalRecordsRef.current) reachedEndRef.current = true
   }, [])
 
   const scrollToBottom = useCallback(() => {
@@ -288,20 +299,27 @@ export default function SessionPanel(): React.JSX.Element {
     isAtBottomRef.current = true
   }, [activeSessionId])
 
-  // Background-expand the render window during idle time until every record
-  // is mounted. requestIdleCallback yields between batches so the main thread
-  // stays responsive to scroll, search typing, and other interactions.
+  // Keep up with a live session for a reader who has already read to the end.
+  // The window is not expanded otherwise: mounting a whole transcript nobody
+  // scrolled through is what made long sessions expensive to open.
   useEffect(() => {
     if (!parsedSession) return
     const total = parsedSession.records.length
-    if (visibleCount >= total) return
-    const ric = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 1))
-    const cic = window.cancelIdleCallback ?? ((id: number) => window.clearTimeout(id))
-    const handle = ric(() => {
-      setVisibleCount((c) => Math.min(total, c + INCREMENT_RENDER_BATCH))
-    })
-    return () => cic(handle as number)
+    if (visibleCount >= total) reachedEndRef.current = true
+    setVisibleCount((c) =>
+      windowAfterAppend(c, total, reachedEndRef.current, isAtBottomRef.current)
+    )
   }, [parsedSession, visibleCount])
+
+  useEffect(() => {
+    visibleCountRef.current = visibleCount
+  }, [visibleCount])
+
+  // A different session, or a different search, means the reader is no longer
+  // at the end of anything they had read.
+  useEffect(() => {
+    reachedEndRef.current = false
+  }, [activeSessionId, searchQuery])
 
   useEffect(() => {
     if (searchOpen) searchInputRef.current?.focus()
