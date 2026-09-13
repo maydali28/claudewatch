@@ -1,3 +1,40 @@
+## 1.3.0 (2026-09-13)
+
+> **Your reported costs will drop, and historical charts will change shape.**
+> Usage was counted once per transcript record rather than once per API
+> response, so totals were overstated — measured at about 2.4x across a full
+> local history. Usage is also attributed to the day it actually happened
+> instead of to each session's last active day, so past days that previously
+> showed nothing now show their real figures. Cached session data is rebuilt
+> automatically on first launch.
+
+### Features
+
+* **accounting:** count usage once per api response
+* **analytics:** drop the 90-day range option
+
+### Bug Fixes
+
+* **accounting:** correct session totals, subagent rollup and model badge
+* **analytics:** count only the turns that happened in the selected period
+* **analytics:** label model charts with their model names again
+* **analytics:** make every tab report the period you selected
+* **analytics:** price cache savings per model and compare real days
+* **analytics:** put usage on the day it actually happened
+* **analytics:** scope project costs to the selected period
+* **lint-rules:** repair two rules that silently never ran
+* **pricing:** recognise current models and refuse to price unknown ones
+* **pricing:** refresh cached costs when rates change
+* **sessions:** correct the token and cost figures in session details
+* **sessions:** show the model a session is currently on
+* **types:** clear the 22 errors the working typecheck exposed
+* **watcher:** log a failed re-parse instead of crashing the app
+
+### Performance Improvements
+
+* **accounting:** parse transcripts off the main thread
+* **sessions:** only render the part of a transcript you have reached
+* **tray:** stop rescanning every transcript to open the popover
 ## 1.2.10 (2026-09-13)
 
 
