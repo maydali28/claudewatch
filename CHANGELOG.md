@@ -1,3 +1,9 @@
+## 1.2.0 (2026-09-13)
+
+
+### Features
+
+* **update:** switch macos auto-update to electron-updater
 ## 1.1.2 (2026-06-29)
 
 

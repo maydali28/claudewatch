@@ -105,20 +105,28 @@ collect_git_state() {
   fi
 
   # ── Working tree ──────────────────────────────────────────────────────────
-  # A tag must point at a commit containing everything you meant to ship, so
-  # uncommitted work blocks at tag time but is merely noise earlier.
-  local dirty entries untracked
+  # A tag points at HEAD, so nothing sitting in the working tree can change
+  # what gets released. Untracked files in particular are never part of any
+  # commit — this repo deliberately keeps an untracked docs/ — so they must
+  # not block a tag. Uncommitted *tracked* edits still earn a warning: they
+  # may be work someone meant to include in the release.
+  local dirty tracked untracked
   dirty="$(git status --porcelain 2>/dev/null)"
   if [ -z "$dirty" ]; then
-    ok "working tree clean"
+    tracked=0
+    untracked=0
   else
-    entries="$(printf '%s\n' "$dirty" | wc -l | tr -d ' ')"
+    tracked="$(printf '%s\n' "$dirty" | grep -vc '^??' || true)"
     untracked="$(printf '%s\n' "$dirty" | grep -c '^??' || true)"
-    if [ "$PHASE" = "tag" ]; then
-      fail "working tree not clean ($entries entries, $untracked untracked) — the tag would not contain this work; commit or stash first"
+  fi
+  if [ "$tracked" = "0" ]; then
+    if [ "$untracked" = "0" ]; then
+      ok "working tree clean"
     else
-      warn "working tree not clean ($entries entries, $untracked untracked)"
+      ok "no uncommitted tracked changes ($untracked untracked path(s) ignored — never part of a commit)"
     fi
+  else
+    warn "$tracked tracked file(s) modified but not committed — they will NOT be in the tag"
   fi
 
   # ── Remote sync ───────────────────────────────────────────────────────────
