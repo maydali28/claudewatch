@@ -6,7 +6,7 @@ import type {
   SessionSearchResult,
   ExportRequest,
 } from '@shared/types/session'
-import type { AnalyticsData, DateRange } from '@shared/types/analytics'
+import type { AnalyticsData, DateRange, TraySnapshot } from '@shared/types/analytics'
 import type {
   ExtendedConfig,
   CommandEntry,
@@ -138,6 +138,10 @@ export interface IPCContracts {
   'updates:install': {
     request: void
     response: Result<void>
+  }
+  'tray:get-snapshot': {
+    request: void
+    response: Result<TraySnapshot>
   }
   'tray:open-dashboard': {
     request: { sessionId?: string; projectId?: string }

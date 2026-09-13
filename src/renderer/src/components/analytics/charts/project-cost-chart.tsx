@@ -36,14 +36,14 @@ export function ProjectCostChart({ data }: Props): React.JSX.Element {
           tickFormatter={(v: string) => (v.length > 18 ? v.slice(-18) : v)}
         />
         <Tooltip
-          formatter={(v: number) => [formatCost(v), 'Cost']}
+          formatter={(v) => [formatCost(Number(v)), 'Cost']}
           contentStyle={{ fontSize: 11 }}
         />
         <Bar dataKey="totalCost" fill="#6366f1" radius={[0, 2, 2, 0]}>
           <LabelList
             dataKey="totalCost"
             position="right"
-            formatter={(v: number) => formatCost(v)}
+            formatter={(v: unknown) => formatCost(Number(v))}
             style={{ fontSize: 10 }}
           />
         </Bar>

@@ -14,7 +14,11 @@ vi.mock('electron-log', () => ({
 }))
 vi.mock('@main/window-manager', () => ({ broadcastToRenderers: () => {} }))
 
-const { parseGithubRepo, htmlReleaseNotesToMarkdown } = await import('./update-service')
+// A static import is safe here: vitest hoists the `vi.mock` calls above it, so
+// the stubs are registered before the module is evaluated. Top-level `await`
+// cannot be used — this project compiles to CommonJS for the Electron main
+// process, where TypeScript rejects it.
+import { parseGithubRepo, htmlReleaseNotesToMarkdown } from './update-service'
 
 describe('parseGithubRepo', () => {
   // Regression guard for the 1.2.0 updater outage: the feed was pointed at the

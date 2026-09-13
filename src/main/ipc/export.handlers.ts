@@ -7,6 +7,8 @@ import { captureHandlerException } from '@main/services/sentry'
 import { validate, ExportSchema } from '@shared/ipc/schemas'
 import { getClaudeDir } from '@main/lib/claude-paths'
 import { parseSessionFull } from '@main/services/session-parser'
+import { getActivePricingTable } from '@main/services/pricing-engine'
+import { Preferences } from '@main/store/preferences'
 import { sessionCache } from '@shared/utils'
 import { writeExport } from '@main/services/export-service'
 
@@ -20,7 +22,12 @@ export function registerExportHandlers(): void {
         const claudeDir = getClaudeDir()
         const projectsDir = path.join(claudeDir, 'projects')
         const sessionFilePath = assertSafePath(projectsDir, projectId, `${sessionId}.jsonl`)
-        parsedSession = await parseSessionFull(sessionFilePath, sessionId, projectId)
+        parsedSession = await parseSessionFull(
+          sessionFilePath,
+          sessionId,
+          projectId,
+          getActivePricingTable(Preferences.get())
+        )
         sessionCache.set(sessionId, parsedSession)
       }
       const writtenPath = await writeExport(parsedSession, format, outputPath)

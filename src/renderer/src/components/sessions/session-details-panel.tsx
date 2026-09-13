@@ -152,9 +152,15 @@ export default function SessionDetailsPanel({
   const totalTokensRemoved = compactionEvents.reduce((sum, e) => sum + (e.preTokens ?? 0), 0)
   const peakContextTokens =
     compactionEvents.length > 0 ? Math.max(...compactionEvents.map((e) => e.preTokens ?? 0)) : 0
-  const primaryModel = sessionSummary?.primaryModel ?? metadata.models[0]
-  const inputRatePerMillion = ANTHROPIC_PRICING[getModelFamily(primaryModel)]?.input ?? 3.0
-  const estimatedCostAvoided = (totalTokensRemoved / 1_000_000) * inputRatePerMillion
+  const primaryModel = sessionSummary?.dominantModel ?? metadata.models[0]
+  // Null when the model is unrecognised. `unknown` prices at zero, so a numeric
+  // fallback here would render a confident $0.00 that reads as "no compaction
+  // happened" rather than "we cannot price this".
+  const compactionFamily = getModelFamily(primaryModel)
+  const estimatedCostAvoided =
+    compactionFamily === 'unknown'
+      ? null
+      : (totalTokensRemoved / 1_000_000) * ANTHROPIC_PRICING[compactionFamily].input
 
   const effortDist = metadata.effortDistribution
   const totalEffortTurns =
@@ -300,8 +306,12 @@ export default function SessionDetailsPanel({
                 />
                 <StatRow
                   label="Cost avoided"
-                  value={formatCost(estimatedCostAvoided)}
-                  hint={`Estimated savings from not re-sending those tokens as fresh input (@ $${inputRatePerMillion}/M for ${primaryModel ?? 'this model'})`}
+                  value={estimatedCostAvoided === null ? '—' : formatCost(estimatedCostAvoided)}
+                  hint={
+                    estimatedCostAvoided === null
+                      ? `Not priced: ${primaryModel ?? 'this model'} is not a recognised model, so no rate applies`
+                      : `Estimated savings from not re-sending those tokens as fresh input (@ $${ANTHROPIC_PRICING[compactionFamily].input}/M for ${primaryModel ?? 'this model'})`
+                  }
                 />
               </div>
               {/* Per-event timeline */}

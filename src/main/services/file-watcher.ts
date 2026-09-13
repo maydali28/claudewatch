@@ -4,12 +4,14 @@ import type { BrowserWindow } from 'electron'
 import chokidar from 'chokidar'
 import { CHANNELS } from '@shared/ipc/channels'
 import { sessionCache } from '@shared/utils'
-import { parseSessionMetadata } from './session-parser'
-import { getPricingTable } from '@shared/constants/pricing'
+import { getActivePricingTable } from './pricing-engine'
+import { accountingWorker } from './accounting/worker-client'
 import { Preferences } from '@main/store/preferences'
 import { patchCachedSessionSummary } from '@main/ipc/sessions.handlers'
 import { scanFileDelta } from './secret-scanner'
 import { createLogger } from '@main/lib/logger'
+import { resolveSessionFileLocation, type SessionFileLocation } from './session-file-location'
+import { ReparseScheduler } from './reparse-scheduler'
 import {
   FILE_WATCHER_DEBOUNCE_MS,
   FILE_WATCHER_WRITE_FINISH_STABILITY_MS,
@@ -19,25 +21,6 @@ import {
 const log = createLogger('FileWatcher')
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-interface SessionFileLocation {
-  projectId: string
-  sessionId: string
-}
-
-function resolveSessionFileLocation(
-  filePath: string,
-  projectsDir: string
-): SessionFileLocation | null {
-  const relativePath = path.relative(projectsDir, filePath)
-  const parts = relativePath.split(path.sep)
-  if (parts.length !== 2) return null
-
-  return {
-    projectId: parts[0],
-    sessionId: path.basename(parts[1], '.jsonl'),
-  }
-}
 
 function buildSecretFingerprint(checkId: string, maskedValue: string): string {
   return `${checkId}:${maskedValue}`
@@ -80,18 +63,26 @@ export interface FileWatcherDeps {
 export class FileWatcher {
   private watcher: FSWatcher | null = null
   private settingsWatcher: FSWatcher | null = null
-  private debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
+  private scheduler: ReparseScheduler
+  /**
+   * Paths first seen via an `add` event. Held here rather than passed through
+   * the scheduler because a burst can mix an add with later changes, and the
+   * session is still new the first time we actually parse it.
+   */
+  private newFiles: Set<string> = new Set()
   private claudeDir: string
   private deps: FileWatcherDeps
   // Tracks the byte offset up to which each session file has already been scanned
   // for secrets, so we only ever process genuinely new content.
   private secretScanOffsets: Map<string, number> = new Map()
-  // Files currently being parsed — additional change events are skipped until done.
-  private pendingParse: Set<string> = new Set()
-
   constructor(claudeDir: string, deps: FileWatcherDeps) {
     this.claudeDir = claudeDir
     this.deps = deps
+    this.scheduler = new ReparseScheduler(
+      (filePath) => this.processFileChange(filePath),
+      FILE_WATCHER_DEBOUNCE_MS,
+      (filePath, error) => log.error(`Failed to re-parse ${path.basename(filePath)}:`, error)
+    )
   }
 
   start(): void {
@@ -124,15 +115,18 @@ export class FileWatcher {
       },
     })
 
-    this.settingsWatcher.on('change', (filePath) => this.scheduleProcessing(filePath, false))
-    this.settingsWatcher.on('add', (filePath) => this.scheduleProcessing(filePath, true))
+    this.settingsWatcher.on('change', (filePath) => this.scheduler.schedule(filePath))
+    this.settingsWatcher.on('add', (filePath) => this.scheduler.schedule(filePath))
     this.settingsWatcher.on('error', (error) => log.error('Settings watcher error:', error))
 
     this.watcher.on('ready', () => {
       /* watcher initialised */
     })
-    this.watcher.on('change', (filePath) => this.scheduleProcessing(filePath, false))
-    this.watcher.on('add', (filePath) => this.scheduleProcessing(filePath, true))
+    this.watcher.on('change', (filePath) => this.scheduler.schedule(filePath))
+    this.watcher.on('add', (filePath) => {
+      this.newFiles.add(filePath)
+      this.scheduler.schedule(filePath)
+    })
     this.watcher.on('error', (error) => log.error('Watcher error:', error))
   }
 
@@ -145,31 +139,11 @@ export class FileWatcher {
       this.settingsWatcher.close().catch((error) => log.error('Settings close error:', error))
       this.settingsWatcher = null
     }
-    for (const timer of this.debounceTimers.values()) {
-      clearTimeout(timer)
-    }
-    this.debounceTimers.clear()
+    this.scheduler.stop()
   }
 
-  private scheduleProcessing(filePath: string, isNewFile: boolean): void {
-    // Skip scheduling if a parse for this file is already in-flight.
-    if (this.pendingParse.has(filePath)) return
-
-    const existingTimer = this.debounceTimers.get(filePath)
-    if (existingTimer) clearTimeout(existingTimer)
-
-    const timer = setTimeout(() => {
-      this.debounceTimers.delete(filePath)
-      this.pendingParse.add(filePath)
-      this.processFileChange(filePath, isNewFile)
-        .catch((error) => log.error('processFileChange error:', error))
-        .finally(() => this.pendingParse.delete(filePath))
-    }, FILE_WATCHER_DEBOUNCE_MS)
-
-    this.debounceTimers.set(filePath, timer)
-  }
-
-  private async processFileChange(filePath: string, isNewFile: boolean): Promise<void> {
+  private async processFileChange(filePath: string): Promise<void> {
+    const isNewFile = this.newFiles.delete(filePath)
     if (filePath.endsWith('settings.json')) {
       this.deps.broadcast(CHANNELS.PUSH_CONFIG_CHANGED, { filePath })
       return
@@ -181,7 +155,8 @@ export class FileWatcher {
     const location = resolveSessionFileLocation(filePath, projectsDir)
     if (!location) return
 
-    await this.processSessionFileChange(filePath, location, isNewFile)
+    // A subagent write updates the parent session; it never creates one.
+    await this.processSessionFileChange(filePath, location, isNewFile && !location.isSubagent)
   }
 
   private async processSessionFileChange(
@@ -193,9 +168,17 @@ export class FileWatcher {
 
     try {
       const preferences = Preferences.get()
-      const pricingTable = getPricingTable(preferences.pricingProvider)
-      const sessionSummary = await parseSessionMetadata(
-        filePath,
+      // The active table, not the bare provider default: the watcher used to
+      // ignore the user's pricing overrides, so a session's cost changed the
+      // moment the app restarted and rescanned it.
+      const pricingTable = getActivePricingTable(preferences)
+      // Always parse the parent transcript: it discovers its own subagents and
+      // rolls their usage up. A child's own path would parse only the child.
+      const parentPath = location.isSubagent
+        ? path.join(this.claudeDir, 'projects', projectId, `${sessionId}.jsonl`)
+        : filePath
+      const sessionSummary = await accountingWorker.parseSession(
+        parentPath,
         sessionId,
         projectId,
         pricingTable

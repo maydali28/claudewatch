@@ -1,58 +1,86 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as readline from 'readline'
-import type { RawRecord, SubagentSummary, ModelTokenBreakdown } from '@shared/types/session'
+import type { RawRecord, SubagentSummary } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
-import { getModelFamily } from '@shared/constants/models'
-import { estimateCost } from '@shared/constants/pricing'
-import { isSyntheticAssistant, isToolResultCarrierUser, parseTokenUsage } from './parser-helpers'
+import { pLimit } from '@main/lib/p-limit'
+import { SUBAGENT_PARSE_CONCURRENCY } from '@shared/constants/tuning'
+import {
+  createResponseAccumulator,
+  type ResponseEntry,
+  type SourceIdentity,
+} from '@main/services/accounting/ledger'
+import { projectUsage } from '@main/services/accounting/projection'
+import { isSyntheticAssistant, isToolResultCarrierUser } from './parser-helpers'
+
+export interface SubagentParseResult {
+  summaries: SubagentSummary[]
+  /** Ledger entries for every subagent, for rollup into the parent session. */
+  entries: ResponseEntry[]
+}
 
 /**
  * Discover and parse subagent transcripts written alongside a session.
  *
  * Subagents (Task tool) get their own JSONL files in
- * `<session>/subagents/agent-<id>.jsonl`. We aggregate per-agent token spend
- * so the parent session view can attribute costs accurately.
+ * `<session>/subagents/agent-<id>.jsonl`. Their usage is real API spend that
+ * the parent transcript does not record, so it must be rolled up — including
+ * cache reads, which the previous implementation dropped.
  */
 export async function parseSubagents(
   sessionFilePath: string,
+  sessionId: string,
+  projectId: string,
   pricingTable: Record<ModelFamily, ModelPricing>
-): Promise<SubagentSummary[]> {
+): Promise<SubagentParseResult> {
   const sessionDir = sessionFilePath.replace(/\.jsonl$/, '')
   const subagentsDir = path.join(sessionDir, 'subagents')
 
   let files: string[]
   try {
-    const entries = await fs.promises.readdir(subagentsDir, { withFileTypes: true })
-    files = entries
+    const dirEntries = await fs.promises.readdir(subagentsDir, { withFileTypes: true })
+    files = dirEntries
       .filter((e) => e.isFile() && e.name.endsWith('.jsonl') && !e.name.includes('compact'))
       .map((e) => e.name)
   } catch {
-    return []
+    return { summaries: [], entries: [] }
   }
 
-  const results = await Promise.all(
-    files.map((file) => parseSingleSubagent(path.join(subagentsDir, file), file, pricingTable))
+  // Bounded: a single session can have hundreds of subagents, and an unbounded
+  // fan-out opens that many file handles at once.
+  const limit = pLimit(SUBAGENT_PARSE_CONCURRENCY)
+  const parsed = await Promise.all(
+    files.map((file) =>
+      limit(() =>
+        parseSingleSubagent(path.join(subagentsDir, file), file, sessionId, projectId, pricingTable)
+      )
+    )
   )
-  return results.filter((s): s is SubagentSummary => s !== null)
+
+  const summaries: SubagentSummary[] = []
+  const entries: ResponseEntry[] = []
+  for (const result of parsed) {
+    if (!result) continue
+    summaries.push(result.summary)
+    entries.push(...result.entries)
+  }
+  return { summaries, entries }
 }
 
 async function parseSingleSubagent(
   filePath: string,
   fileName: string,
+  sessionId: string,
+  projectId: string,
   pricingTable: Record<ModelFamily, ModelPricing>
-): Promise<SubagentSummary | null> {
+): Promise<{ summary: SubagentSummary; entries: ResponseEntry[] } | null> {
   const agentId = fileName.replace(/^agent-/, '').replace(/\.jsonl$/, '')
+  const source: SourceIdentity = { kind: 'subagent', projectId, sessionId, agentId }
+  const accumulator = createResponseAccumulator(filePath, source, pricingTable)
 
   let messageCount = 0
-  let totalInputTokens = 0
-  let totalOutputTokens = 0
-  let estimatedCost = 0
   let firstTimestamp: string | undefined
   let lastTimestamp: string | undefined
-  let primaryModel: string | undefined
-  let maxTurnCount = 0
-  const modelBreakdownMap = new Map<string, ModelTokenBreakdown>()
 
   try {
     const rl = readline.createInterface({
@@ -73,57 +101,9 @@ async function parseSingleSubagent(
       if (raw.timestamp) lastTimestamp = raw.timestamp
 
       if (raw.type === 'user' && !isToolResultCarrierUser(raw)) messageCount++
-      if (raw.type === 'assistant' && !isSyntheticAssistant(raw)) {
-        messageCount++
+      if (raw.type === 'assistant' && !isSyntheticAssistant(raw)) messageCount++
 
-        const usage = parseTokenUsage(raw)
-        totalInputTokens += usage.inputTokens
-        totalOutputTokens += usage.outputTokens
-
-        const model = raw.message?.model
-        const family = getModelFamily(model)
-        const cache5m = usage.cacheCreation?.ephemeral5mInputTokens ?? 0
-        const cache1h = usage.cacheCreation?.ephemeral1hInputTokens ?? 0
-        const turnCost = estimateCost(
-          family,
-          usage.inputTokens,
-          usage.outputTokens,
-          usage.cacheReadInputTokens,
-          cache5m,
-          cache1h,
-          pricingTable
-        )
-        estimatedCost += turnCost
-
-        if (model) {
-          const existing = modelBreakdownMap.get(model)
-          if (existing) {
-            existing.inputTokens += usage.inputTokens
-            existing.outputTokens += usage.outputTokens
-            existing.cacheReadTokens += usage.cacheReadInputTokens
-            existing.cacheCreation5mTokens += cache5m
-            existing.cacheCreation1hTokens += cache1h
-            existing.estimatedCost += turnCost
-            existing.turnCount++
-          } else {
-            modelBreakdownMap.set(model, {
-              model,
-              inputTokens: usage.inputTokens,
-              outputTokens: usage.outputTokens,
-              cacheReadTokens: usage.cacheReadInputTokens,
-              cacheCreation5mTokens: cache5m,
-              cacheCreation1hTokens: cache1h,
-              estimatedCost: turnCost,
-              turnCount: 1,
-            })
-          }
-          const count = modelBreakdownMap.get(model)!.turnCount
-          if (count > maxTurnCount) {
-            maxTurnCount = count
-            primaryModel = model
-          }
-        }
-      }
+      accumulator.add(raw)
     }
   } catch {
     return null
@@ -131,15 +111,30 @@ async function parseSingleSubagent(
 
   if (messageCount === 0) return null
 
+  const entries = accumulator.entries()
+  const usage = projectUsage(entries)
+
   return {
-    agentId,
-    messageCount,
-    totalInputTokens,
-    totalOutputTokens,
-    primaryModel,
-    firstTimestamp: firstTimestamp ?? '',
-    lastTimestamp: lastTimestamp ?? '',
-    estimatedCost,
-    modelBreakdown: Array.from(modelBreakdownMap.values()),
+    summary: {
+      agentId,
+      messageCount,
+      totalInputTokens: usage.combined.inputTokens,
+      totalOutputTokens: usage.combined.outputTokens,
+      primaryModel: usage.modelBreakdown[0]?.model,
+      firstTimestamp: firstTimestamp ?? '',
+      lastTimestamp: lastTimestamp ?? '',
+      estimatedCost: usage.combined.estimatedCost,
+      modelBreakdown: usage.modelBreakdown.map((m) => ({
+        model: m.model,
+        inputTokens: m.inputTokens,
+        outputTokens: m.outputTokens,
+        cacheReadTokens: m.cacheReadTokens,
+        cacheCreation5mTokens: m.cacheWrite5m,
+        cacheCreation1hTokens: m.cacheWrite1h,
+        estimatedCost: m.estimatedCost ?? 0,
+        turnCount: m.turnCount,
+      })),
+    },
+    entries,
   }
 }

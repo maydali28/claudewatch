@@ -170,7 +170,7 @@ function EffortDonut({
         />
         <YAxis tick={{ fontSize: 10 }} />
         <Tooltip
-          formatter={(v: number, name: string) => [v, name]}
+          formatter={(v, name) => [Number(v), String(name)]}
           contentStyle={{ fontSize: 11 }}
         />
         <Bar dataKey="value" name="Turns" radius={[2, 2, 0, 0]}>

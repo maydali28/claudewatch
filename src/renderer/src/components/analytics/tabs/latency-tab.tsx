@@ -70,7 +70,7 @@ function PercentilesChart({ data }: { data: LatencyAnalytics }): React.JSX.Eleme
         />
         <YAxis dataKey="label" type="category" tick={{ fontSize: 11 }} width={90} />
         <Tooltip
-          formatter={(v: number) => [fmtMs(v), 'Duration']}
+          formatter={(v) => [fmtMs(Number(v)), 'Duration']}
           contentStyle={{ fontSize: 11 }}
         />
         {/* Median reference line */}
@@ -83,7 +83,7 @@ function PercentilesChart({ data }: { data: LatencyAnalytics }): React.JSX.Eleme
         <Bar
           dataKey="value"
           radius={[0, 3, 3, 0]}
-          label={{ position: 'right', fontSize: 10, formatter: (v: number) => fmtMs(v) }}
+          label={{ position: 'right', fontSize: 10, formatter: (v: unknown) => fmtMs(Number(v)) }}
         >
           {bars.map((b, i) => (
             <Cell key={i} fill={b.color} />
@@ -118,7 +118,7 @@ function LatencyHistogram({ data }: { data: LatencyAnalytics }): React.JSX.Eleme
           <XAxis dataKey="label" tick={{ fontSize: 11 }} />
           <YAxis tick={{ fontSize: 10 }} />
           <Tooltip
-            formatter={(v: number) => [v, 'Turns']}
+            formatter={(v) => [Number(v), 'Turns']}
             labelFormatter={(l) =>
               `${l} — ${total > 0 ? (((data.histogram.find((b) => b.label === l)?.count ?? 0) / total) * 100).toFixed(0) : 0}% of turns`
             }

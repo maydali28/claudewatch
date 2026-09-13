@@ -38,7 +38,7 @@ export function ParallelToolsChart({ data }: Props): React.JSX.Element {
           />
           <YAxis tick={{ fontSize: 10 }} />
           <Tooltip
-            formatter={(v: number) => [v, 'Occurrences']}
+            formatter={(v) => [Number(v), 'Occurrences']}
             labelFormatter={(l) => `${l} tools`}
             contentStyle={{ fontSize: 11 }}
           />

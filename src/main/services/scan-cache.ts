@@ -1,9 +1,10 @@
 import type { SessionSummary } from '@shared/types/session'
+import type { ScanProjectsResult } from './accounting/worker-protocol'
 import { Preferences } from '@main/store/preferences'
-import { scanProjects } from './project-scanner'
 import { getActivePricingTable } from './pricing-engine'
+import { accountingWorker } from './accounting/worker-client'
 
-type ScanResult = Awaited<ReturnType<typeof scanProjects>>
+type ScanResult = ScanProjectsResult
 
 /**
  * In-memory cache of the last full project scan.
@@ -15,6 +16,7 @@ type ScanResult = Awaited<ReturnType<typeof scanProjects>>
  */
 class ScanCache {
   private current: ScanResult | null = null
+  private inFlight: Promise<ScanResult> | null = null
 
   /**
    * Returns the cached scan, performing a fresh scan if the cache is empty.
@@ -30,10 +32,24 @@ class ScanCache {
    * Force a fresh scan and replace the cache.
    */
   async refresh(): Promise<ScanResult> {
+    // Share one in-flight scan. Without this, concurrent cold requests — the
+    // tray and the dashboard opening together — each start a full scan, and the
+    // slower one overwrites the newer result when it finishes.
+    if (this.inFlight) return this.inFlight
+
     const prefs = Preferences.get()
     const pricingTable = getActivePricingTable(prefs)
-    this.current = await scanProjects(pricingTable)
-    return this.current
+    this.inFlight = accountingWorker
+      .scanProjects(pricingTable)
+      .then((result) => {
+        this.current = result
+        return result
+      })
+      .finally(() => {
+        this.inFlight = null
+      })
+
+    return this.inFlight
   }
 
   /**

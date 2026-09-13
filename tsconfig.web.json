@@ -2,6 +2,7 @@
   "include": ["src/renderer/**/*", "src/preload/**/*", "src/shared/**/*"],
   "compilerOptions": {
     "composite": true,
+    "ignoreDeprecations": "6.0",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
@@ -16,13 +17,14 @@
     "skipLibCheck": true,
     "noEmit": false,
     "jsx": "react-jsx",
-    "outDir": "dist/renderer",
+    "outDir": "dist/types/renderer",
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/shared/*"],
       "@renderer/*": ["src/renderer/src/*"],
       "@preload/*": ["src/preload/*"],
       "@/*": ["src/renderer/src/*"]
-    }
+    },
+    "emitDeclarationOnly": true
   }
 }
