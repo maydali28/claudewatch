@@ -152,7 +152,7 @@ export default function SessionDetailsPanel({
   const totalTokensRemoved = compactionEvents.reduce((sum, e) => sum + (e.preTokens ?? 0), 0)
   const peakContextTokens =
     compactionEvents.length > 0 ? Math.max(...compactionEvents.map((e) => e.preTokens ?? 0)) : 0
-  const primaryModel = sessionSummary?.primaryModel ?? metadata.models[0]
+  const primaryModel = sessionSummary?.dominantModel ?? metadata.models[0]
   // Null when the model is unrecognised. `unknown` prices at zero, so a numeric
   // fallback here would render a confident $0.00 that reads as "no compaction
   // happened" rather than "we cannot price this".

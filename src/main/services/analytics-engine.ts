@@ -340,7 +340,7 @@ function computeCacheAnalytics(
         cacheReadTokens: reads,
         cacheWriteTokens: writes,
         savingsAmount: savings,
-        primaryModel: s.latestModel ?? s.primaryModel,
+        primaryModel: s.latestModel ?? s.dominantModel,
       }
     })
     .filter((e) => e.cacheReadTokens + e.cacheWriteTokens > 0)
@@ -416,7 +416,7 @@ function computeCacheAnalytics(
   // be attributed to a specific model. Unrecognised models avoid nothing
   // rather than a guessed amount.
   const costAvoidedFor = (r: CompactionRollup): number => {
-    const family = getModelFamily(r.session.dominantModel ?? r.session.primaryModel)
+    const family = getModelFamily(r.session.dominantModel)
     const p = pricingTable[family]
     if (family === 'unknown' || !p) return 0
     return (r.tokensRemoved / 1_000_000) * p.input
@@ -432,7 +432,7 @@ function computeCacheAnalytics(
       totalTokensRemoved: r.tokensRemoved,
       peakContextTokens: r.compactions > 0 ? Math.round(r.tokensRemoved / r.compactions) : 0,
       estimatedCostAvoided: costAvoidedFor(r),
-      primaryModel: r.session.dominantModel ?? r.session.primaryModel,
+      primaryModel: r.session.dominantModel,
     }))
 
   const estimatedCostAvoided = ranked.reduce((n, r) => n + costAvoidedFor(r), 0)
@@ -592,7 +592,7 @@ function computeLatencyAnalytics(
         turnIndex: td.turnIndex,
         durationMs: td.durationMs,
         isPostCompaction: td.isPostCompaction,
-        model: td.model ?? s.primaryModel,
+        model: td.model ?? s.dominantModel,
       })
     }
   }

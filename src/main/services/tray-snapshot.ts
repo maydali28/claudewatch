@@ -61,7 +61,6 @@ function toTraySession(s: SessionSummary): TraySnapshotSession {
     title: s.title,
     slug: s.slug,
     latestModel: s.latestModel,
-    primaryModel: s.primaryModel,
     messageCount: s.messageCount,
     totalInputTokens: s.totalInputTokens,
     totalOutputTokens: s.totalOutputTokens,

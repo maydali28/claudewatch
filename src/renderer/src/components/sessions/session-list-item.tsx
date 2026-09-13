@@ -195,9 +195,9 @@ export default function SessionListItem({
           </span>
           {/* Latest, not dominant: the badge answers "what is this session on
               now", which is not the same question as "what did it use most". */}
-          {(session.latestModel ?? session.primaryModel) &&
+          {(session.latestModel ?? session.dominantModel) &&
             (() => {
-              const meta = getModelMeta(session.latestModel ?? session.primaryModel)
+              const meta = getModelMeta(session.latestModel ?? session.dominantModel)
               return (
                 <span
                   className={`rounded-sm px-1 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}

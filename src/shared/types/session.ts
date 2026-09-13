@@ -307,12 +307,6 @@ export interface SessionSummary {
   messageCount: number // parent + subagent messages combined
   parentMessageCount: number // parent session messages only (matches session details panel)
   /**
-   * @deprecated Ambiguous — it meant "most-used model", but was read as "the
-   * model this session is on". Kept as an alias of `dominantModel` while
-   * callers migrate. Use `latestModel` for a live badge.
-   */
-  primaryModel?: string
-  /**
    * Model of the most recent *parent* response. This is what a live badge
    * should show: switching model mid-session updates it immediately, and a
    * subagent on another model never replaces it.
@@ -335,7 +329,6 @@ export interface SessionSummary {
   turnDurations: TurnDuration[]
   estimatedCost: number
   hasError: boolean
-  modelBreakdown: ModelTokenBreakdown[]
   toolCallCount: number
   observability: SessionObservability
   tags?: string[]

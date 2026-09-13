@@ -130,9 +130,13 @@ describe('parseSessionMetadata — subagent rollup', () => {
     )
 
     const summary = await parseSessionMetadata(file, 'reconcile', 'proj', ANTHROPIC_PRICING)
-    const fromBreakdown = summary.modelBreakdown.reduce((s, m) => s + m.cacheReadTokens, 0)
+    // Per-model usage now lives on the day rows, which is what the model charts
+    // read; the session total must still be the sum of its parts.
+    const fromModels = summary.dailyUsage
+      .flatMap((d) => d.models)
+      .reduce((n, m) => n + m.cacheReadTokens, 0)
 
-    expect(fromBreakdown).toBe(summary.totalCacheReadTokens)
+    expect(fromModels).toBe(summary.totalCacheReadTokens)
   })
 })
 

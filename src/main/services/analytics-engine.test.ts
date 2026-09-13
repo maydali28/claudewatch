@@ -54,7 +54,6 @@ function session(id: string, dailyUsage: SessionDayUsage[]): SessionSummary {
     turnDurations: [],
     estimatedCost: sum((d) => d.estimatedCost),
     hasError: false,
-    modelBreakdown: [],
     toolCallCount: 0,
     observability: {
       dominantEffortLevel: 'low',

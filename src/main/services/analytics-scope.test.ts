@@ -58,7 +58,6 @@ function session(
     turnDurations: [],
     estimatedCost: 0,
     hasError: false,
-    modelBreakdown: [],
     toolCallCount: 0,
     observability: {
       dominantEffortLevel: 'low',
