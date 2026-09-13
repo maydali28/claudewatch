@@ -1,4 +1,4 @@
-import { app, BrowserWindow, screen, shell } from 'electron'
+import { app, autoUpdater as squirrelUpdater, BrowserWindow, screen, shell } from 'electron'
 import { join } from 'path'
 import { Preferences } from './store/preferences'
 import type { UpdateInfo } from '@shared/types/project'
@@ -191,7 +191,8 @@ export function createTrayPopoverWindow(): BrowserWindow {
   // An update quit emits 'before-quit-for-update' instead of 'before-quit', so
   // without this the popover refuses to close and keeps the process alive,
   // which makes Squirrel's ShipIt abort the install. See src/main/index.ts.
-  app.once('before-quit-for-update', markQuitting)
+  // Emitted by Electron's built-in autoUpdater, not by `app`.
+  squirrelUpdater.once('before-quit-for-update', markQuitting)
   win.on('close', (event) => {
     if (!quitting) {
       event.preventDefault()
@@ -200,7 +201,7 @@ export function createTrayPopoverWindow(): BrowserWindow {
   })
   win.on('closed', () => {
     app.removeListener('before-quit', markQuitting)
-    app.removeListener('before-quit-for-update', markQuitting)
+    squirrelUpdater.removeListener('before-quit-for-update', markQuitting)
     if (trayPopoverWindow === win) {
       trayPopoverWindow = null
     }
