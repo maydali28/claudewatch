@@ -228,6 +228,39 @@ describe('computeAnalytics — model usage is scoped to the period', () => {
   })
 })
 
+/**
+ * Project costs are a breakdown of the period's total, so they must sum to it.
+ * Summing each session's lifetime cost instead made the parts exceed the whole
+ * whenever a session straddled the window edge.
+ */
+describe('computeAnalytics — project costs are a breakdown of the period', () => {
+  it('sums project costs to the period total', () => {
+    const a = computeAnalytics(
+      [SPLIT_SESSION],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-09', to: '2026-09-09' },
+      ANTHROPIC_PRICING
+    )
+
+    const summed = a.projectCosts.reduce((s, p) => s + p.totalCost, 0)
+    expect(summed).toBeCloseTo(a.totalCost, 10)
+    expect(summed).toBeCloseTo(1, 10)
+  })
+
+  it('sums project tokens to the period total', () => {
+    const a = computeAnalytics(
+      [SPLIT_SESSION],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-08', to: '2026-09-08' },
+      ANTHROPIC_PRICING
+    )
+
+    const summed = a.projectCosts.reduce((s, p) => s + p.totalTokens, 0)
+    expect(summed).toBe(a.totalTokens)
+    expect(summed).toBe(330)
+  })
+})
+
 describe('computeAnalytics — cost is scoped to the period', () => {
   it('excludes cost incurred outside the range', () => {
     const a = computeAnalytics(

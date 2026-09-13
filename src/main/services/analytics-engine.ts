@@ -128,29 +128,45 @@ function totalsInRange(
 
 // ─── buildProjectCosts ────────────────────────────────────────────────────────
 
-function buildProjectCosts(sessions: SessionSummary[], projects: Project[]): ProjectCost[] {
+/**
+ * Per-project totals for the selected period.
+ *
+ * These are a breakdown of the period's total, so they must sum to it. Summing
+ * each session's lifetime figures instead made the parts exceed the whole
+ * whenever a session straddled the edge of the window.
+ */
+function buildProjectCosts(
+  sessions: SessionSummary[],
+  projects: Project[],
+  fromKey: string,
+  toKey: string
+): ProjectCost[] {
   const byProject = new Map<string, ProjectCost>()
-
   const projectMap = new Map(projects.map((p) => [p.id, p]))
 
   for (const s of sessions) {
-    const existing = byProject.get(s.projectId)
-    const projectName = projectMap.get(s.projectId)?.name ?? s.projectId
-    if (existing) {
-      existing.totalCost += s.estimatedCost
-      existing.totalTokens += s.totalInputTokens + s.totalOutputTokens
-      existing.sessionCount++
-      existing.messageCount += s.messageCount
-    } else {
-      byProject.set(s.projectId, {
+    const days = daysInRange(s, fromKey, toKey)
+    if (days.length === 0) continue
+
+    let existing = byProject.get(s.projectId)
+    if (!existing) {
+      existing = {
         id: s.projectId,
         projectId: s.projectId,
-        projectName,
-        totalCost: s.estimatedCost,
-        totalTokens: s.totalInputTokens + s.totalOutputTokens,
-        sessionCount: 1,
-        messageCount: s.messageCount,
-      })
+        projectName: projectMap.get(s.projectId)?.name ?? s.projectId,
+        totalCost: 0,
+        totalTokens: 0,
+        sessionCount: 0,
+        messageCount: 0,
+      }
+      byProject.set(s.projectId, existing)
+    }
+    // One session counts once for the project however many days it spans.
+    existing.sessionCount++
+    for (const d of days) {
+      existing.totalCost += d.estimatedCost
+      existing.totalTokens += d.inputTokens + d.outputTokens
+      existing.messageCount += d.messageCount
     }
   }
 
@@ -752,7 +768,7 @@ export function computeAnalytics(
   const totalCost = inRange.cost
 
   const dailyUsage = buildDailyUsage(filtered, fromKey, toKey)
-  const projectCosts = buildProjectCosts(filtered, projects)
+  const projectCosts = buildProjectCosts(filtered, projects, fromKey, toKey)
   const modelUsage = buildModelUsage(filtered, fromKey, toKey)
   const cacheAnalytics = computeCacheAnalytics(filtered, dailyUsage, pricingTable, fromKey, toKey)
   const modelEfficiency = computeModelEfficiency(filtered, pricingTable)
