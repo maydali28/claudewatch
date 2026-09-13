@@ -20,18 +20,19 @@ function arg(name) {
 
 const dir = arg('dir')
 const version = arg('version')
-const repo = process.env.GITHUB_REPOSITORY
 
 if (!dir || !version) {
   console.error('usage: generate-update-manifests.mjs --dir <path> --version <semver>')
   process.exit(1)
 }
-if (!repo) {
-  console.error('GITHUB_REPOSITORY env var is required')
-  process.exit(1)
-}
-
-const ghBase = `https://github.com/${repo}/releases/download/v${version}`
+// electron-updater treats `url` and `path` in these manifests as file NAMES,
+// not URLs: its provider builds the download link itself from the release base
+// plus the tag, then appends this value. Emitting an absolute URL here made it
+// concatenate the two and 404:
+//
+//   .../releases/download/v1.2.4/https://github.com/.../ClaudeWatch-...zip
+//
+// electron-builder, whose format these files imitate, writes bare filenames.
 const files = fs.readdirSync(dir)
 const now = new Date().toISOString()
 
@@ -50,10 +51,10 @@ if (winExe) {
     [
       `version: ${version}`,
       `files:`,
-      `  - url: ${ghBase}/${winExe}`,
+      `  - url: ${winExe}`,
       `    sha512: ${sha512b64(winExe)}`,
       `    size: ${fileSize(winExe)}`,
-      `path: ${ghBase}/${winExe}`,
+      `path: ${winExe}`,
       `sha512: ${sha512b64(winExe)}`,
       `releaseDate: '${now}'`,
     ].join('\n')
@@ -65,7 +66,7 @@ const linuxPkgs = files.filter((f) => /\.(deb|rpm)$/.test(f))
 if (linuxPkgs.length) {
   const lines = [`version: ${version}`, `files:`]
   for (const f of linuxPkgs) {
-    lines.push(`  - url: ${ghBase}/${f}`, `    sha512: ${sha512b64(f)}`, `    size: ${fileSize(f)}`)
+    lines.push(`  - url: ${f}`, `    sha512: ${sha512b64(f)}`, `    size: ${fileSize(f)}`)
   }
   lines.push(`releaseDate: '${now}'`)
   fs.writeFileSync(path.join(dir, 'latest-linux.yml'), lines.join('\n'))
@@ -94,11 +95,11 @@ const macZips = files.filter(
 if (macZips.length) {
   const lines = [`version: ${version}`, `files:`]
   for (const f of macZips) {
-    lines.push(`  - url: ${ghBase}/${f}`, `    sha512: ${sha512b64(f)}`, `    size: ${fileSize(f)}`)
+    lines.push(`  - url: ${f}`, `    sha512: ${sha512b64(f)}`, `    size: ${fileSize(f)}`)
   }
   // `path` + top-level `sha512` are the legacy single-file pointer electron-updater
   // still reads; point them at the first (host-arch) zip.
   const primary = macZips[0]
-  lines.push(`path: ${ghBase}/${primary}`, `sha512: ${sha512b64(primary)}`, `releaseDate: '${now}'`)
+  lines.push(`path: ${primary}`, `sha512: ${sha512b64(primary)}`, `releaseDate: '${now}'`)
   fs.writeFileSync(path.join(dir, 'latest-mac.yml'), lines.join('\n'))
 }
