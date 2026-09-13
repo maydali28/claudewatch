@@ -109,4 +109,32 @@ describe('htmlReleaseNotesToMarkdown', () => {
   it('drops tags it does not translate rather than printing them', () => {
     expect(htmlReleaseNotesToMarkdown('<div class="x"><span>kept</span></div>')).toBe('kept')
   })
+
+  // CodeQL flagged the original single-pass strip as incomplete
+  // multi-character sanitization: the pattern needs a closing ">", so an
+  // unterminated tag survived it untouched.
+  it('removes an unterminated tag that a single pass would leave behind', () => {
+    expect(htmlReleaseNotesToMarkdown('<p>hi</p><script src=x')).toBe('hi')
+    expect(htmlReleaseNotesToMarkdown('<p>hi</p><script')).not.toContain('<script')
+  })
+
+  it('removes markup that a single pass would splice back together', () => {
+    expect(htmlReleaseNotesToMarkdown('<p><scr<x>ipt>alert(1)</p>')).not.toContain('<')
+  })
+
+  it('never emits a "<" followed by a tag name, whatever the input', () => {
+    const hostile = [
+      '<p>a</p><script>alert(1)</script>',
+      '<p>a</p><SCRIPT SRC=x',
+      '<p>a</p><<script>script>',
+      '<p>a</p></div',
+    ]
+    for (const input of hostile) {
+      expect(htmlReleaseNotesToMarkdown(input)).not.toMatch(/<\/?[A-Za-z]/)
+    }
+  })
+
+  it('keeps a less-than sign that is ordinary prose', () => {
+    expect(htmlReleaseNotesToMarkdown('<p>works when a &lt; b</p>')).toBe('works when a < b')
+  })
 })

@@ -134,7 +134,22 @@ export function htmlReleaseNotesToMarkdown(input: string): string {
   out = out.replace(/<\/?(?:ul|ol)\b[^>]*>/gi, '\n\n')
   out = out.replace(/<\/p>/gi, '\n\n').replace(/<p\b[^>]*>/gi, '')
   out = out.replace(/<br\s*\/?>/gi, '\n')
-  out = out.replace(/<[^>]+>/g, '')
+
+  // Strip whatever markup is left, in two steps.
+  //
+  // The pattern below needs a closing ">", so an unterminated "<script src=x"
+  // survives a single pass untouched — CodeQL flags exactly this as incomplete
+  // multi-character sanitization. Looping also covers the case where removing
+  // one tag splices its neighbours into another.
+  let previous: string
+  do {
+    previous = out
+    out = out.replace(/<[^>]*>/g, '')
+  } while (out !== previous)
+
+  // Then drop any unterminated tag-like remainder. Restricted to "<" followed
+  // by a letter or a slash, so ordinary prose such as "a < b" is preserved.
+  out = out.replace(/<\/?[A-Za-z][^>]*/g, '')
 
   return decodeEntities(out)
     .replace(/[ \t]+$/gm, '')

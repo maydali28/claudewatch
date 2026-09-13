@@ -5,6 +5,7 @@
 
 * **tooling:** do not gate tag deletions in the release check
 * **update:** stop offering an update to the installed version
+* **update:** strip release-note markup completely
 ## 1.2.1 (2026-09-13)
 
 
