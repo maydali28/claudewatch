@@ -1,3 +1,4 @@
+import { isMainThread } from 'worker_threads'
 import logPkg from 'electron-log'
 
 const log = logPkg
@@ -10,6 +11,10 @@ let initialised = false
 function initOnce(): void {
   if (initialised) return
   initialised = true
+  // electron-log's initialize() wires up main-process transports and throws
+  // when there is no Electron main context. The accounting worker is a plain
+  // Node thread, so it logs to the console instead of the log file.
+  if (!isMainThread) return
   log.initialize()
   log.transports.file.maxSize = 5 * 1024 * 1024 // 5 MB per log file
 }
@@ -24,6 +29,15 @@ export interface ScopedLogger {
 
 export function createLogger(scope: string): ScopedLogger {
   const prefix = `[${scope}]`
+  if (!isMainThread) {
+    const c = console
+    return {
+      info: (...args: unknown[]) => c.log(prefix, ...args),
+      warn: (...args: unknown[]) => c.warn(prefix, ...args),
+      error: (...args: unknown[]) => c.error(prefix, ...args),
+      debug: (...args: unknown[]) => c.debug(prefix, ...args),
+    }
+  }
   return {
     info: (...args: unknown[]) => log.info(prefix, ...args),
     warn: (...args: unknown[]) => log.warn(prefix, ...args),

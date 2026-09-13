@@ -1,6 +1,5 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { app } from 'electron'
 import type { SessionSummary } from '@shared/types/session'
 import { PRICING_REVISION } from '@shared/constants/pricing'
 import { createLogger } from '@main/lib/logger'
@@ -34,13 +33,27 @@ interface CacheFile {
 const CACHE_VERSION = 2
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
-// Lazily resolved on first access — `app.getPath('userData')` is unavailable
-// before the `ready` event, so importing this module in a test environment
-// won't blow up.
+// The cache lives wherever the owner says. This module runs inside the
+// accounting worker, a plain Node thread with no Electron `app` to ask, so the
+// directory is supplied by main at spawn rather than resolved here.
 let cachePath: string | null = null
+/**
+ * Directory to hold the cache file, when it cannot be asked of Electron.
+ *
+ * The accounting worker is a plain Node thread with no `app`, so main resolves
+ * the path once and hands it over at spawn. Without this the worker throws the
+ * moment it touches the cache.
+ */
+export function configureMetadataCacheDir(dir: string): void {
+  cachePath = path.join(dir, CACHE_FILENAME)
+}
+
 function getCachePath(): string {
-  if (cachePath) return cachePath
-  cachePath = path.join(app.getPath('userData'), CACHE_FILENAME)
+  if (!cachePath) {
+    throw new Error(
+      'Metadata cache directory not configured — call configureMetadataCacheDir() first'
+    )
+  }
   return cachePath
 }
 

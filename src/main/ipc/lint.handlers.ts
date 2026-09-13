@@ -4,9 +4,7 @@ import { ok, err, toSafeError } from '@shared/ipc/contracts'
 import { captureHandlerException } from '@main/services/sentry'
 import { validate, LintRunSchema } from '@shared/ipc/schemas'
 import type { LintResult } from '@shared/types/lint'
-import { Preferences } from '@main/store/preferences'
-import { scanProjects } from '@main/services/project-scanner'
-import { getActivePricingTable } from '@main/services/pricing-engine'
+import { getOrScanProjects } from './sessions.handlers'
 import { runAll, computeLintSummary } from '@main/services/lint-service'
 
 // Cache last lint results so get-summary can read them without re-running
@@ -16,11 +14,9 @@ export function registerLintHandlers(): void {
   ipcMain.handle(CHANNELS.LINT_RUN, async (_event, payload) => {
     try {
       const lintRunRequest = validate(LintRunSchema, payload)
-      const prefs = Preferences.get()
-      const pricingTable = getActivePricingTable(prefs)
-
-      // Gather all sessions for session-health and secret rules
-      const { projects } = await scanProjects(pricingTable)
+      // Reuse the shared scan rather than starting a second full one. Parsing
+      // now happens in the accounting worker, so main has no scanner of its own.
+      const projects = await getOrScanProjects()
       const allSessions = projects.flatMap((project) => project.sessions)
 
       const lintResults = await runAll(allSessions, lintRunRequest?.projectId)

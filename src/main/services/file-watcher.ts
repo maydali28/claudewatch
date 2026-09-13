@@ -4,8 +4,8 @@ import type { BrowserWindow } from 'electron'
 import chokidar from 'chokidar'
 import { CHANNELS } from '@shared/ipc/channels'
 import { sessionCache } from '@shared/utils'
-import { parseSessionMetadata } from './session-parser'
-import { getPricingTable } from '@shared/constants/pricing'
+import { getActivePricingTable } from './pricing-engine'
+import { accountingWorker } from './accounting/worker-client'
 import { Preferences } from '@main/store/preferences'
 import { patchCachedSessionSummary } from '@main/ipc/sessions.handlers'
 import { scanFileDelta } from './secret-scanner'
@@ -193,8 +193,11 @@ export class FileWatcher {
 
     try {
       const preferences = Preferences.get()
-      const pricingTable = getPricingTable(preferences.pricingProvider)
-      const sessionSummary = await parseSessionMetadata(
+      // The active table, not the bare provider default: the watcher used to
+      // ignore the user's pricing overrides, so a session's cost changed the
+      // moment the app restarted and rescanned it.
+      const pricingTable = getActivePricingTable(preferences)
+      const sessionSummary = await accountingWorker.parseSession(
         filePath,
         sessionId,
         projectId,

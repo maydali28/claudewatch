@@ -11,6 +11,7 @@ import { registerAllHandlers } from './ipc/router'
 import { registerTrayHandlers } from './ipc/tray.handlers'
 import { Preferences } from './store/preferences'
 import { FileWatcher } from './services/file-watcher'
+import { accountingWorker } from './services/accounting/worker-client'
 import { getClaudeDir } from '@main/lib/claude-paths'
 import { initUpdateService } from './services/update-service'
 import { rootLogger as log } from './lib/logger'
@@ -273,6 +274,8 @@ function bootstrap(): void {
   app.on('will-quit', () => {
     fileWatcher?.stop()
     destroyTray()
+    // Otherwise the worker thread keeps the process alive after the windows go.
+    void accountingWorker.dispose()
     log.info('App quitting')
   })
 
