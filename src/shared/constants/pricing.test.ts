@@ -30,7 +30,9 @@ describe('ANTHROPIC_PRICING — cache read rates', () => {
     expect(ANTHROPIC_PRICING['fable-5-1'].cacheRead).toBe(0.25)
   })
 
-  it('prices Mythos 5.1 cache reads at $0.25', () => {
+  // Assumed, not published: the documented exception names Fable 5.1. Pinned so
+  // the assumption is visible and fails loudly if it is ever corrected.
+  it('prices Mythos 5.1 cache reads at an assumed $0.25, matching Fable 5.1', () => {
     expect(ANTHROPIC_PRICING['mythos-5-1'].cacheRead).toBe(0.25)
   })
 
@@ -60,13 +62,21 @@ describe('ANTHROPIC_PRICING — cache write tiers', () => {
 
 describe('estimateCost', () => {
   it('sums all five token pools at their own rates', () => {
-    const cost = estimateCost('opus-5', 1_000_000, 1_000_000, 1_000_000, 1_000_000, 1_000_000)
+    const cost = estimateCost(
+      'opus-5',
+      1_000_000,
+      1_000_000,
+      1_000_000,
+      1_000_000,
+      1_000_000,
+      ANTHROPIC_PRICING
+    )
     // 5 + 25 + 0.5 + 6.25 + 10
     expect(cost).toBeCloseTo(46.75, 10)
   })
 
   it('returns 0 for a priced model with no usage', () => {
-    expect(estimateCost('opus-5', 0, 0, 0, 0, 0)).toBe(0)
+    expect(estimateCost('opus-5', 0, 0, 0, 0, 0, ANTHROPIC_PRICING)).toBe(0)
   })
 
   /**
@@ -75,6 +85,6 @@ describe('estimateCost', () => {
    * looking wrong.
    */
   it('returns null for an unknown model rather than guessing a rate', () => {
-    expect(estimateCost('unknown', 1_000_000, 1_000_000, 0, 0, 0)).toBeNull()
+    expect(estimateCost('unknown', 1_000_000, 1_000_000, 0, 0, 0, ANTHROPIC_PRICING)).toBeNull()
   })
 })

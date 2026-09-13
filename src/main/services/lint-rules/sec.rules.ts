@@ -13,6 +13,7 @@ const LOOKBACK_SECRETS_DAYS = 30
 export const SEC_MIN_MESSAGES = 10
 const SEC_MAX_TOTAL = 20
 const LINES_TO_SCAN = 50
+const SEC_MAX_SESSIONS_SCANNED = 200
 
 // ─── Eligibility ──────────────────────────────────────────────────────────────
 
@@ -25,6 +26,24 @@ const LINES_TO_SCAN = 50
  * always zero, no session ever cleared the threshold, and the scan silently did
  * nothing. `messageCount` is the real field and already covers both roles.
  */
+/**
+ * Eligible sessions, newest first, capped at SEC_MAX_SESSIONS_SCANNED.
+ *
+ * The rule reads the head of every session it returns, on a code path that did
+ * no I/O at all while the eligibility filter was broken. The cap keeps lint
+ * bounded on a large history; ordering by recency means the bound discards the
+ * least relevant sessions rather than arbitrary ones.
+ */
+export function selectSessionsToScan(
+  sessions: SessionSummary[],
+  now: number = Date.now()
+): SessionSummary[] {
+  return sessions
+    .filter((s) => isSecretScanEligible(s, now))
+    .sort((a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime())
+    .slice(0, SEC_MAX_SESSIONS_SCANNED)
+}
+
 export function isSecretScanEligible(
   session: Pick<SessionSummary, 'lastTimestamp' | 'messageCount'>,
   now: number = Date.now()
@@ -44,7 +63,7 @@ export async function secRules(
   const results: LintResult[] = []
   const { claudeDir, settings } = context
 
-  const eligibleSessions = sessions.filter((s) => isSecretScanEligible(s))
+  const eligibleSessions = selectSessionsToScan(sessions)
 
   // Track per-pattern counts across all files for global cap
   const countPerPattern: Record<string, number> = {}

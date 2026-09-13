@@ -5,21 +5,12 @@ import { getModelMeta } from '@renderer/lib/model-meta'
 import type { ModelFamily } from '@shared/types'
 import type { ModelEfficiencyRow } from '@shared/types'
 
-const MODEL_OPTIONS: ModelFamily[] = [
-  'opus-4-7',
-  'opus-4-6',
-  'opus-4-5',
-  'opus-4-1',
-  'opus-4',
-  'opus-3',
-  'sonnet-4-6',
-  'sonnet-4-5',
-  'sonnet-4',
-  'sonnet-3-7',
-  'haiku-4-5',
-  'haiku-3-5',
-  'haiku-3',
-]
+// Derived, never hand-maintained: a literal list silently omits every newly
+// added family, which is how this calculator came to exclude the models
+// accounting for most real usage.
+const MODEL_OPTIONS: ModelFamily[] = (Object.keys(ANTHROPIC_PRICING) as ModelFamily[]).filter(
+  (family) => family !== 'unknown'
+)
 
 interface Props {
   data: ModelEfficiencyRow[]

@@ -40,6 +40,39 @@ describe('getModelFamily — dated snapshots', () => {
   })
 })
 
+/**
+ * Claude Code can run against Bedrock and Vertex (CLAUDE_CODE_USE_BEDROCK /
+ * CLAUDE_CODE_USE_VERTEX), which decorate the model ID with a provider prefix
+ * and, on Bedrock, an inference-profile suffix. Resolving those to `unknown`
+ * would report the whole session as unpriced.
+ */
+describe('getModelFamily — provider-decorated IDs', () => {
+  const cases: Array<[string, ModelFamily]> = [
+    ['anthropic.claude-opus-5', 'opus-5'],
+    ['us.anthropic.claude-sonnet-5', 'sonnet-5'],
+    ['eu.anthropic.claude-opus-4-6', 'opus-4-6'],
+    ['apac.anthropic.claude-sonnet-4-6', 'sonnet-4-6'],
+    ['claude-sonnet-4-5-20250929-v1:0', 'sonnet-4-5'],
+    ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'sonnet-4-5'],
+    ['claude-opus-4-5@20251101', 'opus-4-5'],
+  ]
+
+  it.each(cases)('%s resolves to %s', (raw, expected) => {
+    expect(getModelFamily(raw)).toBe(expected)
+  })
+})
+
+describe('getModelFamily — zero-minor aliases', () => {
+  const cases: Array<[string, ModelFamily]> = [
+    ['claude-opus-4-0', 'opus-4'],
+    ['claude-sonnet-4-0', 'sonnet-4'],
+  ]
+
+  it.each(cases)('%s resolves to %s', (raw, expected) => {
+    expect(getModelFamily(raw)).toBe(expected)
+  })
+})
+
 describe('getModelFamily — legacy version-before-family IDs', () => {
   const cases: Array<[string, ModelFamily]> = [
     ['claude-3-7-sonnet-20250219', 'sonnet-3-7'],
@@ -82,8 +115,10 @@ describe('getModelFamily — unrecognised models resolve to unknown, never an ol
 })
 
 /**
- * Subagent `.meta.json` sidecars record an alias such as "sonnet" rather than
- * the billed model ID. An alias must not be resolved to a concrete family.
+ * Bare aliases appear in transcripts as Agent-tool arguments (`tool_use.input`)
+ * and in Claude Code configuration. They name a tier, not a billed model, so
+ * they must never resolve to a concrete family and a rate — the alias that was
+ * current when a transcript was written is unknowable later.
  */
 describe('getModelFamily — aliases are not billable identities', () => {
   const cases: string[] = ['sonnet', 'opus', 'haiku', 'fable']

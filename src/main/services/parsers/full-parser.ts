@@ -37,7 +37,9 @@ export async function parseSessionFull(
   filePath: string,
   sessionId: string,
   projectId: string,
-  pricingTable: Record<ModelFamily, ModelPricing> = {} as Record<ModelFamily, ModelPricing>
+  // No default: an empty table silently priced every subagent turn at zero, and
+  // the export path did exactly that. Callers must supply the active table.
+  pricingTable: Record<ModelFamily, ModelPricing>
 ): Promise<ParsedSession> {
   const seenUuids = new Set<string>()
   const records: ParsedRecord[] = []

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { isSecretScanEligible, SEC_MIN_MESSAGES } from './sec.rules'
+import { isSecretScanEligible, selectSessionsToScan, SEC_MIN_MESSAGES } from './sec.rules'
+import type { SessionSummary } from '@shared/types/session'
 
 const NOW = new Date('2026-09-13T12:00:00Z').getTime()
 const DAY = 24 * 60 * 60 * 1000
@@ -41,5 +42,37 @@ describe('isSecretScanEligible', () => {
 
   it('rejects a session with an unparseable timestamp', () => {
     expect(isSecretScanEligible({ lastTimestamp: '', messageCount: 500 }, NOW)).toBe(false)
+  })
+})
+
+function session(id: string, daysAgo: number): SessionSummary {
+  return { id, lastTimestamp: at(daysAgo), messageCount: 50 } as SessionSummary
+}
+
+/**
+ * Now that the eligibility filter works, this rule reads the head of every
+ * eligible transcript on a path that previously did no I/O at all. The scan is
+ * bounded to the most recent sessions so a large history cannot make linting
+ * unbounded, and ordered by recency so the bound keeps the most relevant ones.
+ */
+describe('selectSessionsToScan', () => {
+  it('returns eligible sessions newest first', () => {
+    const picked = selectSessionsToScan(
+      [session('old', 10), session('new', 1), session('mid', 5)],
+      NOW
+    )
+    expect(picked.map((s) => s.id)).toEqual(['new', 'mid', 'old'])
+  })
+
+  it('excludes ineligible sessions', () => {
+    const stale = { ...session('stale', 90) } as SessionSummary
+    const quiet = { ...session('quiet', 1), messageCount: 1 } as SessionSummary
+    const picked = selectSessionsToScan([stale, quiet, session('good', 2)], NOW)
+    expect(picked.map((s) => s.id)).toEqual(['good'])
+  })
+
+  it('caps the number of sessions scanned', () => {
+    const many = Array.from({ length: 500 }, (_, i) => session(`s${i}`, 1))
+    expect(selectSessionsToScan(many, NOW).length).toBeLessThanOrEqual(200)
   })
 })

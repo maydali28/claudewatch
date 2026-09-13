@@ -4,11 +4,27 @@ import type { ModelPricing, ModelFamily, PricingProvider } from '@shared/types/p
 // Source: platform.claude.com/docs/en/about-claude/pricing
 //
 // Cache 5m write = 1.25x base input. Cache 1h write = 2x base input.
-// Cache read = 0.1x base input, EXCEPT Fable 5.1 / Mythos 5.1, which Anthropic
-// prices at a flat $0.25 per million regardless of the input rate.
+// Cache read = 0.1x base input, EXCEPT Fable 5.1, which Anthropic prices at a
+// flat $0.25 per million regardless of the input rate.
 //
-// Assumption: the 1.25x / 2x write multipliers are taken to hold for Fable 5.1
-// and Mythos 5.1; only the cache-read exception is published.
+// Assumptions, both narrower than the published rates:
+//   - The 1.25x / 2x write multipliers are taken to hold for Fable 5.1 and
+//     Mythos 5.1; only the cache-read exception is published.
+//   - Mythos 5.1 is assumed to share Fable 5.1's $0.25 cache read. The
+//     published exception names Fable 5.1; whether Mythos 5.1 matches it is
+//     open. Revisit when documented.
+
+/**
+ * Bump whenever any rate below changes, or whenever `getModelFamily` starts
+ * resolving an ID differently. Persisted alongside every cached cost so stale
+ * figures are recomputed rather than served from disk — without this, a rate
+ * correction reaches only sessions whose transcript happens to change
+ * afterwards, leaving totals that mix old and new pricing.
+ *
+ * 2 — added fable-5-1 / mythos-5-1 / opus-5 / sonnet-5 / sonnet-3-5, corrected
+ *     the Fable 5.1 cache-read rate, and stopped pricing unknown models.
+ */
+export const PRICING_REVISION = 2
 
 export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   // ── Fable 5.1 / Mythos 5.1 — $10 input / $50 output, $0.25 cache read ────
@@ -81,7 +97,7 @@ export function estimateCost(
   cacheReadTokens: number,
   cache5mTokens: number,
   cache1hTokens: number,
-  table: Record<ModelFamily, ModelPricing> = ANTHROPIC_PRICING
+  table: Record<ModelFamily, ModelPricing>
 ): number | null {
   if (family === 'unknown') return null
   const p = table[family]

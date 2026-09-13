@@ -1,23 +1,13 @@
 {
-  "include": [
-    "src/renderer/**/*",
-    "src/preload/**/*",
-    "src/shared/**/*"
-  ],
+  "include": ["src/renderer/**/*", "src/preload/**/*", "src/shared/**/*"],
   "compilerOptions": {
     "composite": true,
     "ignoreDeprecations": "6.0",
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "types": [
-      "node"
-    ],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
@@ -27,21 +17,14 @@
     "skipLibCheck": true,
     "noEmit": false,
     "jsx": "react-jsx",
-    "outDir": "dist/renderer",
+    "outDir": "dist/types/renderer",
     "baseUrl": ".",
     "paths": {
-      "@shared/*": [
-        "src/shared/*"
-      ],
-      "@renderer/*": [
-        "src/renderer/src/*"
-      ],
-      "@preload/*": [
-        "src/preload/*"
-      ],
-      "@/*": [
-        "src/renderer/src/*"
-      ]
-    }
+      "@shared/*": ["src/shared/*"],
+      "@renderer/*": ["src/renderer/src/*"],
+      "@preload/*": ["src/preload/*"],
+      "@/*": ["src/renderer/src/*"]
+    },
+    "emitDeclarationOnly": true
   }
 }

@@ -36,6 +36,10 @@ const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
   // ── Haiku ─────────────────────────────────────────────────────────────────
   'claude-haiku-4-5': 'haiku-4-5',
 
+  // ── Zero-minor aliases for the base releases ──────────────────────────────
+  'claude-opus-4-0': 'opus-4',
+  'claude-sonnet-4-0': 'sonnet-4',
+
   // ── Legacy IDs, which order the version before the family ─────────────────
   'claude-3-7-sonnet': 'sonnet-3-7',
   'claude-3-5-sonnet': 'sonnet-3-5',
@@ -44,12 +48,25 @@ const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
   'claude-3-haiku': 'haiku-3',
 }
 
+// Claude Code can target Bedrock or Vertex (CLAUDE_CODE_USE_BEDROCK /
+// CLAUDE_CODE_USE_VERTEX), which decorate the same model with a provider
+// prefix and, on Bedrock, an inference-profile suffix. These are stripped
+// before lookup so a provider-routed session is priced like any other.
+
+/** Bedrock prefix, optionally region-qualified: `anthropic.`, `us.anthropic.`. */
+const PROVIDER_PREFIX = /^(?:[a-z]{2,4}\.)?anthropic\./
+/** Bedrock inference-profile suffix, e.g. `-v1:0`. */
+const PROFILE_SUFFIX = /-v\d+:\d+$/
 /** Trailing dated snapshot, e.g. `-20251101` (Claude API) or `@20251101` (Vertex). */
 const DATE_SUFFIX = /[-@]\d{8}$/
 
 export function getModelFamily(model: string | null | undefined): ModelFamily {
   if (!model) return 'unknown'
-  const normalized = model.toLowerCase().replace(DATE_SUFFIX, '')
+  const normalized = model
+    .toLowerCase()
+    .replace(PROVIDER_PREFIX, '')
+    .replace(PROFILE_SUFFIX, '')
+    .replace(DATE_SUFFIX, '')
   return EXACT_MODEL_FAMILIES[normalized] ?? 'unknown'
 }
 

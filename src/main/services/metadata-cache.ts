@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { app } from 'electron'
 import type { SessionSummary } from '@shared/types/session'
+import { PRICING_REVISION } from '@shared/constants/pricing'
 import { createLogger } from '@main/lib/logger'
 
 const log = createLogger('MetadataCache')
@@ -26,10 +27,11 @@ interface CachedEntry {
 
 interface CacheFile {
   version: number
+  pricingRevision: number
   entries: Record<string, CachedEntry>
 }
 
-const CACHE_VERSION = 1
+const CACHE_VERSION = 2
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // Lazily resolved on first access — `app.getPath('userData')` is unavailable
@@ -52,9 +54,17 @@ function load(): CacheFile {
     if (parsed.version !== CACHE_VERSION || typeof parsed.entries !== 'object') {
       throw new Error('Cache file shape mismatch')
     }
+    // Cached summaries carry `estimatedCost` and `modelBreakdown` baked in at
+    // the rates and model mapping in force when they were parsed. A pricing
+    // correction must therefore discard them: keeping them would leave totals
+    // that mix old and new pricing, which is harder to explain than being
+    // uniformly wrong. A full rebuild is ~1.4s for a 580-file history.
+    if (parsed.pricingRevision !== PRICING_REVISION) {
+      throw new Error('Pricing revision changed')
+    }
     inMemory = parsed
   } catch {
-    inMemory = { version: CACHE_VERSION, entries: {} }
+    inMemory = { version: CACHE_VERSION, pricingRevision: PRICING_REVISION, entries: {} }
   }
   return inMemory
 }
