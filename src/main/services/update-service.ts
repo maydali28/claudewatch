@@ -90,6 +90,41 @@ function decodeEntities(text: string): string {
 }
 
 /**
+ * Remove any remaining tags by scanning, rather than by regex replacement.
+ *
+ * A strip of the form `/<[^>]*>/g` is incomplete in two ways, and CodeQL
+ * flagged it as such (high severity, "incomplete multi-character
+ * sanitization"). It needs a closing ">", so `<script src=x` survived a pass
+ * untouched; and removing one match can splice its neighbours into another.
+ * Repeating the replacement until it stabilises fixes the second problem but
+ * not the first, and is still a regex sanitizer.
+ *
+ * A single left-to-right scan has neither problem: an unterminated "<" simply
+ * consumes the rest of the string, and there is nothing to splice because
+ * nothing is removed from a buffer — text outside tags is copied out instead.
+ *
+ * Treating every bare "<" as a tag opener is correct for the input this gets.
+ * A literal less-than in an Atom feed arrives as "&lt;", which `decodeEntities`
+ * restores afterwards, so prose like "a &lt; b" is preserved.
+ */
+function stripTags(input: string): string {
+  let out = ''
+  let inTag = false
+  for (const ch of input) {
+    if (ch === '<') {
+      inTag = true
+      continue
+    }
+    if (ch === '>' && inTag) {
+      inTag = false
+      continue
+    }
+    if (!inTag) out += ch
+  }
+  return out
+}
+
+/**
  * Convert HTML release notes back to markdown.
  *
  * electron-updater's GitHub provider takes release notes from the releases
@@ -135,21 +170,7 @@ export function htmlReleaseNotesToMarkdown(input: string): string {
   out = out.replace(/<\/p>/gi, '\n\n').replace(/<p\b[^>]*>/gi, '')
   out = out.replace(/<br\s*\/?>/gi, '\n')
 
-  // Strip whatever markup is left, in two steps.
-  //
-  // The pattern below needs a closing ">", so an unterminated "<script src=x"
-  // survives a single pass untouched — CodeQL flags exactly this as incomplete
-  // multi-character sanitization. Looping also covers the case where removing
-  // one tag splices its neighbours into another.
-  let previous: string
-  do {
-    previous = out
-    out = out.replace(/<[^>]*>/g, '')
-  } while (out !== previous)
-
-  // Then drop any unterminated tag-like remainder. Restricted to "<" followed
-  // by a letter or a slash, so ordinary prose such as "a < b" is preserved.
-  out = out.replace(/<\/?[A-Za-z][^>]*/g, '')
+  out = stripTags(out)
 
   return decodeEntities(out)
     .replace(/[ \t]+$/gm, '')
