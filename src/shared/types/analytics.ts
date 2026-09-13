@@ -240,3 +240,43 @@ export interface CustomDateRange {
 }
 
 export type DateRange = DateRangePreset | CustomDateRange
+
+// ─── Tray snapshot ────────────────────────────────────────────────────────────
+
+/**
+ * Everything the tray popover renders, from one committed scan.
+ *
+ * The tray previously issued three calls — today's analytics, the week's
+ * analytics, and listProjects — and the last of those forced a full discovery
+ * scan of every transcript on disk on every open and every 30-second refresh.
+ * This returns only the fields the popover shows, computed from the cached
+ * scan, and carries a handful of sessions instead of all of them.
+ */
+export interface TraySnapshotSession {
+  id: string
+  projectId: string
+  projectPath: string
+  title: string
+  slug?: string
+  latestModel?: string
+  primaryModel?: string
+  messageCount: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  lastTimestamp: string
+  hasError: boolean
+}
+
+export interface TraySnapshot {
+  today: {
+    sessionCount: number
+    tokenCount: number
+    messageCount: number
+    cost: number
+    projectCount: number
+  }
+  /** Seven calendar days ending today, quiet days included. */
+  weekly: Array<{ date: string; tokens: number; cost: number }>
+  activeSessions: TraySnapshotSession[]
+  recentSessions: TraySnapshotSession[]
+}

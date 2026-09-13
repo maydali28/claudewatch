@@ -92,6 +92,7 @@ export const api = {
 
   // ─── Tray ─────────────────────────────────────────────────────────────────
   tray: {
+    getSnapshot: () => invoke(CHANNELS.TRAY_GET_SNAPSHOT),
     openDashboard: (sessionId?: string, projectId?: string) =>
       invoke(CHANNELS.TRAY_OPEN_DASHBOARD, { sessionId, projectId }),
     showAbout: () => invoke(CHANNELS.TRAY_SHOW_ABOUT),

@@ -1,12 +1,11 @@
 import { useEffect, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { AnalyticsData, SessionSummary } from '@shared/types'
+import type { TraySnapshot, TraySnapshotSession } from '@shared/types/analytics'
 import type { UpdateInfo } from '@shared/types/project'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
 import { buildWeeklyUsage } from './weekly-usage'
 
-const ACTIVE_SESSION_MS = 60_000
 const REFRESH_INTERVAL_MS = 30_000
 
 // Query keys are grouped under 'tray' so the push-event handler can invalidate
@@ -16,30 +15,16 @@ const TRAY_ANALYTICS_KEY = ['tray', 'analytics'] as const
 const TRAY_UPDATE_INFO_KEY = ['tray', 'updateInfo'] as const
 const TRAY_SETTINGS_KEY = ['tray', 'settings'] as const
 
-interface TrayAnalytics {
-  today: AnalyticsData | null
-  weekly: AnalyticsData | null
-  sessions: SessionSummary[]
-  partialError: string | null
-}
-
-async function fetchTrayAnalytics(): Promise<TrayAnalytics> {
-  const [todayResult, weeklyResult, projectsResult] = await Promise.all([
-    ipc.analytics.get({ dateRange: 'today' }),
-    ipc.analytics.get({ dateRange: '7d' }),
-    ipc.sessions.listProjects(),
-  ])
-
-  // The tray surfaces partial data when one of the three calls fails — we
-  // want the UI to keep showing whatever resolved rather than blanking out,
-  // so failures are stashed alongside the data instead of thrown.
-  const partialError = !todayResult.ok ? todayResult.error : null
-
+async function fetchTraySnapshot(): Promise<{
+  snapshot: TraySnapshot | null
+  error: string | null
+}> {
+  // One call, reading the shared scan. This was three calls, one of which
+  // forced a full discovery walk of every transcript on every 30s refresh.
+  const result = await ipc.tray.getSnapshot()
   return {
-    today: todayResult.ok ? todayResult.data : null,
-    weekly: weeklyResult.ok ? weeklyResult.data : null,
-    sessions: projectsResult.ok ? projectsResult.data.projects.flatMap((p) => p.sessions) : [],
-    partialError,
+    snapshot: result.ok ? result.data : null,
+    error: result.ok ? null : result.error,
   }
 }
 
@@ -66,8 +51,8 @@ export interface TrayData {
     projectCount: number
   }
   weeklyUsage: Array<{ date: string; cost: number; tokens: number }>
-  activeSessions: SessionSummary[]
-  recentSessions: SessionSummary[]
+  activeSessions: TraySnapshotSession[]
+  recentSessions: TraySnapshotSession[]
   isLoading: boolean
   error: string | null
   updateInfo: UpdateInfo | null
@@ -77,33 +62,12 @@ export interface TrayData {
   dismissTrayTip: () => Promise<void>
 }
 
-function flattenSessions(allSessions: SessionSummary[]): {
-  activeSessions: SessionSummary[]
-  recentSessions: SessionSummary[]
-} {
-  const now = Date.now()
-  const sorted = [...allSessions].sort(
-    (a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime()
-  )
-
-  const activeSessions = sorted.filter(
-    (s) => now - new Date(s.lastTimestamp).getTime() < ACTIVE_SESSION_MS
-  )
-
-  const inactiveSorted = sorted.filter(
-    (s) => now - new Date(s.lastTimestamp).getTime() >= ACTIVE_SESSION_MS
-  )
-  const recentSessions = inactiveSorted.slice(0, 3)
-
-  return { activeSessions, recentSessions }
-}
-
 export function useTrayData(): TrayData {
   const queryClient = useQueryClient()
 
   const analyticsQuery = useQuery({
     queryKey: TRAY_ANALYTICS_KEY,
-    queryFn: fetchTrayAnalytics,
+    queryFn: fetchTraySnapshot,
     refetchInterval: REFRESH_INTERVAL_MS,
   })
   const updateInfoQuery = useQuery({
@@ -171,30 +135,33 @@ export function useTrayData(): TrayData {
     await settingsMutation.mutateAsync({ trayTipDismissed: true })
   }, [settingsMutation])
 
-  const analytics = analyticsQuery.data
-  const todayAnalytics = analytics?.today ?? null
-  const weeklyAnalytics = analytics?.weekly ?? null
-  const allSessions = analytics?.sessions ?? []
+  const snapshot = analyticsQuery.data?.snapshot ?? null
 
-  // todayAnalytics is scoped to 'today'; weeklyAnalytics provides 7-day sparkline data.
   const todayStats = {
-    sessionCount: todayAnalytics?.totalSessions ?? 0,
-    tokenCount: todayAnalytics?.totalTokens ?? 0,
-    messageCount: todayAnalytics?.totalMessages ?? 0,
-    cost: todayAnalytics?.totalCost ?? 0,
-    projectCount: todayAnalytics?.projectCosts.length ?? 0,
+    sessionCount: snapshot?.today.sessionCount ?? 0,
+    tokenCount: snapshot?.today.tokenCount ?? 0,
+    messageCount: snapshot?.today.messageCount ?? 0,
+    cost: snapshot?.today.cost ?? 0,
+    projectCount: snapshot?.today.projectCount ?? 0,
   }
 
-  // Seven real calendar days, quiet ones included as zeros, so "today" and
-  // "yesterday" are actually those days rather than the last two that happened
-  // to have activity.
-  const weeklyUsage = buildWeeklyUsage(weeklyAnalytics?.dailyUsage ?? [])
+  // Main sends only the days that had activity; the week is filled here so
+  // "today" and "yesterday" are real calendar days.
+  const weeklyUsage = buildWeeklyUsage(
+    (snapshot?.weekly ?? []).map((d) => ({
+      date: d.date,
+      inputTokens: d.tokens,
+      outputTokens: 0,
+      estimatedCost: d.cost,
+    }))
+  )
 
-  const { activeSessions, recentSessions } = flattenSessions(allSessions)
+  const activeSessions = snapshot?.activeSessions ?? []
+  const recentSessions = snapshot?.recentSessions ?? []
 
   const error = analyticsQuery.error
     ? String(analyticsQuery.error.message ?? analyticsQuery.error)
-    : (analytics?.partialError ?? null)
+    : (analyticsQuery.data?.error ?? null)
 
   return {
     todayStats,

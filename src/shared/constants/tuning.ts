@@ -74,3 +74,11 @@ export const SECRET_SCAN_MAX_PER_PATTERN = 3
  * handles at once and starves the event loop.
  */
 export const SUBAGENT_PARSE_CONCURRENCY = 6
+
+// ─── Tray popover ─────────────────────────────────────────────────────────────
+
+/** A session counts as live if it was written to within this window. */
+export const ACTIVE_SESSION_MS = 60_000
+
+/** How many finished sessions the tray lists under "Recent". */
+export const TRAY_RECENT_SESSION_COUNT = 3

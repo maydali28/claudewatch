@@ -1,6 +1,6 @@
 import React from 'react'
 import { MessageSquare, Folder } from 'lucide-react'
-import type { SessionSummary } from '@shared/types'
+import type { TraySnapshotSession } from '@shared/types/analytics'
 import { formatTokens } from '@shared/utils/format-tokens'
 import { projectDisplayName } from '@shared/utils/decode-project-id'
 import { cn } from '@renderer/lib/cn'
@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui
 const MAX_VISIBLE = 4
 
 interface ActiveSessionsProps {
-  sessions: SessionSummary[]
+  sessions: TraySnapshotSession[]
   /** Sum of all tokens across visible sessions, used for relative progress bars */
   totalTokens: number
 }
@@ -20,7 +20,7 @@ function ActiveSessionRow({
   session,
   totalTokens,
 }: {
-  session: SessionSummary
+  session: TraySnapshotSession
   totalTokens: number
 }): React.JSX.Element {
   const handleClick = (): void => {
