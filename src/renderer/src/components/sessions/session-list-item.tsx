@@ -193,9 +193,11 @@ export default function SessionListItem({
           <span className="text-[10px] text-muted-foreground">
             {formatShortRelativeTime(session.lastTimestamp)} · {pct.toFixed(0)}%
           </span>
-          {session.primaryModel &&
+          {/* Latest, not dominant: the badge answers "what is this session on
+              now", which is not the same question as "what did it use most". */}
+          {(session.latestModel ?? session.primaryModel) &&
             (() => {
-              const meta = getModelMeta(session.primaryModel)
+              const meta = getModelMeta(session.latestModel ?? session.primaryModel)
               return (
                 <span
                   className={`rounded-sm px-1 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}
