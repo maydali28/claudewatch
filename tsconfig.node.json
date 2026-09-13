@@ -1,7 +1,5 @@
 {
   "include": [
-    "electron.vite.config.*",
-    "forge.config.*",
     "src/main/**/*",
     "src/preload/**/*",
     "src/shared/**/*"
@@ -12,8 +10,13 @@
     "target": "ES2022",
     "module": "CommonJS",
     "moduleResolution": "node",
-    "lib": ["ES2022"],
-    "types": ["node", "electron-vite/node"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node",
+      "electron-vite/node"
+    ],
     "strict": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitReturns": true,
@@ -25,8 +28,12 @@
     "outDir": "dist/main",
     "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/shared/*"],
-      "@main/*": ["src/main/*"]
+      "@shared/*": [
+        "src/shared/*"
+      ],
+      "@main/*": [
+        "src/main/*"
+      ]
     }
   }
 }

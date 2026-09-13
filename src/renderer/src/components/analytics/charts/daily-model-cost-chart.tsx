@@ -82,13 +82,17 @@ export function DailyModelCostChart({ data }: Props): React.JSX.Element {
           />
           <YAxis dataKey="label" type="category" tick={{ fontSize: 10 }} width={80} />
           <Tooltip
-            formatter={(v: number) => [formatCost(v), 'Cost']}
+            formatter={(v) => [formatCost(Number(v)), 'Cost']}
             contentStyle={{ fontSize: 11 }}
           />
           <Bar
             dataKey="cost"
             radius={[0, 3, 3, 0]}
-            label={{ position: 'right', fontSize: 10, formatter: (v: number) => formatCost(v) }}
+            label={{
+              position: 'right',
+              fontSize: 10,
+              formatter: (v: unknown) => formatCost(Number(v)),
+            }}
           >
             {bars.map((b, i) => (
               <Cell key={i} fill={b.color} />
@@ -112,7 +116,7 @@ export function DailyModelCostChart({ data }: Props): React.JSX.Element {
           <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => v.slice(5)} />
           <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatCost(v)} width={52} />
           <Tooltip
-            formatter={(v: number, name: string) => [formatCost(v), getModelMeta(name).label]}
+            formatter={(v, name) => [formatCost(Number(v)), getModelMeta(String(name)).label]}
             contentStyle={{ fontSize: 11 }}
           />
           <Legend
@@ -145,7 +149,7 @@ export function DailyModelCostChart({ data }: Props): React.JSX.Element {
         <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={(v: string) => v.slice(5)} />
         <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatCost(v)} width={52} />
         <Tooltip
-          formatter={(v: number, name: string) => [formatCost(v), getModelMeta(name).label]}
+          formatter={(v, name) => [formatCost(Number(v)), getModelMeta(String(name)).label]}
           contentStyle={{ fontSize: 11 }}
         />
         <Legend

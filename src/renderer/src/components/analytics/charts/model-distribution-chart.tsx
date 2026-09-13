@@ -37,9 +37,9 @@ export function ModelDistributionChart({ data }: Props): React.JSX.Element {
           ))}
         </Pie>
         <Tooltip
-          formatter={(v: number, name: string) => [
-            `${v} turns (${total > 0 ? Math.round((v / total) * 100) : 0}%)`,
-            name,
+          formatter={(v, name) => [
+            `${Number(v)} turns (${total > 0 ? Math.round((Number(v) / total) * 100) : 0}%)`,
+            String(name),
           ]}
           contentStyle={{ fontSize: 11 }}
         />

@@ -351,9 +351,9 @@ function HealthDonutChart({ summary }: { summary: SessionHealthSummary }): React
             ))}
           </Pie>
           <Tooltip
-            formatter={(value: number, name: string) => [
-              `${value} (${((value / total) * 100).toFixed(0)}%)`,
-              name,
+            formatter={(value, name) => [
+              `${Number(value)} (${((Number(value) / total) * 100).toFixed(0)}%)`,
+              String(name),
             ]}
             contentStyle={{ fontSize: 11, borderRadius: 6 }}
           />
