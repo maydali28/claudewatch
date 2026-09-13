@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -74,7 +74,14 @@ function freezeHistory(source: string): string {
 }
 
 describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
-  const root = freezeHistory(path.join(os.homedir(), '.claude', 'projects'))
+  // Frozen in a hook, not in the suite body: a suite body runs during
+  // collection even when `skipIf` will skip every test in it, so touching the
+  // history here crashed the run on any machine without a ~/.claude — CI, for
+  // one. Hooks of a skipped suite never run.
+  let root: string
+  beforeAll(() => {
+    root = freezeHistory(path.join(os.homedir(), '.claude', 'projects'))
+  })
 
   it('30d and 90d totals match the responses that fall in those windows', async () => {
     const files = transcripts(root)
