@@ -1,3 +1,10 @@
+## 1.2.7 (2026-09-13)
+
+
+### Bug Fixes
+
+* **tooling:** do not block a tag when develop only differs by a merge
+* **tooling:** only block a tag when a shipping file differs
 ## 1.2.6 (2026-09-13)
 
 
