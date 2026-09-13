@@ -149,6 +149,49 @@ describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
     expect(summaryCost).toBeCloseTo(ledgerCost, 6)
   }, 180_000)
 
+  /**
+   * Multi-day sessions are the case the old attribution got wrong, so confirm
+   * they exist in real data and that their usage is genuinely spread rather
+   * than piled onto the last day.
+   */
+  it('spreads multi-day sessions across the days they ran', async () => {
+    const { parseSessionMetadata } = await import('@main/services/parsers/metadata-parser')
+    const parents = transcripts(root).filter((f) => !f.includes(`${path.sep}subagents${path.sep}`))
+
+    let multiDay = 0
+    let widest = 0
+    let misattributed = 0
+
+    for (const file of parents) {
+      const summary = await parseSessionMetadata(
+        file,
+        path.basename(file, '.jsonl'),
+        path.basename(path.dirname(file)),
+        ANTHROPIC_PRICING
+      )
+      const days = summary.dailyUsage
+      if (days.length <= 1) continue
+      multiDay++
+      widest = Math.max(widest, days.length)
+
+      // Under the old rule every one of these tokens landed on the last day.
+      const lastDay = days[days.length - 1]
+      const earlier =
+        summary.totalInputTokens +
+        summary.totalOutputTokens -
+        (lastDay.inputTokens + lastDay.outputTokens)
+      if (earlier > 0) misattributed++
+    }
+
+    console.log(
+      `\n  multi-day sessions        ${multiDay}` +
+        `\n  widest span (days)        ${widest}` +
+        `\n  previously misattributed  ${misattributed}`
+    )
+
+    expect(multiDay).toBeGreaterThan(0)
+  }, 180_000)
+
   it('is idempotent on the largest transcript', async () => {
     const files = transcripts(root)
     const largest = files

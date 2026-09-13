@@ -15,6 +15,7 @@ import type {
 } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { decodeProjectId } from '@shared/utils/decode-project-id'
+import { toDateKey } from '@shared/utils/date-ranges'
 import {
   IDLE_GAP_MS,
   MAX_TURN_DURATION_MS,
@@ -62,6 +63,9 @@ interface MetadataAccumulator {
   parallelToolCallCount: number
   maxParallelDegree: number
 
+  /** Messages per local day, so daily series report real per-day activity. */
+  messagesByDay: Map<string, number>
+
   // Turn tracking
   lastMessageTimestamp: string | undefined
   turnIndex: number
@@ -90,6 +94,7 @@ function createMetadataAccumulator(sessionId: string): MetadataAccumulator {
     isWorktreeSession: false,
     parallelToolCallCount: 0,
     maxParallelDegree: 0,
+    messagesByDay: new Map(),
     lastMessageTimestamp: undefined,
     turnIndex: 0,
     turnsSinceLastCompaction: 0,
@@ -131,8 +136,15 @@ function processCompactionBoundary(raw: RawRecord, acc: MetadataAccumulator): vo
   acc.turnsSinceLastCompaction = 0
 }
 
+function countMessageOnDay(raw: RawRecord, acc: MetadataAccumulator): void {
+  if (!raw.timestamp) return
+  const day = toDateKey(raw.timestamp)
+  acc.messagesByDay.set(day, (acc.messagesByDay.get(day) ?? 0) + 1)
+}
+
 function processUserRecord(_raw: RawRecord, acc: MetadataAccumulator): void {
   acc.messageCount++
+  countMessageOnDay(_raw, acc)
   acc.lastMessageTimestamp = _raw.timestamp
   acc.turnIndex++
   acc.turnsSinceLastCompaction++
@@ -228,6 +240,7 @@ function accumulateBlockMetrics(
  */
 function processAssistantRecord(raw: RawRecord, acc: MetadataAccumulator): void {
   acc.messageCount++
+  countMessageOnDay(raw, acc)
   accumulateBlockMetrics(getRawBlocks(raw), raw, parseTokenUsage(raw), acc)
 }
 
@@ -320,6 +333,28 @@ function buildSessionSummary(
     observability: buildObservability(acc),
     tags: acc.parallelToolCallCount > 0 ? ['parallel-threads'] : [],
     subagents: [],
+    dailyUsage: usage.byDay.map((d) => ({
+      day: d.day,
+      inputTokens: d.inputTokens,
+      outputTokens: d.outputTokens,
+      cacheReadTokens: d.cacheReadTokens,
+      cacheCreation5mTokens: d.cacheWrite5m,
+      cacheCreation1hTokens: d.cacheWrite1h,
+      cacheCreationTokens: d.cacheWriteTotal,
+      estimatedCost: d.estimatedCost,
+      responseCount: d.responseCount,
+      // Falls back to the response count for days that only a subagent was
+      // active on — the parent transcript records no message there.
+      messageCount: acc.messagesByDay.get(d.day) ?? d.responseCount,
+      models: d.models.map((m) => ({
+        model: m.model,
+        family: m.family,
+        inputTokens: m.inputTokens,
+        outputTokens: m.outputTokens,
+        estimatedCost: m.estimatedCost ?? 0,
+        turnCount: m.turnCount,
+      })),
+    })),
   }
 }
 

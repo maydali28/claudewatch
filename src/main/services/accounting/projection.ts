@@ -41,6 +41,8 @@ export interface DayBucket extends UsageTotals {
   day: string
   /** Families actually used on this day — not the session's lifetime models. */
   families: ModelFamily[]
+  /** Per-model usage for this day, so model charts can be date-scoped. */
+  models: ModelUsageRow[]
 }
 
 export interface UsageProjection {
@@ -87,12 +89,40 @@ function add(totals: UsageTotals, e: ResponseEntry): void {
   else totals.estimatedCost += e.costUsd
 }
 
+/** Fold one response into a model-keyed map, shared by the lifetime and per-day rollups. */
+function accumulateModel(target: Map<string, ModelUsageRow>, e: ResponseEntry): void {
+  const key = e.modelRaw ?? '(no model)'
+  const row = target.get(key)
+  if (row) {
+    row.inputTokens += e.inputTokens
+    row.outputTokens += e.outputTokens
+    row.cacheReadTokens += e.cacheReadTokens
+    row.cacheWrite5m += e.cacheWrite5m
+    row.cacheWrite1h += e.cacheWrite1h
+    row.turnCount++
+    if (e.costUsd !== null) row.estimatedCost = (row.estimatedCost ?? 0) + e.costUsd
+    return
+  }
+  target.set(key, {
+    model: key,
+    family: e.modelFamily,
+    inputTokens: e.inputTokens,
+    outputTokens: e.outputTokens,
+    cacheReadTokens: e.cacheReadTokens,
+    cacheWrite5m: e.cacheWrite5m,
+    cacheWrite1h: e.cacheWrite1h,
+    estimatedCost: e.costUsd,
+    turnCount: 1,
+  })
+}
+
 export function projectUsage(entries: ResponseEntry[]): UsageProjection {
   const parent = emptyTotals()
   const combined = emptyTotals()
   const byModel = new Map<string, ModelUsageRow>()
   const byDay = new Map<string, DayBucket>()
   const dayFamilies = new Map<string, Set<ModelFamily>>()
+  const dayModels = new Map<string, Map<string, ModelUsageRow>>()
   const parentCounts = new Map<string, number>()
 
   let latestParentModel: string | undefined
@@ -116,38 +146,18 @@ export function projectUsage(entries: ResponseEntry[]): UsageProjection {
       }
     }
 
-    const modelKey = e.modelRaw ?? '(no model)'
-    const row = byModel.get(modelKey)
-    if (row) {
-      row.inputTokens += e.inputTokens
-      row.outputTokens += e.outputTokens
-      row.cacheReadTokens += e.cacheReadTokens
-      row.cacheWrite5m += e.cacheWrite5m
-      row.cacheWrite1h += e.cacheWrite1h
-      row.turnCount++
-      if (e.costUsd !== null) row.estimatedCost = (row.estimatedCost ?? 0) + e.costUsd
-    } else {
-      byModel.set(modelKey, {
-        model: modelKey,
-        family: e.modelFamily,
-        inputTokens: e.inputTokens,
-        outputTokens: e.outputTokens,
-        cacheReadTokens: e.cacheReadTokens,
-        cacheWrite5m: e.cacheWrite5m,
-        cacheWrite1h: e.cacheWrite1h,
-        estimatedCost: e.costUsd,
-        turnCount: 1,
-      })
-    }
+    accumulateModel(byModel, e)
 
     let bucket = byDay.get(e.dayLocal)
     if (!bucket) {
-      bucket = { day: e.dayLocal, families: [], ...emptyTotals() }
+      bucket = { day: e.dayLocal, families: [], models: [], ...emptyTotals() }
       byDay.set(e.dayLocal, bucket)
       dayFamilies.set(e.dayLocal, new Set())
+      dayModels.set(e.dayLocal, new Map())
     }
     add(bucket, e)
     dayFamilies.get(e.dayLocal)!.add(e.modelFamily)
+    accumulateModel(dayModels.get(e.dayLocal)!, e)
   }
 
   let dominantParentModel: string | undefined
@@ -162,6 +172,9 @@ export function projectUsage(entries: ResponseEntry[]): UsageProjection {
   const days = [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day))
   for (const day of days) {
     day.families = [...(dayFamilies.get(day.day) ?? [])].sort()
+    day.models = [...(dayModels.get(day.day)?.values() ?? [])].sort(
+      (a, b) => b.turnCount - a.turnCount
+    )
   }
 
   return {

@@ -25,6 +25,7 @@ import type {
   SessionHealthSummary,
   SessionHealthEntry,
 } from '@shared/types/analytics'
+import type { SessionDayUsage } from '@shared/types/session'
 import type { LintCheckId, LintSeverity } from '@shared/types/lint'
 import { getModelFamily } from '@shared/constants/models'
 
@@ -38,46 +39,91 @@ function percentile(sorted: number[], p: number): number {
   return sorted[idx]
 }
 
+/**
+ * Days a session was actually active within the range.
+ *
+ * Everything date-scoped derives from this. Filtering on `lastTimestamp`
+ * attributed a session's whole history to its final day, so resuming
+ * yesterday's session today moved yesterday's tokens — and yesterday's models
+ * — into today, and selecting yesterday showed nothing at all.
+ */
+function daysInRange(session: SessionSummary, fromKey: string, toKey: string): SessionDayUsage[] {
+  return (session.dailyUsage ?? []).filter((d) => d.day >= fromKey && d.day <= toKey)
+}
+
 function filterByDateRange(sessions: SessionSummary[], from: Date, to: Date): SessionSummary[] {
-  return sessions.filter((s) => isWithinRange(s.lastTimestamp, from, to))
+  const fromKey = toDateKey(from)
+  const toKey = toDateKey(to)
+  return sessions.filter((s) =>
+    s.dailyUsage?.length
+      ? daysInRange(s, fromKey, toKey).length > 0
+      : // A summary written before per-day accounting existed. Kept so an
+        // out-of-date cache degrades to the old behaviour instead of vanishing.
+        isWithinRange(s.lastTimestamp, from, to)
+  )
 }
 
 // ─── buildDailyUsage ─────────────────────────────────────────────────────────
 
-function buildDailyUsage(sessions: SessionSummary[]): DailyUsage[] {
+function buildDailyUsage(sessions: SessionSummary[], fromKey: string, toKey: string): DailyUsage[] {
   const byDate = new Map<string, DailyUsage>()
 
   for (const s of sessions) {
-    const key = toDateKey(s.lastTimestamp)
-    const existing = byDate.get(key)
-    if (existing) {
-      existing.inputTokens += s.totalInputTokens
-      existing.outputTokens += s.totalOutputTokens
-      existing.cacheReadTokens += s.totalCacheReadTokens
-      existing.cacheCreationTokens += s.totalCacheCreationTokens
-      existing.cacheCreation5mTokens += s.totalCacheCreation5mTokens
-      existing.cacheCreation1hTokens += s.totalCacheCreation1hTokens
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      let existing = byDate.get(d.day)
+      if (!existing) {
+        existing = {
+          id: d.day,
+          date: d.day,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+          cacheCreation5mTokens: 0,
+          cacheCreation1hTokens: 0,
+          sessionCount: 0,
+          messageCount: 0,
+          estimatedCost: 0,
+        }
+        byDate.set(d.day, existing)
+      }
+      existing.inputTokens += d.inputTokens
+      existing.outputTokens += d.outputTokens
+      existing.cacheReadTokens += d.cacheReadTokens
+      existing.cacheCreationTokens += d.cacheCreationTokens
+      existing.cacheCreation5mTokens += d.cacheCreation5mTokens
+      existing.cacheCreation1hTokens += d.cacheCreation1hTokens
+      existing.messageCount += d.messageCount
+      existing.estimatedCost += d.estimatedCost
+      // A session active on three days is one session on each of them — but it
+      // is still one session over the range, so these cannot be summed to get a
+      // distinct-session count.
       existing.sessionCount++
-      existing.messageCount += s.messageCount
-      existing.estimatedCost += s.estimatedCost
-    } else {
-      byDate.set(key, {
-        id: key,
-        date: key,
-        inputTokens: s.totalInputTokens,
-        outputTokens: s.totalOutputTokens,
-        cacheReadTokens: s.totalCacheReadTokens,
-        cacheCreationTokens: s.totalCacheCreationTokens,
-        cacheCreation5mTokens: s.totalCacheCreation5mTokens,
-        cacheCreation1hTokens: s.totalCacheCreation1hTokens,
-        sessionCount: 1,
-        messageCount: s.messageCount,
-        estimatedCost: s.estimatedCost,
-      })
     }
   }
 
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
+/** Usage totals for the selected period only, across the given sessions. */
+function totalsInRange(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string
+): { tokens: number; cacheTokens: number; cost: number; messages: number } {
+  let tokens = 0
+  let cacheTokens = 0
+  let cost = 0
+  let messages = 0
+  for (const s of sessions) {
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      tokens += d.inputTokens + d.outputTokens
+      cacheTokens += d.cacheReadTokens + d.cacheCreationTokens
+      cost += d.estimatedCost
+      messages += d.messageCount
+    }
+  }
+  return { tokens, cacheTokens, cost, messages }
 }
 
 // ─── buildProjectCosts ────────────────────────────────────────────────────────
@@ -113,26 +159,34 @@ function buildProjectCosts(sessions: SessionSummary[], projects: Project[]): Pro
 
 // ─── buildModelUsage ──────────────────────────────────────────────────────────
 
-function buildModelUsage(sessions: SessionSummary[]): ModelUsage[] {
+/**
+ * Model usage for the selected period only.
+ *
+ * Previously read each session's lifetime breakdown, so a day on which only
+ * Sonnet ran still listed every model the session had ever used. Unrecognised
+ * models are kept rather than skipped — dropping them made a fifth of real
+ * turns disappear from the chart while still counting in the totals beside it.
+ */
+function buildModelUsage(sessions: SessionSummary[], fromKey: string, toKey: string): ModelUsage[] {
   const byFamily = new Map<string, ModelUsage>()
 
   for (const s of sessions) {
-    for (const bd of s.modelBreakdown) {
-      const family = getModelFamily(bd.model)
-      if (family === 'unknown') continue
-      const existing = byFamily.get(family)
-      if (existing) {
-        existing.turnCount += bd.turnCount
-        existing.totalInputTokens += bd.inputTokens
-        existing.totalOutputTokens += bd.outputTokens
-      } else {
-        byFamily.set(family, {
-          id: family,
-          model: family,
-          turnCount: bd.turnCount,
-          totalInputTokens: bd.inputTokens,
-          totalOutputTokens: bd.outputTokens,
-        })
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      for (const m of d.models) {
+        const existing = byFamily.get(m.family)
+        if (existing) {
+          existing.turnCount += m.turnCount
+          existing.totalInputTokens += m.inputTokens
+          existing.totalOutputTokens += m.outputTokens
+        } else {
+          byFamily.set(m.family, {
+            id: m.family,
+            model: m.family,
+            turnCount: m.turnCount,
+            totalInputTokens: m.inputTokens,
+            totalOutputTokens: m.outputTokens,
+          })
+        }
       }
     }
   }
@@ -145,18 +199,25 @@ function buildModelUsage(sessions: SessionSummary[]): ModelUsage[] {
 function computeCacheAnalytics(
   sessions: SessionSummary[],
   dailyUsage: DailyUsage[],
-  pricingTable: Record<ModelFamily, ModelPricing>
+  pricingTable: Record<ModelFamily, ModelPricing>,
+  fromKey: string,
+  toKey: string
 ): CacheAnalytics {
+  // Scoped to the selected period, matching the daily series shown beside
+  // these figures. Summing session lifetimes here would report cache activity
+  // from days the user did not select.
   let totalCacheReadTokens = 0
   let totalCacheWriteTokens = 0
   let totalCache5mTokens = 0
   let totalCache1hTokens = 0
 
   for (const s of sessions) {
-    totalCacheReadTokens += s.totalCacheReadTokens
-    totalCacheWriteTokens += s.totalCacheCreationTokens
-    totalCache5mTokens += s.totalCacheCreation5mTokens
-    totalCache1hTokens += s.totalCacheCreation1hTokens
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      totalCacheReadTokens += d.cacheReadTokens
+      totalCacheWriteTokens += d.cacheCreationTokens
+      totalCache5mTokens += d.cacheCreation5mTokens
+      totalCache1hTokens += d.cacheCreation1hTokens
+    }
   }
 
   // Cache hit ratio = cacheRead / (input + cacheRead + cacheCreation)
@@ -171,7 +232,10 @@ function computeCacheAnalytics(
   //
   // Note: input_tokens in API responses is already EXCLUSIVE of cache_read and
   // cache_creation tokens, so summing all three gives the true total context size.
-  const totalFreshInputTokens = sessions.reduce((s, sess) => s + sess.totalInputTokens, 0)
+  let totalFreshInputTokens = 0
+  for (const s of sessions) {
+    for (const d of daysInRange(s, fromKey, toKey)) totalFreshInputTokens += d.inputTokens
+  }
   const hitRatioDenominator = totalFreshInputTokens + totalCacheReadTokens + totalCacheWriteTokens
   const hitRatio = hitRatioDenominator > 0 ? totalCacheReadTokens / hitRatioDenominator : 0
 
@@ -386,19 +450,23 @@ function computeModelEfficiency(
 
 // ─── computeDailyModelCost ────────────────────────────────────────────────────
 
-function computeDailyModelCost(sessions: SessionSummary[]): DailyModelCost[] {
+function computeDailyModelCost(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string
+): DailyModelCost[] {
   const byDateModel = new Map<string, DailyModelCost>()
 
   for (const s of sessions) {
-    const date = toDateKey(s.lastTimestamp)
-    for (const bd of s.modelBreakdown) {
-      const family = getModelFamily(bd.model)
-      const key = `${date}-${family}`
-      const existing = byDateModel.get(key)
-      if (existing) {
-        existing.cost += bd.estimatedCost
-      } else {
-        byDateModel.set(key, { id: key, date, model: family, cost: bd.estimatedCost })
+    for (const d of daysInRange(s, fromKey, toKey)) {
+      for (const m of d.models) {
+        const key = `${d.day}-${m.family}`
+        const existing = byDateModel.get(key)
+        if (existing) {
+          existing.cost += m.estimatedCost
+        } else {
+          byDateModel.set(key, { id: key, date: d.day, model: m.family, cost: m.estimatedCost })
+        }
       }
     }
   }
@@ -668,26 +736,27 @@ export function computeAnalytics(
   pricingTable: Record<ModelFamily, ModelPricing>
 ): AnalyticsData {
   const { from, to } = resolveDateRange(dateRange)
+  const fromKey = toDateKey(from)
+  const toKey = toDateKey(to)
   const filtered = filterByDateRange(sessions, from, to)
 
+  // Distinct sessions active in the period — not the sum of per-day counts, in
+  // which a session spanning three days would appear three times.
   const totalSessions = filtered.length
-  const totalMessages = filtered.reduce((s, sess) => s + sess.messageCount, 0)
-  const totalTokens = filtered.reduce(
-    (s, sess) => s + sess.totalInputTokens + sess.totalOutputTokens,
-    0
-  )
-  const totalCacheTokens = filtered.reduce(
-    (s, sess) => s + sess.totalCacheReadTokens + sess.totalCacheCreationTokens,
-    0
-  )
-  const totalCost = filtered.reduce((s, sess) => s + sess.estimatedCost, 0)
 
-  const dailyUsage = buildDailyUsage(filtered)
+  // Totals cover the selected period, not each matching session's lifetime.
+  const inRange = totalsInRange(filtered, fromKey, toKey)
+  const totalMessages = inRange.messages
+  const totalTokens = inRange.tokens
+  const totalCacheTokens = inRange.cacheTokens
+  const totalCost = inRange.cost
+
+  const dailyUsage = buildDailyUsage(filtered, fromKey, toKey)
   const projectCosts = buildProjectCosts(filtered, projects)
-  const modelUsage = buildModelUsage(filtered)
-  const cacheAnalytics = computeCacheAnalytics(filtered, dailyUsage, pricingTable)
+  const modelUsage = buildModelUsage(filtered, fromKey, toKey)
+  const cacheAnalytics = computeCacheAnalytics(filtered, dailyUsage, pricingTable, fromKey, toKey)
   const modelEfficiency = computeModelEfficiency(filtered, pricingTable)
-  const dailyModelCost = computeDailyModelCost(filtered)
+  const dailyModelCost = computeDailyModelCost(filtered, fromKey, toKey)
   const latencyAnalytics = computeLatencyAnalytics(filtered)
   const effortAnalytics = computeEffortAnalytics(filtered, pricingTable)
   const parallelToolAnalytics = computeParallelToolAnalytics(filtered)

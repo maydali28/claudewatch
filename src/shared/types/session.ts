@@ -1,3 +1,5 @@
+import type { ModelFamily } from './pricing'
+
 // ─── Record Types ─────────────────────────────────────────────────────────────
 
 export type RecordType =
@@ -241,6 +243,44 @@ export interface SubagentSummary {
   modelBreakdown: ModelTokenBreakdown[]
 }
 
+// ─── Per-day usage ────────────────────────────────────────────────────────────
+
+/**
+ * Usage attributed to the calendar day it actually occurred on, derived from
+ * each response's own timestamp.
+ *
+ * Analytics previously bucketed a session's entire lifetime on its last active
+ * day, so resuming yesterday's session today moved yesterday's tokens — and
+ * yesterday's models — into today. Carrying the split on the summary lets the
+ * dashboard answer date-scoped questions without re-reading transcripts.
+ */
+export interface SessionDayModelUsage {
+  /** Exact model string as written. */
+  model: string
+  family: ModelFamily
+  inputTokens: number
+  outputTokens: number
+  estimatedCost: number
+  turnCount: number
+}
+
+export interface SessionDayUsage {
+  /** Local calendar day, `YYYY-MM-DD`. */
+  day: string
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreation5mTokens: number
+  cacheCreation1hTokens: number
+  cacheCreationTokens: number
+  estimatedCost: number
+  /** Billable API responses on this day. */
+  responseCount: number
+  /** Messages exchanged on this day, user and assistant. */
+  messageCount: number
+  models: SessionDayModelUsage[]
+}
+
 // ─── Session Summary (lightweight, for sidebar) ───────────────────────────────
 
 export interface SessionSummary {
@@ -287,6 +327,12 @@ export interface SessionSummary {
   observability: SessionObservability
   tags?: string[]
   subagents: SubagentSummary[]
+  /**
+   * Usage split by the day it happened, parent and subagents combined. Every
+   * date-scoped figure in analytics is derived from this rather than from the
+   * session's last timestamp.
+   */
+  dailyUsage: SessionDayUsage[]
 }
 
 // ─── Session Metadata ─────────────────────────────────────────────────────────
