@@ -1,3 +1,9 @@
+## 1.2.10 (2026-09-13)
+
+
+### Bug Fixes
+
+* **update:** listen for the update quit on the emitter that sends it
 ## 1.2.9 (2026-09-13)
 
 

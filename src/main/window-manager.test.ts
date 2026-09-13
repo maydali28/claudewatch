@@ -94,8 +94,37 @@ const fakeApp = {
   },
 }
 
+/**
+ * Electron's built-in autoUpdater is a different emitter from `app`, and the
+ * only one that emits `before-quit-for-update`. Kept separate here so a
+ * listener registered on the wrong object fails a test rather than becoming an
+ * update that silently never installs.
+ */
+const updaterListeners = new Map<string, Listener[]>()
+const fakeSquirrelUpdater = {
+  once(event: string, cb: Listener) {
+    const arr = updaterListeners.get(event) ?? []
+    arr.push(cb)
+    updaterListeners.set(event, arr)
+  },
+  on(event: string, cb: Listener) {
+    this.once(event, cb)
+  },
+  removeListener(event: string, cb: Listener) {
+    const arr = updaterListeners.get(event) ?? []
+    updaterListeners.set(
+      event,
+      arr.filter((l) => l !== cb)
+    )
+  },
+  emit(event: string) {
+    for (const cb of updaterListeners.get(event) ?? []) cb()
+  },
+}
+
 vi.mock('electron', () => ({
   app: fakeApp,
+  autoUpdater: fakeSquirrelUpdater,
   BrowserWindow: FakeWindow,
   shell: { openExternal: vi.fn() },
   screen: {
@@ -115,6 +144,7 @@ describe('positionPopoverUnderTray', () => {
     vi.resetModules()
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
     appListeners.clear()
+    updaterListeners.clear()
   })
 
   it('centers the popover under the tray icon on the clicked display', async () => {
@@ -167,6 +197,7 @@ describe('createTrayPopoverWindow', () => {
     vi.resetModules()
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
     appListeners.clear()
+    updaterListeners.clear()
   })
 
   it('hides instead of closing (Cmd+W via the default app menu must not destroy it)', async () => {
@@ -192,6 +223,31 @@ describe('createTrayPopoverWindow', () => {
     expect(closeEvent.preventDefault).not.toHaveBeenCalled()
   })
 
+  /**
+   * An update quit emits `before-quit-for-update` on Electron's built-in
+   * autoUpdater — not on `app`. Listening on the wrong emitter left the popover
+   * refusing to close, which kept the process alive and made ShipIt abort the
+   * install. That shipped in 1.2.6–1.2.9 and never fired.
+   */
+  it('allows the close during an update quit', async () => {
+    const { createTrayPopoverWindow } = await import('./window-manager')
+    const win = createTrayPopoverWindow() as unknown as FakeWindow
+
+    fakeSquirrelUpdater.emit('before-quit-for-update')
+    const closeEvent = { preventDefault: vi.fn() }
+    win.emit('close', closeEvent)
+
+    expect(closeEvent.preventDefault).not.toHaveBeenCalled()
+  })
+
+  it('does not listen for the update quit on app, which never emits it', async () => {
+    const { createTrayPopoverWindow } = await import('./window-manager')
+    createTrayPopoverWindow()
+
+    expect(appListeners.get('before-quit-for-update') ?? []).toHaveLength(0)
+    expect(updaterListeners.get('before-quit-for-update') ?? []).not.toHaveLength(0)
+  })
+
   it('clears the module-level reference once the window is destroyed', async () => {
     const mod = await import('./window-manager')
     const win = mod.createTrayPopoverWindow() as unknown as FakeWindow
@@ -208,6 +264,7 @@ describe('broadcastToRenderers', () => {
   beforeEach(() => {
     vi.resetModules()
     appListeners.clear()
+    updaterListeners.clear()
   })
 
   it('reaches the update window, so its download progress bar actually moves', async () => {

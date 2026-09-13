@@ -1,5 +1,5 @@
 import type { BrowserWindow } from 'electron'
-import { app, session } from 'electron'
+import { app, autoUpdater as squirrelUpdater, session } from 'electron'
 
 import {
   broadcastToRenderers,
@@ -241,7 +241,11 @@ function bootstrap(): void {
   // ShipIt waits for the target app to exit, times out, and aborts with the very
   // same error — which is why "Install & Restart" still did nothing after the
   // flag alone was added. Quit ourselves once the handoff has had a moment.
-  app.on('before-quit-for-update', () => {
+  // `before-quit-for-update` is emitted by Electron's built-in autoUpdater
+  // (Squirrel), never by `app` — so listening on `app` registered a handler
+  // that could not fire. electron-updater's quitAndInstall delegates to this
+  // same object on macOS, which is what actually starts the handoff.
+  squirrelUpdater.on('before-quit-for-update', () => {
     isQuitting = true
     setTimeout(() => {
       log.info('Quitting so ShipIt can install the update')
