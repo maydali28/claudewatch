@@ -182,6 +182,10 @@ export function createTrayPopoverWindow(): BrowserWindow {
     quitting = true
   }
   app.once('before-quit', markQuitting)
+  // An update quit emits 'before-quit-for-update' instead of 'before-quit', so
+  // without this the popover refuses to close and keeps the process alive,
+  // which makes Squirrel's ShipIt abort the install. See src/main/index.ts.
+  app.once('before-quit-for-update', markQuitting)
   win.on('close', (event) => {
     if (!quitting) {
       event.preventDefault()
@@ -190,6 +194,7 @@ export function createTrayPopoverWindow(): BrowserWindow {
   })
   win.on('closed', () => {
     app.removeListener('before-quit', markQuitting)
+    app.removeListener('before-quit-for-update', markQuitting)
     if (trayPopoverWindow === win) {
       trayPopoverWindow = null
     }

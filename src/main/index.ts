@@ -210,6 +210,26 @@ function bootstrap(): void {
     isQuitting = true
   })
 
+  // An update quit does NOT emit 'before-quit'. From Electron's own docs for
+  // autoUpdater.quitAndInstall():
+  //
+  //   "When this API is called, the before-quit event is not emitted before all
+  //    windows are closed. As a result you should listen to this event if you
+  //    wish to perform actions before the windows are closed while a process is
+  //    quitting, as well as listening to before-quit."
+  //
+  // Without this, isQuitting stayed false, the 'close' handler below hid the
+  // window instead of letting it close, the process stayed alive, and Squirrel's
+  // ShipIt aborted the install:
+  //
+  //   Aborting update attempt because there are 1 running instances of the
+  //   target app — SQRLInstallerErrorDomain Code=-9 "App Still Running Error"
+  //
+  // which is why "Install & Restart" appeared to do nothing.
+  app.on('before-quit-for-update', () => {
+    isQuitting = true
+  })
+
   // ─── Keep process alive on all windows closed (tray app) ───────────────────
   // On macOS the window hides to tray so this fires when the user Force-Quits
   // via Activity Monitor or the Dock menu. On Windows/Linux there is no
