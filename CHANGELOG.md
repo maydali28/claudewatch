@@ -1,3 +1,9 @@
+## 1.2.3 (2026-09-13)
+
+
+### Bug Fixes
+
+* **update:** ship app-update.yml so downloads can start
 ## 1.2.2 (2026-09-13)
 
 
