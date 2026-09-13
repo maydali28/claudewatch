@@ -87,6 +87,49 @@ describe('getModelFamily — legacy version-before-family IDs', () => {
   })
 })
 
+/**
+ * Analytics hands charts a resolved family (`opus-5`), and those charts resolve
+ * it again to pick a label and colour. Resolution must therefore be idempotent
+ * — the substring matcher was accidentally, and an exact registry is not unless
+ * families are registered as their own keys. Without this every model chart
+ * falls back to the generic "Claude" label.
+ */
+describe('getModelFamily — resolving a family is idempotent', () => {
+  const families: ModelFamily[] = [
+    'fable-5-1',
+    'mythos-5-1',
+    'fable-5',
+    'mythos-5',
+    'opus-5',
+    'opus-4-8',
+    'opus-4-7',
+    'opus-4-6',
+    'opus-4-5',
+    'opus-4-1',
+    'opus-4',
+    'opus-3',
+    'sonnet-5',
+    'sonnet-4-6',
+    'sonnet-4-5',
+    'sonnet-4',
+    'sonnet-3-7',
+    'sonnet-3-5',
+    'haiku-4-5',
+    'haiku-3-5',
+    'haiku-3',
+    'unknown',
+  ]
+
+  it.each(families)('%s resolves to itself', (family) => {
+    expect(getModelFamily(family)).toBe(family)
+  })
+
+  it('resolving twice matches resolving once', () => {
+    const once = getModelFamily('claude-fable-5-1')
+    expect(getModelFamily(once)).toBe(once)
+  })
+})
+
 describe('getModelFamily — case insensitivity', () => {
   it('resolves an upper-case ID', () => {
     expect(getModelFamily('CLAUDE-OPUS-5')).toBe('opus-5')

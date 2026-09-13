@@ -57,11 +57,25 @@ const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
 const PROVIDER_PREFIX = /^(?:[a-z]{2,4}\.)?anthropic\./
 /** Bedrock inference-profile suffix, e.g. `-v1:0`. */
 const PROFILE_SUFFIX = /-v\d+:\d+$/
+/**
+ * Every family also resolves to itself, so resolution is idempotent.
+ *
+ * Analytics hands charts an already-resolved family and those charts resolve it
+ * again to pick a label and colour. The old substring matcher happened to
+ * survive that round trip; an exact registry does not unless the families are
+ * keys too, and without them every model chart falls back to a generic
+ * "Claude" label.
+ */
+for (const family of new Set(Object.values(EXACT_MODEL_FAMILIES))) {
+  EXACT_MODEL_FAMILIES[family] = family
+}
+
 /** Trailing dated snapshot, e.g. `-20251101` (Claude API) or `@20251101` (Vertex). */
 const DATE_SUFFIX = /[-@]\d{8}$/
 
 export function getModelFamily(model: string | null | undefined): ModelFamily {
   if (!model) return 'unknown'
+  if (model === 'unknown') return 'unknown'
   const normalized = model
     .toLowerCase()
     .replace(PROVIDER_PREFIX, '')
