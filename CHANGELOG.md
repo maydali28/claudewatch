@@ -1,3 +1,11 @@
+## 1.2.4 (2026-09-13)
+
+
+### Dependencies
+
+* update 49 dependency ranges within their current majors
+* runtime: @sentry/electron 7.18.0, zod 4.6.4, semver 7.8.5
+
 ## 1.2.3 (2026-09-13)
 
 
