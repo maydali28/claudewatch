@@ -23,6 +23,8 @@ import {
   parseTokenUsage,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
+import { createResponseAccumulator } from '@main/services/accounting/ledger'
+import { projectUsage } from '@main/services/accounting/projection'
 
 /**
  * Parse a session JSONL file into a fully-hydrated `ParsedSession` —
@@ -42,6 +44,14 @@ export async function parseSessionFull(
   pricingTable: Record<ModelFamily, ModelPricing>
 ): Promise<ParsedSession> {
   const seenUuids = new Set<string>()
+  // Usage is accounted once per API response. The records array below still
+  // keeps every transcript record — deduplicating the accounting must not
+  // remove anything the reader sees.
+  const ledger = createResponseAccumulator(
+    filePath,
+    { kind: 'parent', projectId, sessionId },
+    pricingTable
+  )
   const records: ParsedRecord[] = []
   const toolResultMap: Record<string, ToolResultEntry> = {}
 
@@ -54,10 +64,6 @@ export async function parseSessionFull(
   let messageCount = 0
   let userMessageCount = 0
   let assistantMessageCount = 0
-  let totalInputTokens = 0
-  let totalOutputTokens = 0
-  let totalCacheReadTokens = 0
-  let totalCacheCreationTokens = 0
   const modelsSet = new Set<string>()
   let compactionCount = 0
   const turnDurations: TurnDuration[] = []
@@ -97,6 +103,8 @@ export async function parseSessionFull(
       if (seenUuids.has(raw.uuid)) continue
       seenUuids.add(raw.uuid)
     }
+
+    ledger.add(raw)
 
     if (raw.slug && !slug) slug = raw.slug
     if (raw.parentUuid && !parentSessionId) parentSessionId = raw.parentUuid
@@ -216,11 +224,6 @@ export async function parseSessionFull(
       messageCount++
       assistantMessageCount++
 
-      totalInputTokens += usage.inputTokens
-      totalOutputTokens += usage.outputTokens
-      totalCacheReadTokens += usage.cacheReadInputTokens
-      totalCacheCreationTokens += usage.cacheCreationInputTokens
-
       const model = raw.message?.model
       if (model) modelsSet.add(model)
 
@@ -272,6 +275,12 @@ export async function parseSessionFull(
     projectId,
     pricingTable
   )
+
+  const usage = projectUsage([...ledger.entries()])
+  const totalInputTokens = usage.combined.inputTokens
+  const totalOutputTokens = usage.combined.outputTokens
+  const totalCacheReadTokens = usage.combined.cacheReadTokens
+  const totalCacheCreationTokens = usage.combined.cacheWriteTotal
 
   let subagentInputTokens = 0
   let subagentOutputTokens = 0

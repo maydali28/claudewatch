@@ -429,7 +429,24 @@ export default function SessionPanel(): React.JSX.Element {
                 {metadata.lastTimestamp && (
                   <span>{format(new Date(metadata.lastTimestamp), 'HH:mm')}</span>
                 )}
-                <span className="font-mono">{formatTokens(totalTokens)} tokens</span>
+                {/* Parent-only, matching the messages count beside it. The
+                    combined figure is shown when subagents contributed, so the
+                    header cannot silently disagree with the session list. */}
+                <span className="font-mono">
+                  {formatTokens(totalTokens)} tokens
+                  {activeSessionSummary &&
+                    activeSessionSummary.totalInputTokens + activeSessionSummary.totalOutputTokens >
+                      totalTokens && (
+                      <span className="ml-1 text-muted-foreground/60">
+                        (
+                        {formatTokens(
+                          activeSessionSummary.totalInputTokens +
+                            activeSessionSummary.totalOutputTokens
+                        )}{' '}
+                        incl. subagents)
+                      </span>
+                    )}
+                </span>
                 <span className="text-muted-foreground/60">
                   {metadata.messageCount} messages
                   {activeSessionSummary &&
