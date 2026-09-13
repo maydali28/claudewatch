@@ -62,7 +62,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b --force",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "depcruise": "depcruise --config .dependency-cruiser.cjs \"src/**/*.{ts,tsx}\"",
