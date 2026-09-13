@@ -76,6 +76,108 @@ function isRemoteVersionNewer(remoteVersion: string, currentVersion: string): bo
   return semver.gt(cleanedRemote, cleanedCurrent)
 }
 
+const LOOKS_LIKE_HTML = /<\/?(?:h[1-6]|ul|ol|li|p|br|strong|b|em|i|code|pre|a|div)\b[^>]*>/i
+
+function decodeEntities(text: string): string {
+  // &amp; is decoded last so "&amp;lt;" does not become "<".
+  return text
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;|&#0?39;|&#x27;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&amp;/gi, '&')
+}
+
+/**
+ * Remove any remaining tags by scanning, rather than by regex replacement.
+ *
+ * A strip of the form `/<[^>]*>/g` is incomplete in two ways, and CodeQL
+ * flagged it as such (high severity, "incomplete multi-character
+ * sanitization"). It needs a closing ">", so `<script src=x` survived a pass
+ * untouched; and removing one match can splice its neighbours into another.
+ * Repeating the replacement until it stabilises fixes the second problem but
+ * not the first, and is still a regex sanitizer.
+ *
+ * A single left-to-right scan has neither problem: an unterminated "<" simply
+ * consumes the rest of the string, and there is nothing to splice because
+ * nothing is removed from a buffer — text outside tags is copied out instead.
+ *
+ * Treating every bare "<" as a tag opener is correct for the input this gets.
+ * A literal less-than in an Atom feed arrives as "&lt;", which `decodeEntities`
+ * restores afterwards, so prose like "a &lt; b" is preserved.
+ */
+function stripTags(input: string): string {
+  let out = ''
+  let inTag = false
+  for (const ch of input) {
+    if (ch === '<') {
+      inTag = true
+      continue
+    }
+    if (ch === '>' && inTag) {
+      inTag = false
+      continue
+    }
+    if (!inTag) out += ch
+  }
+  return out
+}
+
+/**
+ * Convert HTML release notes back to markdown.
+ *
+ * electron-updater's GitHub provider takes release notes from the releases
+ * Atom feed, whose content is HTML — not the markdown we wrote into
+ * CHANGELOG.md. The update window renders notes with react-markdown and
+ * deliberately does not enable raw HTML, so from 1.2.1 the tags were shown
+ * literally:
+ *
+ *   <h3>Bug Fixes</h3> <ul> <li><strong>deps:</strong> clear the 12 tar …
+ *
+ * Converting the small subset the feed emits is preferable to rendering
+ * release-note HTML directly, which would mean turning on raw HTML in the
+ * markdown renderer for text fetched over the network.
+ *
+ * Input that is not HTML — the plain text Hazel returns on Linux — is passed
+ * through untouched.
+ */
+export function htmlReleaseNotesToMarkdown(input: string): string {
+  if (!LOOKS_LIKE_HTML.test(input)) return input.trim()
+
+  let out = input
+  // Inline elements first, so their text survives the generic tag strip below.
+  out = out.replace(
+    /<a\b[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi,
+    (_m, href: string, text: string) => `[${text.trim()}](${href})`
+  )
+  out = out.replace(
+    /<(strong|b)\b[^>]*>([\s\S]*?)<\/\1>/gi,
+    (_m, _tag: string, text: string) => `**${text.trim()}**`
+  )
+  out = out.replace(
+    /<(em|i)\b[^>]*>([\s\S]*?)<\/\1>/gi,
+    (_m, _tag: string, text: string) => `*${text.trim()}*`
+  )
+  out = out.replace(/<code\b[^>]*>([\s\S]*?)<\/code>/gi, (_m, text: string) => `\`${text.trim()}\``)
+  // Block elements.
+  out = out.replace(
+    /<h([1-6])\b[^>]*>([\s\S]*?)<\/h\1>/gi,
+    (_m, level: string, text: string) => `\n\n${'#'.repeat(Number(level))} ${text.trim()}\n\n`
+  )
+  out = out.replace(/<li\b[^>]*>([\s\S]*?)<\/li>/gi, (_m, text: string) => `\n- ${text.trim()}`)
+  out = out.replace(/<\/?(?:ul|ol)\b[^>]*>/gi, '\n\n')
+  out = out.replace(/<\/p>/gi, '\n\n').replace(/<p\b[^>]*>/gi, '')
+  out = out.replace(/<br\s*\/?>/gi, '\n')
+
+  out = stripTags(out)
+
+  return decodeEntities(out)
+    .replace(/[ \t]+$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 function pushUpdateServiceError(message: string): void {
   log.error('[UpdateService] health event:', message)
   broadcastToRenderers(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, { message })
@@ -191,7 +293,10 @@ function initAutoUpdater(): void {
   autoUpdater.on('update-available', (info) => {
     _latestInfo = {
       version: info.version,
-      releaseNotes: typeof info.releaseNotes === 'string' ? info.releaseNotes : undefined,
+      releaseNotes:
+        typeof info.releaseNotes === 'string'
+          ? htmlReleaseNotesToMarkdown(info.releaseNotes)
+          : undefined,
       releaseDate: info.releaseDate ? String(info.releaseDate) : undefined,
     }
     broadcastToRenderers(CHANNELS.PUSH_UPDATE_AVAILABLE, _latestInfo)
@@ -248,11 +353,28 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
     const result = await autoUpdater.checkForUpdates()
     if (!result) return null
 
+    // `checkForUpdates()` resolves with whatever the feed's newest release is,
+    // whether or not it is newer than what is running. Without this guard the
+    // window offered an "update" to the version already installed, and then
+    // Download failed with electron-updater's "Please check update first" —
+    // its own state correctly held no pending update. The Linux branch above
+    // has always compared; this branch did not.
+    const currentVersion = app.getVersion()
+    if (!isRemoteVersionNewer(result.updateInfo.version, currentVersion)) {
+      log.info(
+        '[UpdateService] No update: remote %s is not newer than %s',
+        result.updateInfo.version,
+        currentVersion
+      )
+      _latestInfo = null
+      return null
+    }
+
     _latestInfo = {
       version: result.updateInfo.version,
       releaseNotes:
         typeof result.updateInfo.releaseNotes === 'string'
-          ? result.updateInfo.releaseNotes
+          ? htmlReleaseNotesToMarkdown(result.updateInfo.releaseNotes)
           : undefined,
       releaseDate: result.updateInfo.releaseDate
         ? String(result.updateInfo.releaseDate)
