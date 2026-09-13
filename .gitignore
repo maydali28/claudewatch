@@ -13,3 +13,6 @@ TODO.md
 .env
 
 private/
+# MCP server config — carries auth headers/tokens for github and supabase.
+# Local-only; never commit it.
+.mcp.json
