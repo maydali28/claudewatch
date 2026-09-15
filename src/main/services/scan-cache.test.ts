@@ -1,0 +1,522 @@
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { AppPreferences } from '@shared/types/preferences'
+import type { Project } from '@shared/types/project'
+import type { SessionSummary } from '@shared/types/session'
+import type { ScanProjectsResult } from './accounting/worker-protocol'
+
+// scan-cache.ts pulls in `@main/services/accounting/worker-client`, which
+// imports `@main/lib/logger` — under vitest's `forks` pool that module sees
+// `isMainThread === true` and throws. Mocking the worker client (which we
+// need to control anyway, to hold scans open deterministically) sidesteps
+// that import chain entirely, per src/main/services/autostart.test.ts:22-27.
+const mockScanProjects = vi.fn()
+vi.mock('@main/services/accounting/worker-client', () => ({
+  accountingWorker: {
+    scanProjects: (...args: unknown[]) => mockScanProjects(...args),
+  },
+}))
+
+const mockGet = vi.fn<() => AppPreferences>()
+vi.mock('@main/store/preferences', () => ({
+  Preferences: {
+    get: () => mockGet(),
+  },
+}))
+
+const BASE_PREFS: AppPreferences = {
+  pricingProvider: 'anthropic',
+  pricingOverrides: {},
+  secretScanEnabled: false,
+  redactionLevel: 'none',
+  launchAtLogin: false,
+  trayTipDismissed: false,
+  theme: 'system',
+  sidebarWidth: 280,
+  alertedSecrets: [],
+  sentryEnabled: false,
+}
+
+/** A controllable promise, so scan resolution order is set explicitly rather than by timing. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
+function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
+  return {
+    id: 's1',
+    projectId: 'proj',
+    projectPath: '/proj',
+    title: 'session',
+    firstTimestamp: '2026-01-01T00:00:00.000Z',
+    lastTimestamp: '2026-01-01T00:00:00.000Z',
+    messageCount: 1,
+    parentMessageCount: 1,
+    modelsUsed: [],
+    unpricedResponses: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalCacheReadTokens: 0,
+    totalCacheCreationTokens: 0,
+    totalCacheCreation5mTokens: 0,
+    totalCacheCreation1hTokens: 0,
+    compactionCount: 0,
+    totalTokensRemovedByCompaction: 0,
+    turnDurations: [],
+    estimatedCost: 0,
+    hasError: false,
+    toolCallCount: 0,
+    observability: {
+      effortDistribution: { low: 0, medium: 0, high: 0, ultrathink: 0 },
+      errorClassifications: [],
+      hasIdleZombieGap: false,
+      estimatedIdleWasteCost: 0,
+      compactionTimestamps: [],
+      parallelToolCallCount: 0,
+      maxParallelDegree: 0,
+      isWorktreeSession: false,
+    },
+    subagents: [],
+    dailyUsage: [],
+    diagnostics: {
+      malformedLines: 0,
+      unreadableChildren: 0,
+      negativeCounters: 0,
+      conflictCount: 0,
+      unpricedResponses: 0,
+      incompleteUsageResponses: 0,
+      responsesWithoutCompletionSignal: 0,
+      reducedConfidenceResponses: 0,
+    },
+    thinkingTokens: 0,
+    recordedEffortDistribution: {},
+    serviceTiers: [],
+    ...overrides,
+  }
+}
+
+function makeProject(overrides: Partial<Project> = {}): Project {
+  return {
+    id: 'proj',
+    name: 'proj',
+    path: '/proj',
+    sessions: [makeSummary()],
+    sessionCount: 1,
+    localSkills: [],
+    localClaudeMd: null,
+    ...overrides,
+  }
+}
+
+function makeScan(projects: Project[]): ScanProjectsResult {
+  return { projects }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  mockGet.mockReturnValue(BASE_PREFS)
+})
+
+describe('ScanCache', () => {
+  it('keeps a live update that arrived while a scan was running', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+
+    // First scan completes so the cache has a snapshot to patch.
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [makeSummary({ messageCount: 1 })] })]))
+    await first
+
+    // Second scan starts and is held open; a watcher patch lands mid-scan.
+    const scan2 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan2.promise)
+    const second = cache.refresh()
+
+    await cache.patchSessionSummary(makeSummary({ messageCount: 2 }))
+
+    // Scan resolves with the OLD messageCount, as if read from disk before
+    // the patch landed. Without replay, this wholesale-replaces `current`
+    // and the patch is lost.
+    scan2.resolve(makeScan([makeProject({ sessions: [makeSummary({ messageCount: 1 })] })]))
+    await second
+
+    const sessions = await cache.getSessionsForProject('proj')
+    expect(sessions[0].messageCount).toBe(2)
+  })
+
+  it('does not drop a patch that arrives before any scan has completed', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+
+    // No scan has ever completed yet: `current` is null.
+    const patchPromise = cache.patchSessionSummary(makeSummary({ messageCount: 7 }))
+
+    scan1.resolve(makeScan([makeProject({ sessions: [makeSummary({ messageCount: 1 })] })]))
+    await patchPromise
+
+    const sessions = await cache.getSessionsForProject('proj')
+    expect(sessions[0].messageCount).toBe(7)
+  })
+
+  it('does not let an older scan overwrite a newer one that already published', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    // Prime the cache so `refresh()` below starts genuinely concurrent scans
+    // rather than one of them being served from the empty-cache dedup path.
+    const priming = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(priming.promise)
+    const primed = cache.refresh()
+    priming.resolve(makeScan([makeProject()]))
+    await primed
+
+    const older = deferred<ScanProjectsResult>()
+    const newer = deferred<ScanProjectsResult>()
+
+    // Differently-priced rates so the two scans get distinct fingerprints
+    // and both actually run, rather than the second joining the first.
+    mockGet.mockReturnValueOnce(BASE_PREFS)
+    mockScanProjects.mockReturnValueOnce(older.promise)
+    const olderScan = cache.refresh()
+
+    mockGet.mockReturnValueOnce({
+      ...BASE_PREFS,
+      pricingOverrides: { 'sonnet-5': { input: 999 } },
+    })
+    mockScanProjects.mockReturnValueOnce(newer.promise)
+    const newerScan = cache.refresh()
+
+    // Newer resolves FIRST and publishes.
+    newer.resolve(makeScan([makeProject({ sessions: [makeSummary({ messageCount: 42 })] })]))
+    await newerScan
+
+    // Older resolves LAST and must not clobber the newer, already-published result.
+    older.resolve(makeScan([makeProject({ sessions: [makeSummary({ messageCount: 1 })] })]))
+    await olderScan
+
+    const sessions = await cache.getSessionsForProject('proj')
+    expect(sessions[0].messageCount).toBe(42)
+  })
+
+  it('get() never resolves to a falsy value when the non-latest of two racing cold-start scans resolves first', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const older = deferred<ScanProjectsResult>()
+    const newer = deferred<ScanProjectsResult>()
+
+    // Cold start: `current` is null and no scan has ever published. `get()`
+    // itself triggers the OLDER (non-latest) scan here.
+    mockGet.mockReturnValueOnce(BASE_PREFS)
+    mockScanProjects.mockReturnValueOnce(older.promise)
+    const getPromise = cache.get()
+
+    // A second, differently-priced (so genuinely concurrent, not deduped)
+    // caller starts a NEWER scan while the older one is still in flight.
+    mockGet.mockReturnValueOnce({
+      ...BASE_PREFS,
+      pricingOverrides: { 'sonnet-5': { input: 999 } },
+    })
+    mockScanProjects.mockReturnValueOnce(newer.promise)
+    const newerScan = cache.refresh()
+
+    // The non-latest scan resolves FIRST, before anything has published.
+    older.resolve(makeScan([makeProject()]))
+    const result = await getPromise
+
+    // `get()` must hand back a real snapshot, never null/undefined — this
+    // is what pins the "newer than published" gate against a regression to
+    // "only the newest-started scan may publish": under that stricter rule
+    // the older scan here would publish nothing, and nothing else has
+    // published yet either, so `get()` would resolve to null and crash the
+    // very next line downstream (`scan.projects.find`) in
+    // `getSessionsForProject`.
+    expect(result).toBeTruthy()
+    expect(result.projects).toBeDefined()
+
+    // Let the newer scan settle so it doesn't leak into other tests.
+    newer.resolve(makeScan([makeProject()]))
+    await newerScan
+  })
+
+  it('shares one scan between concurrent callers using the same pricing table', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan.promise)
+
+    const a = cache.refresh()
+    const b = cache.refresh()
+
+    scan.resolve(makeScan([makeProject()]))
+    await Promise.all([a, b])
+
+    expect(mockScanProjects).toHaveBeenCalledTimes(1)
+  })
+
+  it('inserts a non-newest session at its correct sort position and keeps sessionCount in sync', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+
+    const newest = makeSummary({ id: 'newest', lastTimestamp: '2026-01-03T00:00:00.000Z' })
+    const oldest = makeSummary({ id: 'oldest', lastTimestamp: '2026-01-01T00:00:00.000Z' })
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [newest, oldest], sessionCount: 2 })]))
+    await first
+
+    // Inserted session sits chronologically in the middle — `unshift` would
+    // wrongly place it first.
+    const middle = makeSummary({ id: 'middle', lastTimestamp: '2026-01-02T00:00:00.000Z' })
+    await cache.patchSessionSummary(middle)
+
+    const sessions = await cache.getSessionsForProject('proj')
+    expect(sessions.map((s) => s.id)).toEqual(['newest', 'middle', 'oldest'])
+    expect(sessions.length).toBe(3)
+
+    const scan = await cache.get()
+    expect(scan.projects[0].sessionCount).toBe(3)
+  })
+})
+
+// Round-1 review finding: `removeSession` mutated only the OUTGOING
+// `current`, with no buffered-removal equivalent of `pendingPatches`. A scan
+// already in flight when a deletion arrived still resolved with the
+// pre-deletion result and `refresh()` swapped it in wholesale, silently
+// resurrecting the just-deleted session — exactly the symptom this task
+// exists to eliminate, reappearing in the window most likely to occur at
+// startup (a cold-start scan racing a watcher-driven deletion).
+describe('ScanCache — removeSession', () => {
+  it('keeps a removal issued while a scan is in flight absent after that scan publishes', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [makeSummary({ id: 's1' })] })]))
+    await first
+
+    // Second scan starts and is held open; the transcript is deleted mid-scan.
+    const scan2 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan2.promise)
+    const second = cache.refresh()
+
+    cache.removeSession('proj', 's1')
+
+    // Scan resolves with the STALE pre-deletion result, as if read from disk
+    // before the deletion landed. Without buffering the removal the same way
+    // a patch is buffered, this wholesale-replaces `current` and resurrects
+    // 's1'.
+    scan2.resolve(makeScan([makeProject({ sessions: [makeSummary({ id: 's1' })] })]))
+    await second
+
+    const sessions = await cache.getSessionsForProject('proj')
+    expect(sessions.find((s) => s.id === 's1')).toBeUndefined()
+  })
+
+  it('lets a patch that recreates the same id beat an earlier buffered removal', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [makeSummary({ id: 's1' })] })]))
+    await first
+
+    const scan2 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan2.promise)
+    const second = cache.refresh()
+
+    // Removed, then recreated with the same id before the in-flight scan lands.
+    cache.removeSession('proj', 's1')
+    await cache.patchSessionSummary(makeSummary({ id: 's1', messageCount: 99 }))
+
+    scan2.resolve(
+      makeScan([makeProject({ sessions: [makeSummary({ id: 's1', messageCount: 1 })] })])
+    )
+    await second
+
+    const sessions = await cache.getSessionsForProject('proj')
+    const recreated = sessions.find((s) => s.id === 's1')
+    expect(recreated).toBeDefined()
+    expect(recreated?.messageCount).toBe(99)
+  })
+
+  it('lets a removal beat an earlier buffered patch for the same id', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [makeSummary({ id: 's1' })] })]))
+    await first
+
+    const scan2 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan2.promise)
+    const second = cache.refresh()
+
+    // Patched, then deleted before the in-flight scan lands.
+    await cache.patchSessionSummary(makeSummary({ id: 's1', messageCount: 99 }))
+    cache.removeSession('proj', 's1')
+
+    scan2.resolve(
+      makeScan([makeProject({ sessions: [makeSummary({ id: 's1', messageCount: 1 })] })])
+    )
+    await second
+
+    const sessions = await cache.getSessionsForProject('proj')
+    expect(sessions.find((s) => s.id === 's1')).toBeUndefined()
+  })
+
+  it('keeps sessionCount in sync with sessions.length after a removal', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(
+      makeScan([
+        makeProject({
+          sessions: [makeSummary({ id: 's1' }), makeSummary({ id: 's2' })],
+          sessionCount: 2,
+        }),
+      ])
+    )
+    await first
+
+    cache.removeSession('proj', 's1')
+
+    const scan = await cache.get()
+    const project = scan.projects.find((p) => p.id === 'proj')
+    expect(project?.sessions.map((s) => s.id)).toEqual(['s2'])
+    expect(project?.sessionCount).toBe(project?.sessions.length)
+  })
+
+  it('peekProjectSessions reflects the cache without ever triggering a scan', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    // No scan has ever run — peeking must not start one.
+    expect(cache.peekProjectSessions('proj')).toEqual([])
+    expect(mockScanProjects).not.toHaveBeenCalled()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [makeSummary({ id: 's1' })] })]))
+    await first
+
+    expect(cache.peekProjectSessions('proj').map((s) => s.id)).toEqual(['s1'])
+    expect(mockScanProjects).toHaveBeenCalledTimes(1)
+  })
+})
+
+// Task 12 / defect 1: `refresh()`'s replay loop called `applyPatch(result,
+// patch)` and discarded the boolean, then cleared `pendingPatches` wholesale
+// regardless of the result. `applyPatch` returns false when the summary's
+// project isn't in the fresh scan yet (e.g. a brand-new project directory
+// the scan started before it existed) — so a patch buffered for exactly that
+// reason was thrown away on the very replay meant to apply it, and nothing
+// would ever retry it. The direct path in `patchSessionSummary` (no scan in
+// flight) already re-buffers on a false return; the replay path did not.
+describe('ScanCache — replay does not drop a patch its own scan still cannot place', () => {
+  it('keeps a patch buffered when the fresh scan still does not know its project', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ id: 'proj', sessions: [makeSummary()] })]))
+    await first
+
+    // Second scan starts (in flight) before the new project's directory is
+    // discovered on disk.
+    const scan2 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan2.promise)
+    const second = cache.refresh()
+
+    // A watcher patch lands for a brand-new project while that scan is
+    // already running. `this.inFlight` is truthy, so `patchSessionSummary`
+    // buffers it rather than applying it directly.
+    const patchForNewProject = makeSummary({
+      id: 'brand-new',
+      projectId: 'proj-new',
+      messageCount: 5,
+    })
+    await cache.patchSessionSummary(patchForNewProject)
+
+    // The in-flight scan resolves with a result from BEFORE the new project
+    // was discovered — replaying the patch onto it still can't place it.
+    scan2.resolve(makeScan([makeProject({ id: 'proj', sessions: [makeSummary()] })]))
+    await second
+
+    // Prove the patch survived (rather than being cleared alongside patches
+    // that DID apply) by letting a later scan discover the project and
+    // checking the patch replays onto it instead of having vanished.
+    const scan3 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan3.promise)
+    const third = cache.refresh()
+    scan3.resolve(
+      makeScan([
+        makeProject({ id: 'proj', sessions: [makeSummary()] }),
+        makeProject({ id: 'proj-new', path: '/proj-new', sessions: [], sessionCount: 0 }),
+      ])
+    )
+    await third
+
+    const sessions = await cache.getSessionsForProject('proj-new')
+    expect(sessions.map((s) => s.id)).toEqual(['brand-new'])
+  })
+})
+
+// Task 12 / defect 2: `applyPatch`'s insert-sort subtracted two `getTime()`
+// results (`new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime()`),
+// which is `NaN` whenever a `lastTimestamp` is unparsable — a comparator
+// that can return `NaN` breaks `Array.prototype.sort`'s contract. This is
+// the fifth copy of a bug already fixed via `compareTimestampsAscending` in
+// four other places on this branch (projection.ts, project-scanner.ts,
+// sort-session-rows.ts, the renderer's sessions.store.ts).
+describe('ScanCache — applyPatch sort with an unparsable lastTimestamp', () => {
+  it('sorts sessions deterministically when an existing lastTimestamp is unparsable', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+
+    // Deliberately NOT already in the correct final order, so a NaN
+    // comparator that happens to leave the array untouched wouldn't
+    // accidentally look right.
+    const garbage = makeSummary({ id: 'garbage', lastTimestamp: 'not-a-timestamp' })
+    const oldest = makeSummary({ id: 'oldest', lastTimestamp: '2026-01-01T00:00:00.000Z' })
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [garbage, oldest], sessionCount: 2 })]))
+    await first
+
+    const newest = makeSummary({ id: 'newest', lastTimestamp: '2026-01-03T00:00:00.000Z' })
+    await cache.patchSessionSummary(newest)
+
+    const sessions = await cache.getSessionsForProject('proj')
+    // Descending by time; an unparsable timestamp is never evidence of
+    // recency, so it deterministically sorts last — not wherever NaN's
+    // comparison semantics happen to leave it.
+    expect(sessions.map((s) => s.id)).toEqual(['newest', 'oldest', 'garbage'])
+  })
+})

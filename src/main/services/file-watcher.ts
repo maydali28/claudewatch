@@ -1,3 +1,4 @@
+import * as fs from 'fs'
 import * as path from 'path'
 import type { FSWatcher } from 'chokidar'
 import type { BrowserWindow } from 'electron'
@@ -7,7 +8,12 @@ import { sessionCache } from '@shared/utils'
 import { getActivePricingTable } from './pricing-engine'
 import { accountingWorker } from './accounting/worker-client'
 import { Preferences } from '@main/store/preferences'
-import { patchCachedSessionSummary } from '@main/ipc/sessions.handlers'
+import {
+  patchCachedSessionSummary,
+  removeCachedSession,
+  peekCachedSessionsForProject,
+} from '@main/ipc/sessions.handlers'
+import { invalidateCachedSummary } from './metadata-cache'
 import { scanFileDelta } from './secret-scanner'
 import { createLogger } from '@main/lib/logger'
 import { resolveSessionFileLocation, type SessionFileLocation } from './session-file-location'
@@ -79,9 +85,9 @@ export class FileWatcher {
     this.claudeDir = claudeDir
     this.deps = deps
     this.scheduler = new ReparseScheduler(
-      (filePath) => this.processFileChange(filePath),
+      (parentKey, contributingFiles) => this.processFileChange(parentKey, contributingFiles),
       FILE_WATCHER_DEBOUNCE_MS,
-      (filePath, error) => log.error(`Failed to re-parse ${path.basename(filePath)}:`, error)
+      (parentKey, error) => log.error(`Failed to re-parse ${path.basename(parentKey)}:`, error)
     )
   }
 
@@ -117,16 +123,35 @@ export class FileWatcher {
 
     this.settingsWatcher.on('change', (filePath) => this.scheduler.schedule(filePath))
     this.settingsWatcher.on('add', (filePath) => this.scheduler.schedule(filePath))
+    this.settingsWatcher.on('unlink', (filePath) => this.scheduler.schedule(filePath))
     this.settingsWatcher.on('error', (error) => log.error('Settings watcher error:', error))
 
     this.watcher.on('ready', () => {
       /* watcher initialised */
     })
-    this.watcher.on('change', (filePath) => this.scheduler.schedule(filePath))
+    this.watcher.on('change', (filePath) =>
+      this.scheduler.schedule(filePath, this.resolveParentKey(filePath))
+    )
     this.watcher.on('add', (filePath) => {
-      this.newFiles.add(filePath)
-      this.scheduler.schedule(filePath)
+      const parentKey = this.resolveParentKey(filePath)
+      // Only a genuinely new PARENT transcript counts as a new session — a
+      // subagent's first write coalesces onto its parent's key and must not
+      // masquerade as one (see the isNewFile guard in processSessionFileChange).
+      if (parentKey === filePath) this.newFiles.add(filePath)
+      this.scheduler.schedule(filePath, parentKey)
     })
+    // A deleted subagent transcript kept contributing its usage to the
+    // parent's rollup until something else happened to re-parse the parent;
+    // a deleted parent session lingered in memory until the next full
+    // discovery. Routing `unlink` through the same scheduler as `change`
+    // means `processSessionFileChange` reacts to the settled state (file
+    // exists or not) at execution time rather than trusting the event type —
+    // which also collapses a delete-then-recreate burst into one correct
+    // outcome instead of two conflicting ones.
+    this.watcher.on('unlink', (filePath) =>
+      this.scheduler.schedule(filePath, this.resolveParentKey(filePath))
+    )
+    this.watcher.on('unlinkDir', (dirPath) => this.handleUnlinkDir(dirPath))
     this.watcher.on('error', (error) => log.error('Watcher error:', error))
   }
 
@@ -142,7 +167,27 @@ export class FileWatcher {
     this.scheduler.stop()
   }
 
-  private async processFileChange(filePath: string): Promise<void> {
+  /**
+   * The identity a change should be coalesced and parsed against. A subagent
+   * write updates its parent's rollup, not anything readable on its own, so
+   * every child of a session resolves to the same key as the parent
+   * transcript itself — required so ReparseScheduler can merge a burst across
+   * many children into one parse (see reparse-scheduler.ts). Anything that
+   * isn't a recognised session file (settings.json, a stray non-jsonl path)
+   * has no parent/child distinction, so it is its own key.
+   */
+  private resolveParentKey(filePath: string): string {
+    if (!filePath.endsWith('.jsonl')) return filePath
+    const projectsDir = path.join(this.claudeDir, 'projects')
+    const location = resolveSessionFileLocation(filePath, projectsDir)
+    if (!location || !location.isSubagent) return filePath
+    return path.join(projectsDir, location.projectId, `${location.sessionId}.jsonl`)
+  }
+
+  private async processFileChange(
+    filePath: string,
+    contributingFiles: ReadonlySet<string>
+  ): Promise<void> {
     const isNewFile = this.newFiles.delete(filePath)
     if (filePath.endsWith('settings.json')) {
       this.deps.broadcast(CHANNELS.PUSH_CONFIG_CHANGED, { filePath })
@@ -156,15 +201,40 @@ export class FileWatcher {
     if (!location) return
 
     // A subagent write updates the parent session; it never creates one.
-    await this.processSessionFileChange(filePath, location, isNewFile && !location.isSubagent)
+    await this.processSessionFileChange(
+      filePath,
+      location,
+      isNewFile && !location.isSubagent,
+      contributingFiles
+    )
   }
 
   private async processSessionFileChange(
     filePath: string,
     location: SessionFileLocation,
-    isNewFile: boolean
+    isNewFile: boolean,
+    contributingFiles: ReadonlySet<string>
   ): Promise<void> {
     const { projectId, sessionId } = location
+
+    // `filePath` is already the parent's own path here — the scheduler is
+    // keyed on parentKey (see resolveParentKey below), so `location.isSubagent`
+    // can never be true at this point regardless of which child originally
+    // triggered the change. The parent/child branch used to live here; it's
+    // gone rather than left as dead code that looks live.
+    const parentPath = filePath
+
+    // A deleted SUBAGENT needs nothing beyond the parent re-parse below — the
+    // rollup simply stops finding it, which is the correct result. A deleted
+    // PARENT has no file left to hand the worker at all: check the settled
+    // state of the parent itself (regardless of which path the event named)
+    // so a subagent deletion racing an already-gone parent is handled the
+    // same way as a direct parent deletion, instead of failing a parse
+    // against a path that no longer exists.
+    if (!fs.existsSync(parentPath)) {
+      this.handleParentRemoved(parentPath, sessionId, projectId)
+      return
+    }
 
     try {
       const preferences = Preferences.get()
@@ -172,11 +242,6 @@ export class FileWatcher {
       // ignore the user's pricing overrides, so a session's cost changed the
       // moment the app restarted and rescanned it.
       const pricingTable = getActivePricingTable(preferences)
-      // Always parse the parent transcript: it discovers its own subagents and
-      // rolls their usage up. A child's own path would parse only the child.
-      const parentPath = location.isSubagent
-        ? path.join(this.claudeDir, 'projects', projectId, `${sessionId}.jsonl`)
-        : filePath
       const sessionSummary = await accountingWorker.parseSession(
         parentPath,
         sessionId,
@@ -184,18 +249,71 @@ export class FileWatcher {
         pricingTable
       )
 
-      sessionCache.invalidate(sessionId)
+      sessionCache.invalidate(projectId, sessionId)
 
       patchCachedSessionSummary(sessionSummary)
 
       const channel = isNewFile ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
       this.deps.broadcast(channel, sessionSummary)
 
+      // The parse is coalesced onto the parent, but the scan is not: it reads
+      // a delta at a per-file byte offset, so every raw file that actually
+      // changed (the parent itself, one subagent, or several in one burst)
+      // gets its own scan. Scanning only `filePath` (the parent) here would
+      // leave subagent transcripts permanently unscanned.
       if (!isNewFile && preferences.secretScanEnabled) {
-        this.scanSessionFileForSecrets(filePath, sessionId, projectId).catch(() => undefined)
+        for (const raw of contributingFiles) {
+          this.scanSessionFileForSecrets(raw, sessionId, projectId).catch(() => undefined)
+        }
       }
     } catch (error) {
       log.error('Failed to re-parse session:', sessionId, error)
+    }
+  }
+
+  /**
+   * The parent transcript is gone: there is nothing left to re-parse, so
+   * forget every cache that still thinks the session exists rather than
+   * let a stale entry survive until the next full discovery, and tell the
+   * renderer directly since no further push for this session is coming.
+   */
+  private handleParentRemoved(parentPath: string, sessionId: string, projectId: string): void {
+    invalidateCachedSummary(parentPath)
+    sessionCache.invalidate(projectId, sessionId)
+    removeCachedSession(projectId, sessionId)
+    this.deps.broadcast(CHANNELS.PUSH_SESSION_DELETED, { sessionId, projectId })
+  }
+
+  /**
+   * A directory disappeared under `projects/`. Two shapes matter:
+   *   `<project>/<session>` — the session's own dir, holding only its
+   *     subagents/ folder. The parent .jsonl is a sibling file and is
+   *     untouched, so re-parsing it is enough — the rollup simply finds no
+   *     subagents left.
+   *   `<project>` — the whole project vanished. Nothing under it will ever
+   *     emit its own unlink event for main to react to individually, so
+   *     every session known for it must be torn down here.
+   */
+  private handleUnlinkDir(dirPath: string): void {
+    const projectsDir = path.join(this.claudeDir, 'projects')
+    const relative = path.relative(projectsDir, dirPath)
+    if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return
+
+    const parts = relative.split(path.sep)
+
+    if (parts.length === 2) {
+      const [projectId, sessionId] = parts
+      const parentPath = path.join(projectsDir, projectId, `${sessionId}.jsonl`)
+      this.scheduler.schedule(parentPath)
+      return
+    }
+
+    if (parts.length === 1) {
+      const [projectId] = parts
+      for (const session of peekCachedSessionsForProject(projectId)) {
+        const parentPath = path.join(projectsDir, projectId, `${session.id}.jsonl`)
+        this.handleParentRemoved(parentPath, session.id, projectId)
+      }
     }
   }
 
