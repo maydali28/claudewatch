@@ -14,6 +14,7 @@ import { useUIStore } from '@renderer/store/ui.store'
 export function useFileEvents(): void {
   const handleSessionUpdated = useSessionsStore((s) => s.handleSessionUpdated)
   const handleSessionCreated = useSessionsStore((s) => s.handleSessionCreated)
+  const handleSessionDeleted = useSessionsStore((s) => s.handleSessionDeleted)
   const loadParsedSession = useSessionsStore((s) => s.loadParsedSession)
   const loadAllConfig = useConfigStore((s) => s.loadAll)
   const invalidateAnalytics = useAnalyticsStore((s) => s.invalidate)
@@ -34,6 +35,15 @@ export function useFileEvents(): void {
       invalidateAnalytics()
       refreshAnalytics()
     })
+
+    const unsubDeleted = ipc.on<{ sessionId: string; projectId: string }>(
+      CHANNELS.PUSH_SESSION_DELETED,
+      (payload) => {
+        handleSessionDeleted(payload)
+        invalidateAnalytics()
+        refreshAnalytics()
+      }
+    )
 
     const unsubConfig = ipc.on(CHANNELS.PUSH_CONFIG_CHANGED, () => {
       loadAllConfig()
@@ -61,6 +71,7 @@ export function useFileEvents(): void {
     return () => {
       unsubUpdated()
       unsubCreated()
+      unsubDeleted()
       unsubConfig()
       unsubNavigate()
       unsubMainError()
@@ -68,6 +79,7 @@ export function useFileEvents(): void {
   }, [
     handleSessionUpdated,
     handleSessionCreated,
+    handleSessionDeleted,
     loadParsedSession,
     loadAllConfig,
     invalidateAnalytics,

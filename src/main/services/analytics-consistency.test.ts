@@ -20,11 +20,21 @@ function day(over: Partial<SessionDayUsage> & { day: string }): SessionDayUsage 
     cacheCreation1hTokens: 0,
     cacheCreationTokens: 0,
     estimatedCost: 1,
+    unpricedResponses: 0,
+    incompleteUsageResponses: 0,
+    responsesWithoutCompletionSignal: 0,
+    reducedConfidenceResponses: 0,
     responseCount: 1,
+    parentMessageCount: 1,
+    childMessageCount: 0,
     messageCount: 1,
     parentEstimatedCost: 1,
     compactions: 0,
     tokensRemovedByCompaction: 0,
+    maxPreCompactionTokens: 0,
+    effortDistribution: { low: 0, medium: 0, high: 0, ultrathink: 0 },
+    parallelToolGroups: 0,
+    maxParallelDegree: 0,
     models: [],
     ...over,
   }
@@ -72,6 +82,19 @@ function session(
     tags: [],
     subagents: [],
     dailyUsage,
+    diagnostics: {
+      malformedLines: 0,
+      unreadableChildren: 0,
+      negativeCounters: 0,
+      conflictCount: 0,
+      unpricedResponses: 0,
+      incompleteUsageResponses: 0,
+      responsesWithoutCompletionSignal: 0,
+      reducedConfidenceResponses: 0,
+    },
+    thinkingTokens: 0,
+    recordedEffortDistribution: {},
+    serviceTiers: [],
     ...extra,
   }
 }
@@ -94,6 +117,7 @@ const TWO_DAYS = session(
       responseCount: 2,
       compactions: 1,
       tokensRemovedByCompaction: 4_000,
+      effortDistribution: { low: 0, medium: 0, high: 2, ultrathink: 0 },
     }),
     day({
       day: ON_9TH,
@@ -101,6 +125,7 @@ const TWO_DAYS = session(
       responseCount: 1,
       compactions: 1,
       tokensRemovedByCompaction: 1_000,
+      effortDistribution: { low: 0, medium: 0, high: 1, ultrathink: 0 },
     }),
   ],
   { compactionCount: 2, totalTokensRemovedByCompaction: 5_000 }
@@ -112,12 +137,45 @@ describe('cache tab agrees with the overview', () => {
     expect(a.cacheAnalytics.actualCost).toBeCloseTo(a.totalCost, 10)
   })
 
-  it('bases the uncached counterfactual on the period’s cost', () => {
-    const a = computeAnalytics([TWO_DAYS], [], custom(ON_9TH, ON_9TH), ANTHROPIC_PRICING)
-    expect(a.cacheAnalytics.hypotheticalUncachedCost).toBeCloseTo(
-      a.totalCost + a.cacheAnalytics.costSavings,
-      10
-    )
+  /**
+   * `hypotheticalUncachedCost === totalCost + costSavings` was the exact
+   * identity that hid the cache-write premium inside the "without cache"
+   * baseline — an uncached request never pays a cache-write premium, so
+   * folding it into the baseline via that formula overstated savings. This
+   * fixture's workload (Sonnet 5, 1M one-hour writes + 1M reads) has a
+   * baseline that is cheaply verified independently of the formula under
+   * test: an uncached request pays ordinary input for every token, i.e.
+   * 2,000,000 combined tokens * $2/MTok = $4.00, regardless of what caching
+   * cost.
+   */
+  it('bases the uncached counterfactual on paying input rate for the same token volume', () => {
+    const CACHE_WORKLOAD = session('cache-workload', [
+      day({
+        day: ON_9TH,
+        cacheReadTokens: 1_000_000,
+        cacheCreation1hTokens: 1_000_000,
+        cacheCreationTokens: 1_000_000,
+        estimatedCost: 4.2,
+        models: [
+          {
+            model: 'claude-sonnet-5',
+            family: 'sonnet-5',
+            inputTokens: 0,
+            outputTokens: 0,
+            cacheReadTokens: 1_000_000,
+            cacheCreation5mTokens: 0,
+            cacheCreation1hTokens: 1_000_000,
+            cacheCreationUnknownTtlTokens: 0,
+            estimatedCost: 4.2,
+            turnCount: 1,
+          },
+        ],
+      }),
+    ])
+
+    const a = computeAnalytics([CACHE_WORKLOAD], [], custom(ON_9TH, ON_9TH), ANTHROPIC_PRICING)
+
+    expect(a.cacheAnalytics.uncachedSameWorkloadCost).toBeCloseTo(4.0, 10)
   })
 })
 
@@ -137,6 +195,7 @@ describe('models tab agrees with itself', () => {
           cacheReadTokens: 0,
           cacheCreation5mTokens: 0,
           cacheCreation1hTokens: 0,
+          cacheCreationUnknownTtlTokens: 0,
           estimatedCost: 5,
           turnCount: 4,
         },
@@ -154,6 +213,7 @@ describe('models tab agrees with itself', () => {
           cacheReadTokens: 0,
           cacheCreation5mTokens: 0,
           cacheCreation1hTokens: 0,
+          cacheCreationUnknownTtlTokens: 0,
           estimatedCost: 1,
           turnCount: 1,
         },

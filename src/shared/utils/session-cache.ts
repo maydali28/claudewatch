@@ -20,23 +20,37 @@ export class SessionCache {
     this.cache = new Map()
   }
 
-  get(sessionId: string): ParsedSession | undefined {
-    const entry = this.cache.get(sessionId)
+  /**
+   * Session ids are only unique within a project — two different projects can
+   * both hold a session id (Claude Code sessions are UUIDs in practice, but
+   * nothing enforces that, and a cache keyed on the bare id would silently
+   * hand one project's parsed session back for another's request). Scoping
+   * the key to the project makes that collision structurally impossible
+   * rather than merely unlikely.
+   */
+  private key(projectId: string, sessionId: string): string {
+    return `${projectId}:${sessionId}`
+  }
+
+  get(projectId: string, sessionId: string): ParsedSession | undefined {
+    const key = this.key(projectId, sessionId)
+    const entry = this.cache.get(key)
     if (!entry) return undefined
-    this.cache.delete(sessionId)
-    this.cache.set(sessionId, entry)
+    this.cache.delete(key)
+    this.cache.set(key, entry)
     return entry.session
   }
 
-  set(sessionId: string, session: ParsedSession): void {
+  set(projectId: string, sessionId: string, session: ParsedSession): void {
+    const key = this.key(projectId, sessionId)
     const bytes = estimateSessionBytes(session)
 
     // Drop any existing entry first: its bytes must not be counted twice, and
     // it must not be eligible as an eviction victim for its own replacement.
-    const existing = this.cache.get(sessionId)
+    const existing = this.cache.get(key)
     if (existing) {
       this.totalBytes -= existing.bytes
-      this.cache.delete(sessionId)
+      this.cache.delete(key)
     }
 
     // An entry larger than the whole cap cannot be held without breaking the
@@ -58,15 +72,16 @@ export class SessionCache {
       this.cache.delete(lruKey)
     }
 
-    this.cache.set(sessionId, { session, bytes })
+    this.cache.set(key, { session, bytes })
     this.totalBytes += bytes
   }
 
-  invalidate(sessionId: string): void {
-    const entry = this.cache.get(sessionId)
+  invalidate(projectId: string, sessionId: string): void {
+    const key = this.key(projectId, sessionId)
+    const entry = this.cache.get(key)
     if (entry) {
       this.totalBytes -= entry.bytes
-      this.cache.delete(sessionId)
+      this.cache.delete(key)
     }
   }
 

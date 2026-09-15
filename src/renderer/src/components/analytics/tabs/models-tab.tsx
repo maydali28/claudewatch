@@ -18,6 +18,7 @@ import { ModelDistributionChart } from '@renderer/components/analytics/charts/mo
 import { ModelEfficiencyTable } from '@renderer/components/analytics/charts/model-efficiency-table'
 import { DailyModelCostChart } from '@renderer/components/analytics/charts/daily-model-cost-chart'
 import { WhatIfCalculator } from '@renderer/components/analytics/charts/whatif-calculator'
+import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import type { AnalyticsData } from '@shared/types'
 
 interface Props {
@@ -155,7 +156,12 @@ export function ModelsTab({ data }: Props): React.JSX.Element {
 
       {/* Daily cost over time */}
       <ChartCard title="Daily Cost by Model" description="Spend trend stacked by model">
-        <DailyModelCostChart data={data.dailyModelCost} />
+        {/* This chart sorts dates alphabetically and plots one axis tick per
+            day, so the `(undated)` sentinel (see `AnalyticsData.undatedActivity`)
+            would render as a stray, out-of-order tick rather than a real day.
+            Totals elsewhere still include it — only this per-day series drops
+            it, the same choice `overview-tab.tsx`'s `DailyUsageChart` makes. */}
+        <DailyModelCostChart data={data.dailyModelCost.filter((d) => d.date !== UNDATED_DAY)} />
       </ChartCard>
 
       {/* Efficiency table */}

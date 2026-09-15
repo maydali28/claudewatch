@@ -55,11 +55,15 @@ function deriveInsights(data: AnalyticsData): Insight[] {
 
   // Cache hit quality
   if (cacheHitPct >= 60) {
+    const netSavings = data.cacheAnalytics.netSavings
     insights.push({
       id: 'cache-good',
-      level: 'positive',
+      level: netSavings >= 0 ? 'positive' : 'warning',
       title: `Strong cache utilisation at ${cacheHitPct}%`,
-      body: `You're saving ${formatCost(data.cacheAnalytics.costSavings)} vs uncached. Keep prompts stable to maintain this.`,
+      body:
+        netSavings >= 0
+          ? `Caching is netting you ${formatCost(netSavings)} vs the same workload uncached. Keep prompts stable to maintain this.`
+          : `Despite the high hit rate, cache-write premiums are outweighing the read discount by ${formatCost(Math.abs(netSavings))} vs the same workload uncached. Long-lived writes may not be paying for themselves here.`,
     })
   } else if (cacheHitPct < 30 && data.totalTokens > 0) {
     insights.push({
@@ -147,14 +151,18 @@ function deriveInsights(data: AnalyticsData): Insight[] {
       id: 'compaction-frequent',
       level: 'warning',
       title: `Sessions compact ${avgCompactionsPerSession.toFixed(1)}× on average`,
-      body: `Context windows are filling up regularly. ${formatTokens(compactionAnalytics.avgTokensRemovedPerSession)} tokens removed per affected session. Consider breaking long workflows into smaller, focused sessions to reduce compaction overhead.`,
+      body: `Context windows are filling up regularly. An average of ${formatTokens(compactionAnalytics.avgTokensRemovedPerSession)} of pre-compaction context per affected session. Consider breaking long workflows into smaller, focused sessions to reduce compaction overhead.`,
     })
   } else if (compactionAnalytics.totalCompactions > 0) {
     insights.push({
       id: 'compaction-present',
       level: 'info',
       title: `${compactionAnalytics.totalCompactions} compaction${compactionAnalytics.totalCompactions > 1 ? 's' : ''} across ${data.totalSessions} sessions`,
-      body: `Some sessions hit the context limit and were summarised automatically. ${formatTokens(compactionAnalytics.totalTokensRemoved)} tokens removed in total — estimated ${formatCost(compactionAnalytics.estimatedCostAvoided)} avoided by not re-sending them as fresh input.`,
+      // "estimated" and "hypothetical" both appear deliberately: this prices the
+      // pre-compaction total once at each session's dominant model as if it had
+      // been re-sent fresh, ignoring the retained summary, the summarisation
+      // call's own cost, and later cache reuse — not a measured saving.
+      body: `Some sessions hit the context limit and were summarised automatically, totalling ${formatTokens(compactionAnalytics.totalTokensRemoved)} of pre-compaction context. Hypothetically, re-sending that much as fresh input would have cost an estimated ${formatCost(compactionAnalytics.estimatedCostAvoided)}.`,
     })
   }
 
@@ -178,13 +186,18 @@ function deriveInsights(data: AnalyticsData): Insight[] {
     }
   }
 
-  // High value recovered — surface as a positive
+  // Large hypothetical resend cost — informational, not a claimed saving:
+  // this is an estimate of what re-sending the pre-compaction context fresh
+  // would have cost, not a measurement of what compaction actually saved
+  // (the retained summary, the summarisation call, and later cache reuse are
+  // all unaccounted for). Kept at 'info' rather than 'positive' so it never
+  // reads as a confirmed win.
   if (compactionAnalytics.estimatedCostAvoided > 0.5) {
     insights.push({
       id: 'compaction-savings',
-      level: 'positive',
-      title: `Compaction saved an estimated ${formatCost(compactionAnalytics.estimatedCostAvoided)}`,
-      body: `${formatTokens(compactionAnalytics.totalTokensRemoved)} tokens were compacted rather than re-sent. These tokens were summarised and never charged as fresh input in subsequent turns.`,
+      level: 'info',
+      title: `Compaction's hypothetical resend cost: ${formatCost(compactionAnalytics.estimatedCostAvoided)}`,
+      body: `${formatTokens(compactionAnalytics.totalTokensRemoved)} of pre-compaction context was summarised instead of re-sent as fresh input. This is what re-sending it would have hypothetically cost, priced at each session's dominant model — not a measured saving.`,
     })
   }
 

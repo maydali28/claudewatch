@@ -11,7 +11,13 @@ import {
   Bar,
   Cell,
 } from 'recharts'
-import { formatCost, formatTokens } from '@shared/utils'
+import {
+  buildCompletenessBadge,
+  buildProvenanceNote,
+  formatCost,
+  formatTokens,
+} from '@shared/utils'
+import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import { StatCard } from '@renderer/components/analytics/stat-card'
 import { ChartCard } from '@renderer/components/analytics/chart-card'
 import type {
@@ -107,8 +113,13 @@ function ModelSavingsChart({ data }: { data: ModelCacheSavings[] }): React.JSX.E
     return <p className="py-6 text-center text-xs text-muted-foreground">No model savings data</p>
   }
 
-  const chartData = [...data].sort((a, b) => b.totalSavings - a.totalSavings)
-  const COLORS = ['#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#6366f1']
+  // Sorted and plotted on net savings so this chart reconciles with the
+  // "Net Savings" KPI tile above it — the gross read discount alone is still
+  // surfaced in the tooltip, since it explains why a model with heavy cache
+  // writes can rank lower (or negative) despite a large read discount.
+  const chartData = [...data].sort((a, b) => b.netSavings - a.netSavings)
+  const POSITIVE_COLORS = ['#06b6d4', '#8b5cf6', '#f59e0b', '#10b981', '#6366f1']
+  const NEGATIVE_COLOR = '#ef4444'
 
   return (
     <ResponsiveContainer width="100%" height={Math.max(140, chartData.length * 36)}>
@@ -127,12 +138,23 @@ function ModelSavingsChart({ data }: { data: ModelCacheSavings[] }): React.JSX.E
           tickFormatter={(v: string) => (v.length > 16 ? v.slice(-16) : v)}
         />
         <Tooltip
-          formatter={(v) => [formatCost(Number(v)), 'Savings']}
+          formatter={(v, _name, item) => {
+            const gross = (item?.payload as ModelCacheSavings | undefined)?.totalSavings ?? 0
+            return [
+              `${formatCost(Number(v))} net (${formatCost(gross)} gross read discount)`,
+              'Net savings',
+            ]
+          }}
           contentStyle={{ fontSize: 11 }}
         />
-        <Bar dataKey="totalSavings" radius={[0, 2, 2, 0]}>
-          {chartData.map((_, i) => (
-            <Cell key={i} fill={COLORS[i % COLORS.length]} />
+        <Bar dataKey="netSavings" radius={[0, 2, 2, 0]}>
+          {chartData.map((d, i) => (
+            <Cell
+              key={i}
+              fill={
+                d.netSavings >= 0 ? POSITIVE_COLORS[i % POSITIVE_COLORS.length] : NEGATIVE_COLOR
+              }
+            />
           ))}
         </Bar>
       </BarChart>
@@ -147,8 +169,6 @@ function SessionEfficiencyTable({ rows }: { rows: SessionCacheEfficiency[] }): R
     return <p className="py-4 text-center text-xs text-muted-foreground">No session data</p>
   }
 
-  const sorted = [...rows].sort((a, b) => b.hitRatio - a.hitRatio)
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
@@ -161,7 +181,7 @@ function SessionEfficiencyTable({ rows }: { rows: SessionCacheEfficiency[] }): R
           </tr>
         </thead>
         <tbody>
-          {sorted.slice(0, 15).map((s) => {
+          {rows.slice(0, 15).map((s) => {
             const pct = Math.round(s.hitRatio * 100)
             return (
               <tr key={s.id} className="border-b last:border-0 hover:bg-muted/40">
@@ -217,8 +237,18 @@ function CompactionTable({ rows }: { rows: SessionCompactionEntry[] }): React.JS
           <tr className="border-b text-muted-foreground">
             <th className="pb-1.5 text-left font-medium">Session</th>
             <th className="pb-1.5 text-right font-medium">Compactions</th>
-            <th className="pb-1.5 text-right font-medium">Tokens removed</th>
-            <th className="pb-1.5 text-right font-medium">Cost avoided</th>
+            <th
+              className="pb-1.5 text-right font-medium"
+              title="Sum of context size recorded just before each compaction — an observed high-water mark, not tokens actually freed"
+            >
+              Pre-compaction context
+            </th>
+            <th
+              className="pb-1.5 text-right font-medium"
+              title="Hypothetical: what re-sending that context as fresh input would have cost at this session's dominant model's rate. Ignores the retained summary, the summarisation call's own cost, and later cache reuse — not a measured saving."
+            >
+              Hypothetical resend cost
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -246,7 +276,9 @@ function CompactionTable({ rows }: { rows: SessionCompactionEntry[] }): React.JS
                     </span>
                   </div>
                 </td>
-                <td className="py-1.5 text-right font-semibold text-green-600">
+                {/* Amber, not green: this column is a hypothetical estimate, not
+                    a measured saving — green would read as a confirmed win. */}
+                <td className="py-1.5 text-right font-semibold text-amber-600">
                   {formatCost(r.estimatedCostAvoided)}
                 </td>
               </tr>
@@ -261,8 +293,8 @@ function CompactionTable({ rows }: { rows: SessionCompactionEntry[] }): React.JS
 // ─── Tab root ─────────────────────────────────────────────────────────────────
 
 export function CacheTab({ data }: Props): React.JSX.Element {
-  const savings = data.costSavings
-  const uncached = data.hypotheticalUncachedCost
+  const savings = data.netSavings
+  const uncached = data.uncachedSameWorkloadCost
   const savingsPct = uncached > 0 ? Math.round((savings / uncached) * 100) : 0
 
   return (
@@ -272,13 +304,19 @@ export function CacheTab({ data }: Props): React.JSX.Element {
         <StatCard
           label="Cache Hit Rate"
           value={`${Math.round(data.hitRatio * 100)}%`}
-          subtitle="of all input tokens"
+          subtitle="share of all input tokens"
         />
         <StatCard
-          label="Cost Savings"
+          label="Net Savings"
           value={formatCost(savings)}
-          subtitle={`${savingsPct}% vs uncached`}
-          deltaPositive
+          subtitle={
+            savings >= 0
+              ? `${savingsPct}% vs uncached`
+              : `cache cost ${Math.abs(savingsPct)}% more than uncached`
+          }
+          deltaPositive={savings >= 0}
+          badge={buildCompletenessBadge(data)}
+          info={buildProvenanceNote(data)}
         />
         <StatCard
           label="Cache Reads"
@@ -287,7 +325,11 @@ export function CacheTab({ data }: Props): React.JSX.Element {
         />
         <StatCard
           label="Read / Write Ratio"
-          value={`${data.averageReuseRate.toFixed(1)}×`}
+          value={
+            data.averageReuseRate === null
+              ? 'No writes in range'
+              : `${data.averageReuseRate.toFixed(1)}×`
+          }
           subtitle="read tokens per written token"
         />
       </div>
@@ -301,12 +343,28 @@ export function CacheTab({ data }: Props): React.JSX.Element {
             {/* Cost breakdown */}
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-md bg-muted p-2">
-                <p className="text-muted-foreground">Actual cost</p>
+                <p className="text-muted-foreground">Estimated token cost</p>
                 <p className="font-bold">{formatCost(data.actualCost)}</p>
               </div>
               <div className="rounded-md bg-muted p-2">
-                <p className="text-muted-foreground">Without cache</p>
+                <p className="text-muted-foreground">Same workload, uncached</p>
                 <p className="font-bold">{formatCost(uncached)}</p>
+              </div>
+            </div>
+
+            {/* Gross read discount vs. cache write premium — so a negative net
+                reads as "writes cost more than they saved on reads" rather
+                than looking like a miscalculation. */}
+            <div className="rounded-md border p-2 space-y-1 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Gross read discount</span>
+                <span className="font-medium text-green-600">
+                  {formatCost(data.grossReadSavings)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Cache write premium</span>
+                <span className="font-medium text-red-500">−{formatCost(data.writePremium)}</span>
               </div>
             </div>
 
@@ -329,20 +387,49 @@ export function CacheTab({ data }: Props): React.JSX.Element {
                 <span className="text-muted-foreground">1-hour tier cost</span>
                 <span className="font-medium">{formatCost(data.tierCostBreakdown.cost1h)}</span>
               </div>
+              {/* A flat cache-write counter with no TTL split reported. Shown
+                  only when it actually occurs — kept apart from the 5-minute
+                  tier so a fallback estimate is never mistaken for a known
+                  write, per the app's rule that a guessed figure must never
+                  masquerade as a measured one. */}
+              {data.totalCacheUnknownTtlTokens > 0 && (
+                <>
+                  <div className="flex justify-between border-t pt-1">
+                    <span className="text-muted-foreground">Estimated, unknown TTL tokens</span>
+                    <span className="font-medium">
+                      {formatTokens(data.totalCacheUnknownTtlTokens)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Estimated, unknown TTL</span>
+                    <span className="font-medium">
+                      {formatCost(data.tierCostBreakdown.costUnknownTtl)}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
       </ChartCard>
 
       {/* Daily hit ratio trend */}
-      <ChartCard title="Daily Hit Ratio Trend" description="How cache efficiency evolves over time">
-        <DailyHitRatioChart data={data.dailyHitRatio} />
-        {data.cacheBustingDays.length > 0 && (
+      <ChartCard
+        title="Observed hit-ratio drops"
+        description="Consecutive days where the ratio fell sharply"
+      >
+        {/* This chart sorts dates alphabetically and plots one axis tick per
+            day, so the `(undated)` sentinel (see `AnalyticsData.undatedActivity`)
+            would render as a stray, out-of-order tick rather than a real day.
+            Totals elsewhere still include it — only this per-day series drops
+            it, the same choice `overview-tab.tsx`'s `DailyUsageChart` makes. */}
+        <DailyHitRatioChart data={data.dailyHitRatio.filter((d) => d.date !== UNDATED_DAY)} />
+        {data.hitRatioDropDays.length > 0 && (
           <p className="mt-2 text-xs text-muted-foreground">
-            Cache-busting days:{' '}
+            Hit-ratio drop days:{' '}
             <span className="font-medium text-amber-500">
-              {data.cacheBustingDays.slice(0, 5).join(', ')}
-              {data.cacheBustingDays.length > 5 && ` +${data.cacheBustingDays.length - 5} more`}
+              {data.hitRatioDropDays.slice(0, 5).join(', ')}
+              {data.hitRatioDropDays.length > 5 && ` +${data.hitRatioDropDays.length - 5} more`}
             </span>
           </p>
         )}
@@ -350,7 +437,10 @@ export function CacheTab({ data }: Props): React.JSX.Element {
 
       {/* Model savings */}
       {data.modelSavings.length > 0 && (
-        <ChartCard title="Savings by Model" description="Which models benefit most from caching">
+        <ChartCard
+          title="Net Savings by Model"
+          description="Which models come out ahead after their cache-write premium"
+        >
           <ModelSavingsChart data={data.modelSavings} />
         </ChartCard>
       )}
@@ -379,10 +469,11 @@ export function CacheTab({ data }: Props): React.JSX.Element {
               <span className="font-semibold text-foreground">
                 {formatTokens(data.compactionAnalytics.totalTokensRemoved)}
               </span>{' '}
-              tokens removed
+              pre-compaction context
             </span>
-            <span className="font-semibold text-green-600">
-              {formatCost(data.compactionAnalytics.estimatedCostAvoided)} avoided
+            {/* Amber, not green: a hypothetical estimate, not a confirmed saving. */}
+            <span className="font-semibold text-amber-600">
+              {formatCost(data.compactionAnalytics.estimatedCostAvoided)} hypothetical
             </span>
           </div>
         }
@@ -394,18 +485,25 @@ export function CacheTab({ data }: Props): React.JSX.Element {
             <p className="font-bold text-sm">{data.compactionAnalytics.totalCompactions}</p>
           </div>
           <div className="rounded-md bg-muted p-2 text-xs">
-            <p className="text-muted-foreground mb-0.5">Avg tokens removed</p>
+            <p className="text-muted-foreground mb-0.5">Avg pre-compaction context</p>
             <p className="font-bold text-sm">
               {formatTokens(data.compactionAnalytics.avgTokensRemovedPerSession)}
             </p>
             <p className="text-muted-foreground">per affected session</p>
           </div>
           <div className="rounded-md bg-amber-500/10 border border-amber-500/20 p-2 text-xs">
-            <p className="text-muted-foreground mb-0.5">Est. cost avoided</p>
-            <p className="font-bold text-sm text-green-600">
+            <p className="text-muted-foreground mb-0.5">Hypothetical resend cost</p>
+            {/* Amber, not green: this box is a caveated estimate — see the
+                tooltip below — not a measured saving. */}
+            <p className="font-bold text-sm text-amber-600">
               {formatCost(data.compactionAnalytics.estimatedCostAvoided)}
             </p>
-            <p className="text-muted-foreground">vs re-sending all tokens</p>
+            <p
+              className="text-muted-foreground"
+              title="Prices the pre-compaction context once at the dominant model's fresh-input rate, as if re-sent instead of compacted. Ignores the retained summary, the summarisation call's own cost, and later cache reuse — not a measured saving."
+            >
+              if re-sent as fresh input (est.)
+            </p>
           </div>
         </div>
         <CompactionTable rows={data.compactionAnalytics.topSessions} />

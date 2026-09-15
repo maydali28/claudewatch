@@ -9,7 +9,15 @@ import {
   ArrowUp,
   ArrowDown,
 } from 'lucide-react'
-import { formatCost, formatTokens, resolveDateRange, isWithinRange } from '@shared/utils'
+import {
+  buildCompletenessBadge,
+  buildProvenanceNote,
+  formatCost,
+  formatTokens,
+  sortSessionRows,
+} from '@shared/utils'
+import type { SessionRowSortKey as SortKey, SessionRowSortDir as SortDir } from '@shared/utils'
+import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
 import { useSessionsStore } from '@renderer/store/sessions.store'
 import { StatCard } from '@renderer/components/analytics/stat-card'
@@ -17,12 +25,9 @@ import { DailyUsageChart } from '@renderer/components/analytics/charts/daily-usa
 import { ProjectCostChart } from '@renderer/components/analytics/charts/project-cost-chart'
 import { DailyModelCostChart } from '@renderer/components/analytics/charts/daily-model-cost-chart'
 import { ChartCard } from '@renderer/components/analytics/chart-card'
-import type { AnalyticsData, SessionSummary } from '@shared/types'
+import type { AnalyticsData, SessionPeriodRow } from '@shared/types'
 
 // ─── Filtered session list ────────────────────────────────────────────────────
-
-type SortKey = 'lastTimestamp' | 'messageCount' | 'estimatedCost' | 'totalTokens'
-type SortDir = 'asc' | 'desc'
 
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
@@ -59,7 +64,7 @@ function SortHeader({ label, sortKey, active, dir, onSort }: SortHeaderProps): R
   )
 }
 
-function SessionsTable({ sessions }: { sessions: SessionSummary[] }): React.JSX.Element {
+function SessionsTable({ sessions }: { sessions: SessionPeriodRow[] }): React.JSX.Element {
   const [sortKey, setSortKey] = React.useState<SortKey>('lastTimestamp')
   const [sortDir, setSortDir] = React.useState<SortDir>('desc')
 
@@ -72,26 +77,13 @@ function SessionsTable({ sessions }: { sessions: SessionSummary[] }): React.JSX.
     }
   }
 
-  const sorted = React.useMemo(() => {
-    const sign = sortDir === 'asc' ? 1 : -1
-    return [...sessions].sort((a, b) => {
-      switch (sortKey) {
-        case 'lastTimestamp':
-          return sign * a.lastTimestamp.localeCompare(b.lastTimestamp)
-        case 'messageCount':
-          return sign * (a.messageCount - b.messageCount)
-        case 'estimatedCost':
-          return sign * (a.estimatedCost - b.estimatedCost)
-        case 'totalTokens':
-          return (
-            sign *
-            (a.totalInputTokens + a.totalOutputTokens - (b.totalInputTokens + b.totalOutputTokens))
-          )
-        default:
-          return 0
-      }
-    })
-  }, [sessions, sortKey, sortDir])
+  // Shared with the projection-level test suite (src/shared/utils) so the
+  // rule this table sorts by is verified against the same code that runs
+  // here, not a copy of it.
+  const sorted = React.useMemo(
+    () => sortSessionRows(sessions, sortKey, sortDir),
+    [sessions, sortKey, sortDir]
+  )
 
   if (sorted.length === 0) {
     return (
@@ -113,8 +105,8 @@ function SessionsTable({ sessions }: { sessions: SessionSummary[] }): React.JSX.
               onSort={handleSort}
             />
             <SortHeader
-              label="Messages"
-              sortKey="messageCount"
+              label="Messages (parent)"
+              sortKey="parentMessageCount"
               active={sortKey}
               dir={sortDir}
               onSort={handleSort}
@@ -167,35 +159,30 @@ function SessionsTable({ sessions }: { sessions: SessionSummary[] }): React.JSX.
   )
 }
 
-// ─── Hook: derive filtered sessions from store state ─────────────────────────
+// ─── Hook: label the active project filter ───────────────────────────────────
 
-function useFilteredSessions(): { sessions: SessionSummary[]; label: string } {
-  const { dateRange, selectedProjectIds } = useAnalyticsStore()
+/**
+ * `data.sessionRows` already carries the right sessions for the current date
+ * range AND project filter — the IPC handler filters projects before calling
+ * `computeAnalytics`, which then applies `daysInRange` to what's left. This
+ * hook only resolves the human-readable label for the selected filter; it
+ * must not re-derive session membership, which is exactly how the table used
+ * to disagree with the charts beside it (see `daysInRange`'s doc comment in
+ * analytics-engine.ts for the membership rule this table now shares).
+ */
+function useProjectFilterLabel(): string {
+  const { selectedProjectIds } = useAnalyticsStore()
   const { projects } = useSessionsStore()
 
   return React.useMemo(() => {
-    const { from, to } = resolveDateRange(dateRange)
-
-    // Collect sessions from projects that match the active filter
-    const allSessions: SessionSummary[] = []
-    for (const project of projects) {
-      if (selectedProjectIds.length > 0 && !selectedProjectIds.includes(project.id)) continue
-      for (const session of project.sessions) {
-        if (isWithinRange(session.lastTimestamp, from, to)) {
-          allSessions.push(session)
-        }
-      }
+    if (selectedProjectIds.length === 1) {
+      return projects.find((p) => p.id === selectedProjectIds[0])?.name ?? 'Selected project'
     }
-
-    const label =
-      selectedProjectIds.length === 1
-        ? (projects.find((p) => p.id === selectedProjectIds[0])?.name ?? 'Selected project')
-        : selectedProjectIds.length > 1
-          ? `${selectedProjectIds.length} projects`
-          : 'All projects'
-
-    return { sessions: allSessions, label }
-  }, [dateRange, selectedProjectIds, projects])
+    if (selectedProjectIds.length > 1) {
+      return `${selectedProjectIds.length} projects`
+    }
+    return 'All projects'
+  }, [selectedProjectIds, projects])
 }
 
 // ─── Tab root ─────────────────────────────────────────────────────────────────
@@ -212,14 +199,15 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
   const cacheHitPct = Math.round(data.cacheAnalytics.hitRatio * 100)
   const totalCacheTokens = data.totalCacheTokens
 
-  const { sessions, label } = useFilteredSessions()
+  const sessions = data.sessionRows
+  const label = useProjectFilterLabel()
 
   return (
     <div className="space-y-4">
       {/* Primary KPIs */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <StatCard
-          label="Sessions"
+          label="Active Sessions"
           value={data.totalSessions.toLocaleString()}
           subtitle={`${avgMessagesPerSession} avg msgs/session`}
           icon={<Activity className="h-4 w-4" />}
@@ -228,10 +216,15 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
           label="Total Messages"
           value={data.totalMessages.toLocaleString()}
           subtitle={`${avgMessagesPerSession} avg/session`}
+          badge={
+            data.undatedActivity.messages > 0 && !data.undatedActivity.includedInTotals
+              ? `Excludes ${data.undatedActivity.messages.toLocaleString()} undated message${data.undatedActivity.messages === 1 ? '' : 's'}`
+              : undefined
+          }
           icon={<MessageSquare className="h-4 w-4" />}
         />
         <StatCard
-          label="Total Tokens"
+          label="Fresh input + output"
           value={formatTokens(data.totalTokens)}
           badge={totalCacheTokens > 0 ? `+ ${formatTokens(totalCacheTokens)} cache` : undefined}
           subtitle={`${formatTokens(avgTokensPerSession)} avg/session`}
@@ -240,21 +233,34 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
         <StatCard
           label="Cache Hit Rate"
           value={`${cacheHitPct}%`}
-          subtitle={`${formatCost(data.cacheAnalytics.costSavings)} saved`}
-          deltaPositive
+          badge="of all input tokens"
+          subtitle={
+            data.cacheAnalytics.netSavings >= 0
+              ? `${formatCost(data.cacheAnalytics.netSavings)} saved`
+              : `${formatCost(Math.abs(data.cacheAnalytics.netSavings))} lost to write premiums`
+          }
+          deltaPositive={data.cacheAnalytics.netSavings >= 0}
           icon={<TrendingUp className="h-4 w-4" />}
         />
         <StatCard
           label="Total Cost"
           value={formatCost(data.totalCost)}
           subtitle={`${formatCost(avgCostPerSession)} avg/session`}
+          badge={buildCompletenessBadge(data)}
+          info={buildProvenanceNote(data)}
           icon={<DollarSign className="h-4 w-4" />}
         />
       </div>
 
       {/* Daily token usage — full width */}
       <ChartCard title="Daily Token Usage">
-        <DailyUsageChart data={data.dailyUsage} />
+        {/* Only the `all` preset can ever put an UNDATED_DAY row in `dailyUsage`
+            (see `AnalyticsData.undatedActivity`), and this chart plots one bar
+            per calendar day, so that row is excluded here rather than shown as
+            a leading, unlabeled bar. It is not lost — it is still folded into
+            every stat above (`totalMessages`, `totalTokens`, etc.) and reported
+            in `data.undatedActivity` for the disclosure Task 8 renders. */}
+        <DailyUsageChart data={data.dailyUsage.filter((d) => d.date !== UNDATED_DAY)} />
       </ChartCard>
 
       {/* Two-column: projects + daily model cost */}
@@ -263,7 +269,11 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
           <ProjectCostChart data={data.projectCosts} />
         </ChartCard>
         <ChartCard title="Daily Cost by Model">
-          <DailyModelCostChart data={data.dailyModelCost} />
+          {/* Same treatment as `DailyUsageChart` above: this chart sorts dates
+              alphabetically and plots one axis tick per day, so the
+              `(undated)` sentinel would render as a stray, out-of-order tick
+              rather than a real day. Totals elsewhere still include it. */}
+          <DailyModelCostChart data={data.dailyModelCost.filter((d) => d.date !== UNDATED_DAY)} />
         </ChartCard>
       </div>
 

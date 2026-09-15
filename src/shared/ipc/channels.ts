@@ -64,6 +64,13 @@ export const CHANNELS = {
 
   PUSH_SESSION_UPDATED: 'push:session-updated',
   PUSH_SESSION_CREATED: 'push:session-created',
+  /**
+   * Fired when a parent transcript is deleted from disk. `PUSH_SESSION_UPDATED`
+   * carries a fresh summary to patch in; a removal has no summary to send, so
+   * it gets its own channel rather than overloading the update one with a
+   * sentinel payload.
+   */
+  PUSH_SESSION_DELETED: 'push:session-deleted',
   PUSH_CONFIG_CHANGED: 'push:config-changed',
   PUSH_SECRETS_DETECTED: 'push:secrets-detected',
   PUSH_UPDATE_AVAILABLE: 'push:update-available',
@@ -93,6 +100,7 @@ export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS]
 export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_SESSION_UPDATED'
   | 'PUSH_SESSION_CREATED'
+  | 'PUSH_SESSION_DELETED'
   | 'PUSH_CONFIG_CHANGED'
   | 'PUSH_SECRETS_DETECTED'
   | 'PUSH_UPDATE_AVAILABLE'

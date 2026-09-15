@@ -6,6 +6,10 @@ import { Preferences } from '@main/store/preferences'
 import { setSentryEnabled, captureHandlerException } from '@main/services/sentry'
 import { setAutostart } from '@main/services/autostart'
 import { broadcastToRenderers } from '@main/window-manager'
+import { scanCache } from '@main/services/scan-cache'
+import { createLogger } from '@main/lib/logger'
+
+const log = createLogger('Settings')
 
 export function registerSettingsHandlers(): void {
   ipcMain.handle(CHANNELS.SETTINGS_GET, async () => {
@@ -28,6 +32,23 @@ export function registerSettingsHandlers(): void {
 
       if (typeof settingsPatch.sentryEnabled === 'boolean') {
         setSentryEnabled(settingsPatch.sentryEnabled)
+      }
+
+      // A rate change leaves every already-scanned session's cost stale: the
+      // in-memory scan cache holds summaries computed under the old table,
+      // and the worker's on-disk metadata cache would otherwise keep serving
+      // them right back on the next read. Refreshing here recomputes with
+      // the new active table and, via its pricing fingerprint, discards the
+      // stale disk entries too — one call covers both caches.
+      if ('pricingProvider' in settingsPatch || 'pricingOverrides' in settingsPatch) {
+        // Best-effort: the preference write already succeeded, and a scan
+        // failure here (e.g. an unreadable projects dir) shouldn't be
+        // reported back as the settings write itself failing.
+        try {
+          await scanCache.refresh()
+        } catch (error) {
+          log.warn('Failed to refresh scan cache after a pricing change:', error)
+        }
       }
 
       // Notify every renderer surface so windows that mounted with stale prefs
