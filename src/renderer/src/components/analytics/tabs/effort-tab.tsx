@@ -11,6 +11,7 @@ import {
   Cell,
 } from 'recharts'
 import { formatCost } from '@shared/utils'
+import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import { StatCard } from '@renderer/components/analytics/stat-card'
 import { ChartCard } from '@renderer/components/analytics/chart-card'
 import { ParallelToolsChart } from '@renderer/components/analytics/charts/parallel-tools-chart'
@@ -238,7 +239,14 @@ export function EffortTab({ data }: Props): React.JSX.Element {
 
       {/* Effort over time */}
       <ChartCard title="Effort Over Time" description="Daily stacked turn counts by effort level">
-        <EffortOverTimeChart data={effortAnalytics.effortOverTime} />
+        {/* This chart sorts dates alphabetically and plots one axis tick per
+            day, so the `(undated)` sentinel (see `AnalyticsData.undatedActivity`)
+            would render as a stray, out-of-order tick rather than a real day.
+            Totals elsewhere still include it — only this per-day series drops
+            it, the same choice `overview-tab.tsx`'s `DailyUsageChart` makes. */}
+        <EffortOverTimeChart
+          data={effortAnalytics.effortOverTime.filter((d) => d.date !== UNDATED_DAY)}
+        />
       </ChartCard>
 
       {/* Parallel tool usage */}

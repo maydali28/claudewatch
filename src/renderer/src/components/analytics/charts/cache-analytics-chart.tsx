@@ -41,8 +41,12 @@ export function CacheAnalyticsChart({ data }: Props): React.JSX.Element {
         <div className="space-y-1 text-xs">
           <p className="font-medium">Cache Hit Ratio</p>
           <p className="text-muted-foreground">
-            Savings:{' '}
-            <span className="font-medium text-green-600">{formatCost(data.costSavings)}</span>
+            Net savings:{' '}
+            <span
+              className={`font-medium ${data.netSavings >= 0 ? 'text-green-600' : 'text-red-500'}`}
+            >
+              {formatCost(data.netSavings)}
+            </span>
           </p>
           <p className="text-muted-foreground">
             5m tokens: {formatTokens(data.totalCache5mTokens)}
