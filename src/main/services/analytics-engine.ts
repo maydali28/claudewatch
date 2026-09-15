@@ -24,12 +24,19 @@ import type {
   DateRange,
   SessionHealthSummary,
   SessionHealthEntry,
+  SessionPeriodRow,
 } from '@shared/types/analytics'
 import type { SessionDayUsage } from '@shared/types/session'
 import type { LintCheckId, LintSeverity } from '@shared/types/lint'
 import { getModelFamily } from '@shared/constants/models'
 
-import { resolveDateRange, toDateKey, isWithinRange } from '@shared/utils/date-ranges'
+import {
+  resolveDateRange,
+  toDateKey,
+  toDayKeyOrUndated,
+  isWithinRange,
+  UNDATED_DAY,
+} from '@shared/utils/date-ranges'
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -46,30 +53,84 @@ function percentile(sorted: number[], p: number): number {
  * attributed a session's whole history to its final day, so resuming
  * yesterday's session today moved yesterday's tokens — and yesterday's models
  * — into today, and selecting yesterday showed nothing at all.
+ *
+ * `includeUndated` admits `UNDATED_DAY` rows alongside the calendar-bounded
+ * ones. It is passed down explicitly by every caller (ultimately from
+ * `computeAnalytics`'s own `dateRange === 'all'` check) rather than inferred
+ * here: `UNDATED_DAY` sorts lexically before every real `YYYY-MM-DD` key,
+ * including `'1970-01-01'`, so `d.day >= fromKey` alone can never admit it —
+ * by design, so every other caller of this same lexical comparison keeps
+ * excluding undated activity from a bounded range without a special case.
+ * The `all` preset is the one caller that wants it in, so it says so.
  */
-function daysInRange(session: SessionSummary, fromKey: string, toKey: string): SessionDayUsage[] {
-  return (session.dailyUsage ?? []).filter((d) => d.day >= fromKey && d.day <= toKey)
+function daysInRange(
+  session: SessionSummary,
+  fromKey: string,
+  toKey: string,
+  includeUndated: boolean
+): SessionDayUsage[] {
+  return (session.dailyUsage ?? []).filter(
+    (d) => (d.day >= fromKey && d.day <= toKey) || (includeUndated && d.day === UNDATED_DAY)
+  )
 }
 
-function filterByDateRange(sessions: SessionSummary[], from: Date, to: Date): SessionSummary[] {
+function filterByDateRange(
+  sessions: SessionSummary[],
+  from: Date,
+  to: Date,
+  includeUndated: boolean
+): SessionSummary[] {
   const fromKey = toDateKey(from)
   const toKey = toDateKey(to)
   return sessions.filter((s) =>
     s.dailyUsage?.length
-      ? daysInRange(s, fromKey, toKey).length > 0
+      ? daysInRange(s, fromKey, toKey, includeUndated).length > 0
       : // A summary written before per-day accounting existed. Kept so an
         // out-of-date cache degrades to the old behaviour instead of vanishing.
         isWithinRange(s.lastTimestamp, from, to)
   )
 }
 
+/**
+ * Undated activity summed across every session, independent of the selected
+ * range. Reported unconditionally so the range picker can disclose "N
+ * messages have no date" no matter what is selected — including a calendar
+ * range that just excluded them from its own totals, and `all` even though
+ * it also folds this figure into the totals below. Reading straight from
+ * `session.dailyUsage` (not `filtered`, and not through `daysInRange`) is
+ * deliberate: a session whose only activity is undated has nothing to pass a
+ * calendar-bounded `filterByDateRange` and would otherwise disappear from
+ * this count exactly where it matters most — a narrow range on a corpus that
+ * still has an undated record in it.
+ */
+function undatedActivityTotals(sessions: SessionSummary[]): {
+  messages: number
+  responses: number
+} {
+  let messages = 0
+  let responses = 0
+  for (const s of sessions) {
+    const undated = s.dailyUsage?.find((d) => d.day === UNDATED_DAY)
+    if (undated) {
+      messages += undated.messageCount
+      responses += undated.responseCount
+    }
+  }
+  return { messages, responses }
+}
+
 // ─── buildDailyUsage ─────────────────────────────────────────────────────────
 
-function buildDailyUsage(sessions: SessionSummary[], fromKey: string, toKey: string): DailyUsage[] {
+function buildDailyUsage(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string,
+  includeUndated: boolean
+): DailyUsage[] {
   const byDate = new Map<string, DailyUsage>()
 
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       let existing = byDate.get(d.day)
       if (!existing) {
         existing = {
@@ -109,21 +170,48 @@ function buildDailyUsage(sessions: SessionSummary[], fromKey: string, toKey: str
 function totalsInRange(
   sessions: SessionSummary[],
   fromKey: string,
-  toKey: string
-): { tokens: number; cacheTokens: number; cost: number; messages: number } {
+  toKey: string,
+  includeUndated: boolean
+): {
+  tokens: number
+  cacheTokens: number
+  cost: number
+  messages: number
+  unpricedResponses: number
+  incompleteUsageResponses: number
+  responsesWithoutCompletionSignal: number
+  reducedConfidenceResponses: number
+} {
   let tokens = 0
   let cacheTokens = 0
   let cost = 0
   let messages = 0
+  let unpricedResponses = 0
+  let incompleteUsageResponses = 0
+  let responsesWithoutCompletionSignal = 0
+  let reducedConfidenceResponses = 0
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       tokens += d.inputTokens + d.outputTokens
       cacheTokens += d.cacheReadTokens + d.cacheCreationTokens
       cost += d.estimatedCost
       messages += d.messageCount
+      unpricedResponses += d.unpricedResponses
+      incompleteUsageResponses += d.incompleteUsageResponses
+      responsesWithoutCompletionSignal += d.responsesWithoutCompletionSignal
+      reducedConfidenceResponses += d.reducedConfidenceResponses
     }
   }
-  return { tokens, cacheTokens, cost, messages }
+  return {
+    tokens,
+    cacheTokens,
+    cost,
+    messages,
+    unpricedResponses,
+    incompleteUsageResponses,
+    responsesWithoutCompletionSignal,
+    reducedConfidenceResponses,
+  }
 }
 
 // ─── buildProjectCosts ────────────────────────────────────────────────────────
@@ -139,13 +227,14 @@ function buildProjectCosts(
   sessions: SessionSummary[],
   projects: Project[],
   fromKey: string,
-  toKey: string
+  toKey: string,
+  includeUndated: boolean
 ): ProjectCost[] {
   const byProject = new Map<string, ProjectCost>()
   const projectMap = new Map(projects.map((p) => [p.id, p]))
 
   for (const s of sessions) {
-    const days = daysInRange(s, fromKey, toKey)
+    const days = daysInRange(s, fromKey, toKey, includeUndated)
     if (days.length === 0) continue
 
     let existing = byProject.get(s.projectId)
@@ -173,6 +262,63 @@ function buildProjectCosts(
   return [...byProject.values()].sort((a, b) => b.totalCost - a.totalCost)
 }
 
+// ─── buildSessionPeriodRows ───────────────────────────────────────────────────
+
+/**
+ * Per-session rows for the Overview tab's session table, scoped to the
+ * selected period.
+ *
+ * The renderer used to filter and total these itself from lifetime session
+ * fields via `lastTimestamp`, which is exactly the membership disagreement
+ * `daysInRange` exists to prevent (see its own doc comment): a session active
+ * on two days either vanished from the table on the earlier one or showed
+ * both days' totals on the later one. Building the row here, from the same
+ * per-day rows every other date-scoped series reads, means there is one
+ * membership rule and one set of period totals for this table to consume.
+ */
+function buildSessionPeriodRows(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string,
+  includeUndated: boolean
+): SessionPeriodRow[] {
+  const rows: SessionPeriodRow[] = []
+
+  for (const s of sessions) {
+    const days = daysInRange(s, fromKey, toKey, includeUndated)
+    if (days.length === 0) continue
+
+    let totalInputTokens = 0
+    let totalOutputTokens = 0
+    let estimatedCost = 0
+    let messageCount = 0
+    let parentMessageCount = 0
+    for (const d of days) {
+      totalInputTokens += d.inputTokens
+      totalOutputTokens += d.outputTokens
+      estimatedCost += d.estimatedCost
+      messageCount += d.messageCount
+      parentMessageCount += d.parentMessageCount
+    }
+
+    rows.push({
+      id: s.id,
+      sessionId: s.id,
+      projectId: s.projectId,
+      title: s.title,
+      hasError: s.hasError,
+      lastTimestamp: s.lastTimestamp,
+      parentMessageCount,
+      messageCount,
+      totalInputTokens,
+      totalOutputTokens,
+      estimatedCost,
+    })
+  }
+
+  return rows
+}
+
 // ─── buildModelUsage ──────────────────────────────────────────────────────────
 
 /**
@@ -183,11 +329,16 @@ function buildProjectCosts(
  * models are kept rather than skipped — dropping them made a fifth of real
  * turns disappear from the chart while still counting in the totals beside it.
  */
-function buildModelUsage(sessions: SessionSummary[], fromKey: string, toKey: string): ModelUsage[] {
+function buildModelUsage(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string,
+  includeUndated: boolean
+): ModelUsage[] {
   const byFamily = new Map<string, ModelUsage>()
 
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
         const existing = byFamily.get(m.family)
         if (existing) {
@@ -219,7 +370,8 @@ function computeCacheAnalytics(
   dailyUsage: DailyUsage[],
   pricingTable: Record<ModelFamily, ModelPricing>,
   fromKey: string,
-  toKey: string
+  toKey: string,
+  includeUndated: boolean
 ): CacheAnalytics {
   // Scoped to the selected period, matching the daily series shown beside
   // these figures. Summing session lifetimes here would report cache activity
@@ -228,13 +380,28 @@ function computeCacheAnalytics(
   let totalCacheWriteTokens = 0
   let totalCache5mTokens = 0
   let totalCache1hTokens = 0
+  // Coverage, not a cost figure: every unknown-model guard below (`m.family
+  // === 'unknown'`, `!p`) already excludes these responses' cache activity
+  // from savings rather than pricing them at a guess. Counting them
+  // separately is what lets a `0` net-savings figure read as "we can't price
+  // this" instead of "no cache activity happened" — see `CacheAnalytics.unpricedResponses`.
+  let unpricedResponses = 0
+  // Same rationale, for the three completeness signals `SessionDiagnostics`
+  // carries — see `CacheAnalytics.incompleteUsageResponses` and its siblings.
+  let incompleteUsageResponses = 0
+  let responsesWithoutCompletionSignal = 0
+  let reducedConfidenceResponses = 0
 
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       totalCacheReadTokens += d.cacheReadTokens
       totalCacheWriteTokens += d.cacheCreationTokens
       totalCache5mTokens += d.cacheCreation5mTokens
       totalCache1hTokens += d.cacheCreation1hTokens
+      unpricedResponses += d.unpricedResponses
+      incompleteUsageResponses += d.incompleteUsageResponses
+      responsesWithoutCompletionSignal += d.responsesWithoutCompletionSignal
+      reducedConfidenceResponses += d.reducedConfidenceResponses
     }
   }
 
@@ -252,42 +419,56 @@ function computeCacheAnalytics(
   // cache_creation tokens, so summing all three gives the true total context size.
   let totalFreshInputTokens = 0
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) totalFreshInputTokens += d.inputTokens
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated))
+      totalFreshInputTokens += d.inputTokens
   }
   const hitRatioDenominator = totalFreshInputTokens + totalCacheReadTokens + totalCacheWriteTokens
   const hitRatio = hitRatioDenominator > 0 ? totalCacheReadTokens / hitRatioDenominator : 0
 
-  // What cache reads saved, priced at each model's own rate.
-  //
-  // This used Sonnet 4.6 as a stand-in for every model. On a mixed-model
-  // session that is wrong even when the token counts are right — an Opus read
-  // saves $4.50/MTok where a Sonnet read saves $2.70. An unrecognised model
-  // saves nothing here rather than a guessed amount, matching how its cost is
-  // left unpriced.
-  let costSavings = 0
+  // An uncached request pays ordinary input rates for tokens that caching wrote
+  // at a premium — 1.25x input for a 5-minute write, 2x for an hour. Adding
+  // only the read discount to the actual cost left those premiums inside the
+  // "without cache" baseline, overstating savings. Measured on real history the
+  // overstatement is $526.62 against $24,608.05 of true net savings (2.14%).
+  // Net savings can legitimately be negative over a write-heavy window. An
+  // unrecognised model contributes nothing here rather than a guessed amount,
+  // matching how its cost is left unpriced.
+  let grossReadSavings = 0
+  let writePremium = 0
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
         if (m.family === 'unknown') continue
         const p = pricingTable[m.family]
         if (!p) continue
-        costSavings += (m.cacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
+        grossReadSavings += (m.cacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
+        writePremium +=
+          (m.cacheCreation5mTokens / 1_000_000) * (p.cache5m - p.input) +
+          (m.cacheCreation1hTokens / 1_000_000) * (p.cache1h - p.input) +
+          // An unsplit write (no TTL reported) is still a genuine cache write and
+          // still carries a premium over ordinary input. Priced at the 5-minute
+          // rate for consistency with the tier-cost display below, which prices
+          // this same remainder the same way.
+          (m.cacheCreationUnknownTtlTokens / 1_000_000) * (p.cache5m - p.input)
       }
     }
   }
+  const netSavings = grossReadSavings - writePremium
 
   // The period's cost, so the cache tab cannot contradict the overview beside
   // it. Summing session lifetimes here reported $11 against a $1 total on a
   // one-day selection.
   let actualCost = 0
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) actualCost += d.estimatedCost
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) actualCost += d.estimatedCost
   }
-  const hypotheticalUncachedCost = actualCost + costSavings
+  const uncachedSameWorkloadCost = actualCost + netSavings
 
-  // Average reuse rate: how many times each cache write was reused on average
+  // Average reuse rate: how many times each cache write was reused on average.
+  // Zero writes is an undefined denominator, not zero reuse: the write may
+  // have happened just before the range started.
   const averageReuseRate =
-    totalCacheWriteTokens > 0 ? totalCacheReadTokens / totalCacheWriteTokens : 0
+    totalCacheWriteTokens > 0 ? totalCacheReadTokens / totalCacheWriteTokens : null
 
   // Daily hit ratios — same formula: read / (input + read + creation)
   const dailyHitRatio: DailyHitRatio[] = dailyUsage
@@ -301,13 +482,18 @@ function computeCacheAnalytics(
       }
     })
 
-  // Cache-busting days: days where ratio dropped significantly vs prior day
-  const cacheBustingDays: string[] = []
+  // A drop is only comparable between consecutive calendar days. Comparing
+  // array neighbours flagged a nine-day gap as if it were an overnight change.
+  // This is an observed drop, not a diagnosis: workload mix and ordinary cache
+  // expiry lower the ratio without anything being invalidated.
+  const hitRatioDropDays: string[] = []
   for (let i = 1; i < dailyHitRatio.length; i++) {
-    const prev = dailyHitRatio[i - 1].ratio
-    const curr = dailyHitRatio[i].ratio
-    if (prev > 0.3 && curr < 0.1) {
-      cacheBustingDays.push(dailyHitRatio[i].date)
+    const prevDate = new Date(`${dailyHitRatio[i - 1].date}T00:00:00`)
+    const currDate = new Date(`${dailyHitRatio[i].date}T00:00:00`)
+    const dayGap = Math.round((currDate.getTime() - prevDate.getTime()) / 86_400_000)
+    if (dayGap !== 1) continue
+    if (dailyHitRatio[i - 1].ratio > 0.3 && dailyHitRatio[i].ratio < 0.1) {
+      hitRatioDropDays.push(dailyHitRatio[i].date)
     }
   }
 
@@ -315,7 +501,7 @@ function computeCacheAnalytics(
   // session actually ran — not from whichever model it used most.
   const sessionEfficiency: SessionCacheEfficiency[] = sessions
     .map((s) => {
-      const days = daysInRange(s, fromKey, toKey)
+      const days = daysInRange(s, fromKey, toKey, includeUndated)
       let input = 0
       let reads = 0
       let writes = 0
@@ -344,28 +530,47 @@ function computeCacheAnalytics(
       }
     })
     .filter((e) => e.cacheReadTokens + e.cacheWriteTokens > 0)
-    .sort((a, b) => b.cacheReadTokens - a.cacheReadTokens)
+    // Rank by the advertised criterion before truncating. Sorting by read
+    // volume first and re-sorting the survivors in the renderer could drop the
+    // best session before it was ever compared.
+    .sort((a, b) => b.hitRatio - a.hitRatio)
     .slice(0, 20)
 
-  // Model savings breakdown, over the selected period.
+  // Model savings breakdown, over the selected period. `totalSavings` is the
+  // gross read discount alone; `netSavings` subtracts that same model's
+  // cache-write premium, using the identical known/priced guard for both
+  // terms — pricing the premium for a row whose gross was zeroed out (unknown
+  // family, or no pricing entry) would make net wrong in the model's favor.
   const modelSavingsMap = new Map<string, ModelCacheSavings>()
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
         const p = pricingTable[m.family]
-        const perMTok = m.family === 'unknown' || !p ? 0 : p.input - p.cacheRead
-        const savings = (m.cacheReadTokens / 1_000_000) * perMTok
+        const known = m.family !== 'unknown' && !!p
+        const perMTok = known ? p.input - p.cacheRead : 0
+        const gross = (m.cacheReadTokens / 1_000_000) * perMTok
+        const premium = known
+          ? (m.cacheCreation5mTokens / 1_000_000) * (p.cache5m - p.input) +
+            (m.cacheCreation1hTokens / 1_000_000) * (p.cache1h - p.input) +
+            // Same unsplit-write remainder as the aggregate premium above,
+            // priced at the same 5-minute rate — an asymmetric guard here
+            // would make this model's net savings disagree with the total.
+            (m.cacheCreationUnknownTtlTokens / 1_000_000) * (p.cache5m - p.input)
+          : 0
+        const net = gross - premium
         const existing = modelSavingsMap.get(m.family)
         if (existing) {
           existing.cacheReadTokens += m.cacheReadTokens
-          existing.totalSavings += savings
+          existing.totalSavings += gross
+          existing.netSavings += net
         } else {
           modelSavingsMap.set(m.family, {
             id: m.family,
             model: m.family,
             cacheReadTokens: m.cacheReadTokens,
             savingsPerMTok: perMTok,
-            totalSavings: savings,
+            totalSavings: gross,
+            netSavings: net,
           })
         }
       }
@@ -376,13 +581,24 @@ function computeCacheAnalytics(
   // most-used model — a 5m write on Opus costs more than one on Haiku.
   let cost5m = 0
   let cost1h = 0
+  let costUnknownTtl = 0
+  let totalCacheUnknownTtlTokens = 0
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
+        // Token count is reported regardless of pricing, matching how the 5m
+        // and 1h tiers are counted above — a model with no pricing entry
+        // still had real cache-write activity.
+        totalCacheUnknownTtlTokens += m.cacheCreationUnknownTtlTokens
         const p = pricingTable[m.family]
         if (m.family === 'unknown' || !p) continue
         cost5m += (m.cacheCreation5mTokens / 1_000_000) * p.cache5m
         cost1h += (m.cacheCreation1hTokens / 1_000_000) * p.cache1h
+        // No TTL was reported for this remainder, so there is no tier rate to
+        // charge it at. The 5-minute rate is a fallback estimate — kept in its
+        // own bucket rather than folded into cost5m, so it never masquerades
+        // as a known 5-minute write.
+        costUnknownTtl += (m.cacheCreationUnknownTtlTokens / 1_000_000) * p.cache5m
       }
     }
   }
@@ -394,16 +610,23 @@ function computeCacheAnalytics(
     session: SessionSummary
     compactions: number
     tokensRemoved: number
+    maxPreTokens: number
   }
   const compactionRollups: CompactionRollup[] = []
   for (const s of sessions) {
     let compactions = 0
     let tokensRemoved = 0
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    let maxPreTokens = 0
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       compactions += d.compactions
       tokensRemoved += d.tokensRemovedByCompaction
+      // Max-of-maxes across days equals the global max; max-of-sums (or the
+      // sum-over-count mean this replaced) would report the busiest day
+      // instead of the single largest pre-compaction context.
+      maxPreTokens = Math.max(maxPreTokens, d.maxPreCompactionTokens)
     }
-    if (compactions > 0) compactionRollups.push({ session: s, compactions, tokensRemoved })
+    if (compactions > 0)
+      compactionRollups.push({ session: s, compactions, tokensRemoved, maxPreTokens })
   }
 
   const totalCompactions = compactionRollups.reduce((n, r) => n + r.compactions, 0)
@@ -411,10 +634,13 @@ function computeCacheAnalytics(
   const avgTokensRemovedPerSession =
     compactionRollups.length > 0 ? totalTokensRemoved / compactionRollups.length : 0
 
-  // Cost avoided is priced from the session's dominant model: compaction
-  // clears context rather than producing tokens, so the cleared tokens cannot
-  // be attributed to a specific model. Unrecognised models avoid nothing
-  // rather than a guessed amount.
+  // Hypothetical only — see `SessionCompactionEntry.estimatedCostAvoided`.
+  // Priced from the session's dominant model because compaction clears
+  // context rather than producing tokens, so the cleared tokens cannot be
+  // attributed to a specific model; unrecognised models avoid nothing rather
+  // than a guessed amount. This does not net out the retained summary, the
+  // summarisation call's own cost, or later cache reuse, so it must never be
+  // presented as a measured saving — UI labels it explicitly hypothetical.
   const costAvoidedFor = (r: CompactionRollup): number => {
     const family = getModelFamily(r.session.dominantModel)
     const p = pricingTable[family]
@@ -430,7 +656,10 @@ function computeCacheAnalytics(
       sessionTitle: r.session.title,
       compactionCount: r.compactions,
       totalTokensRemoved: r.tokensRemoved,
-      peakContextTokens: r.compactions > 0 ? Math.round(r.tokensRemoved / r.compactions) : 0,
+      // The largest single pre-compaction context, matching what session
+      // details shows. Dividing the total removed by the compaction count is
+      // a mean, which is not what "peak" means.
+      peakContextTokens: r.maxPreTokens,
       estimatedCostAvoided: costAvoidedFor(r),
       primaryModel: r.session.dominantModel,
     }))
@@ -449,18 +678,25 @@ function computeCacheAnalytics(
     hitRatio,
     totalCacheReadTokens,
     totalCacheWriteTokens,
-    costSavings,
-    hypotheticalUncachedCost,
+    grossReadSavings,
+    writePremium,
+    netSavings,
+    uncachedSameWorkloadCost,
     actualCost,
     averageReuseRate,
     dailyHitRatio,
     totalCache5mTokens,
     totalCache1hTokens,
-    tierCostBreakdown: { cost5m, cost1h },
+    totalCacheUnknownTtlTokens,
+    tierCostBreakdown: { cost5m, cost1h, costUnknownTtl },
     sessionEfficiency,
     modelSavings: [...modelSavingsMap.values()],
-    cacheBustingDays,
+    hitRatioDropDays,
     compactionAnalytics,
+    unpricedResponses,
+    incompleteUsageResponses,
+    responsesWithoutCompletionSignal,
+    reducedConfidenceResponses,
   }
 }
 
@@ -476,30 +712,48 @@ function computeCacheAnalytics(
 function computeModelEfficiency(
   sessions: SessionSummary[],
   fromKey: string,
-  toKey: string
+  toKey: string,
+  includeUndated: boolean
 ): ModelEfficiencyRow[] {
   const byFamily = new Map<
     string,
     {
       turnCount: number
+      inputTokens: number
+      cacheReadTokens: number
+      cacheCreation5mTokens: number
+      cacheCreation1hTokens: number
+      cacheCreationUnknownTtlTokens: number
       totalOutputTokens: number
       totalCost: number
     }
   >()
 
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
         const existing = byFamily.get(m.family)
         if (existing) {
           existing.turnCount += m.turnCount
+          existing.inputTokens += m.inputTokens
+          existing.cacheReadTokens += m.cacheReadTokens
+          existing.cacheCreation5mTokens += m.cacheCreation5mTokens
+          existing.cacheCreation1hTokens += m.cacheCreation1hTokens
+          existing.cacheCreationUnknownTtlTokens += m.cacheCreationUnknownTtlTokens
           existing.totalOutputTokens += m.outputTokens
-          existing.totalCost += m.estimatedCost
+          // Skip nulls rather than adding them as zero: an unpriced model's
+          // rows still contribute their tokens above, just not to totalCost.
+          if (m.estimatedCost !== null) existing.totalCost += m.estimatedCost
         } else {
           byFamily.set(m.family, {
             turnCount: m.turnCount,
+            inputTokens: m.inputTokens,
+            cacheReadTokens: m.cacheReadTokens,
+            cacheCreation5mTokens: m.cacheCreation5mTokens,
+            cacheCreation1hTokens: m.cacheCreation1hTokens,
+            cacheCreationUnknownTtlTokens: m.cacheCreationUnknownTtlTokens,
             totalOutputTokens: m.outputTokens,
-            totalCost: m.estimatedCost,
+            totalCost: m.estimatedCost ?? 0,
           })
         }
       }
@@ -513,6 +767,11 @@ function computeModelEfficiency(
       id: family,
       model: family,
       turnCount: e.turnCount,
+      inputTokens: e.inputTokens,
+      cacheReadTokens: e.cacheReadTokens,
+      cacheCreation5mTokens: e.cacheCreation5mTokens,
+      cacheCreation1hTokens: e.cacheCreation1hTokens,
+      cacheCreationUnknownTtlTokens: e.cacheCreationUnknownTtlTokens,
       totalOutputTokens: e.totalOutputTokens,
       avgOutputPerTurn: e.turnCount > 0 ? e.totalOutputTokens / e.turnCount : 0,
       totalCost: e.totalCost,
@@ -527,19 +786,26 @@ function computeModelEfficiency(
 function computeDailyModelCost(
   sessions: SessionSummary[],
   fromKey: string,
-  toKey: string
+  toKey: string,
+  includeUndated: boolean
 ): DailyModelCost[] {
   const byDateModel = new Map<string, DailyModelCost>()
 
   for (const s of sessions) {
-    for (const d of daysInRange(s, fromKey, toKey)) {
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
         const key = `${d.day}-${m.family}`
         const existing = byDateModel.get(key)
         if (existing) {
-          existing.cost += m.estimatedCost
+          // Skip nulls rather than adding them as zero — see computeModelEfficiency.
+          if (m.estimatedCost !== null) existing.cost += m.estimatedCost
         } else {
-          byDateModel.set(key, { id: key, date: d.day, model: m.family, cost: m.estimatedCost })
+          byDateModel.set(key, {
+            id: key,
+            date: d.day,
+            model: m.family,
+            cost: m.estimatedCost ?? 0,
+          })
         }
       }
     }
@@ -558,8 +824,31 @@ function computeDailyModelCost(
  * Turn durations carry their own timestamp, so they belong to the day they
  * occurred on. Counting every turn of any session merely *active* in the range
  * put a fortnight of latency behind a one-day selection — the same mistake as
- * attributing a session's whole history to its last day. A turn with no
- * timestamp is kept: dropping it would silently lose data.
+ * attributing a session's whole history to its last day.
+ *
+ * Deliberately does NOT take `includeUndated`, unlike every other date-scoped
+ * aggregate in this file: an undated turn is excluded from every calendar
+ * range, `all` included, because a latency percentile is sensitive to exactly
+ * which durations feed it. That ruling currently governs an EMPTY SET, and
+ * this comment previously claimed otherwise. `judgeResponse`
+ * (`response-observability.ts`) is the only producer of a `TurnDuration`, and
+ * it builds one only when `durationMs > 0`; `durationMs` is `NaN` — never
+ * `> 0` — whenever either timestamp fails to parse, and it is not computed at
+ * all unless both are present. So every `assistantTimestamp` reaching this
+ * function is present AND parsable, `toDayKeyOrUndated` never returns
+ * `UNDATED_DAY` here, and no turn is ever excluded by the undated policy.
+ * That invariant is pinned at its source — see "never yields a turn duration
+ * from a timestamp it could not parse" in `response-observability.test.ts` —
+ * rather than defended by an unreachable branch here.
+ *
+ * What was deleted, and why it is not a loss of protection: this used to wrap
+ * the day check in `if (td.assistantTimestamp)`, which kept a timestamp-less
+ * turn in EVERY range unconditionally — including `today` — while the comment
+ * above it asserted such a turn was excluded "the same way" as an unparsable
+ * one. The two undated sub-cases were documented as symmetric and implemented
+ * as opposites. They are now genuinely symmetric: both route through
+ * `toDayKeyOrUndated` to `UNDATED_DAY`, which sorts below every real day key,
+ * so neither can be attributed to a calendar window it cannot honestly claim.
  */
 function computeLatencyAnalytics(
   sessions: SessionSummary[],
@@ -574,10 +863,30 @@ function computeLatencyAnalytics(
   for (const s of sessions) {
     for (const td of s.turnDurations ?? []) {
       if (td.durationMs <= 0) continue
-      if (td.assistantTimestamp) {
-        const day = toDateKey(td.assistantTimestamp)
-        if (day < fromKey || day > toKey) continue
-      }
+      // One day-key derivation for both undated sub-cases — absent timestamp
+      // and unparsable timestamp alike — through the same shared helper every
+      // other day-key site in this codebase uses.
+      //
+      // REQUIRED here, not merely consistent. `assistantTimestamp` is
+      // `string | undefined`, and `toDateKey(undefined)` THROWS: it calls
+      // `.getFullYear()` on the undefined it was handed. Deleting the
+      // enclosing `if (td.assistantTimestamp)` guard (see this function's doc
+      // comment) is what made the absent case reach this line, so this helper
+      // is now the only thing standing between a summary carrying a
+      // timestamp-less turn and a crash in the analytics engine. Substituting
+      // `toDateKey` here is caught by `analytics-scope.test.ts`'s two undated
+      // latency tests.
+      //
+      // `judgeResponse` cannot produce such a turn, so nothing in the normal
+      // pipeline reaches it — but a hand-built summary or a corrupted cache
+      // entry can, and the difference between "excluded from the range" and
+      // "throws" is not one to leave to the data.
+      //
+      // `fromKey`/`toKey` are always real calendar keys, and `UNDATED_DAY`
+      // sorts below every one of them, so an undated turn would be excluded
+      // from every range including `all`.
+      const day = toDayKeyOrUndated(td.assistantTimestamp)
+      if (day < fromKey || day > toKey) continue
       allDurations.push(td.durationMs)
       if (td.isPostCompaction) {
         postCompactionDurations.push(td.durationMs)
@@ -614,8 +923,12 @@ function computeLatencyAnalytics(
     else buckets[3].count++
   }
 
-  // Degrading sessions: max turn duration > 2× median and median itself is slow
-  const degradingSessionIds = sessions
+  // Degrading sessions: max turn duration > 2× median and median itself is slow.
+  // Unlike everything else in this function, this stays a lifetime judgement —
+  // a median-versus-max comparison describes a whole session's trajectory and
+  // cannot be honestly scoped to a window without recomputing the median from
+  // a truncated sample, which would answer a different question.
+  const lifetimeDegradingSessionIds = sessions
     .filter((s) => {
       const med = s.observability?.medianTurnDurationMs
       const max = s.observability?.maxTurnDurationMs
@@ -633,29 +946,42 @@ function computeLatencyAnalytics(
     slowestTurns: slowTurnEntries.sort((a, b) => b.durationMs - a.durationMs).slice(0, 20),
     postCompactionAvgMs: avg(postCompactionDurations),
     normalAvgMs: avg(normalDurations),
-    degradingSessionIds,
+    lifetimeDegradingSessionIds,
   }
 }
 
 // ─── computeEffortAnalytics ───────────────────────────────────────────────────
 
 /**
- * Effort is recorded per session, not per turn, so its distribution cannot be
- * split by day — a session active in the period contributes its whole
- * distribution. Its *cost*, however, is attributed from the period only:
- * charging a one-day view for a fortnight of spend made the effort tab
- * contradict the overview.
+ * Effort is judged once per API response, and every response carries its own
+ * timestamp (Task 5's `flushPendingResponse`), so the distribution is
+ * date-scopeable. Summing a session's lifetime distribution for any session
+ * merely *active* in the range charged a one-day view for a fortnight of
+ * thinking — the same defect as attributing a session's whole history to its
+ * last day. Cost is attributed from the period only, same as before: charging
+ * a one-day view for a fortnight of spend made the effort tab contradict the
+ * overview.
  */
 function computeEffortAnalytics(
   sessions: SessionSummary[],
   fromKey: string,
-  toKey: string
+  toKey: string,
+  includeUndated: boolean
 ): EffortAnalytics {
   const totals = { low: 0, medium: 0, high: 0, ultrathink: 0 }
   const costs: Record<EffortLevel, number> = { low: 0, medium: 0, high: 0, ultrathink: 0 }
 
   for (const s of sessions) {
-    const ed = s.observability.effortDistribution
+    const days = daysInRange(s, fromKey, toKey, includeUndated)
+    const ed = { low: 0, medium: 0, high: 0, ultrathink: 0 }
+    let parentCost = 0
+    for (const d of days) {
+      ed.low += d.effortDistribution.low
+      ed.medium += d.effortDistribution.medium
+      ed.high += d.effortDistribution.high
+      ed.ultrathink += d.effortDistribution.ultrathink
+      parentCost += d.parentEstimatedCost
+    }
     totals.low += ed.low
     totals.medium += ed.medium
     totals.high += ed.high
@@ -663,12 +989,6 @@ function computeEffortAnalytics(
 
     // Cost attribution: use parent-session-only cost (exclude subagent rollup) so
     // the proportional split stays consistent with the parent effort distribution.
-    // Parent-only, and only for days inside the period.
-    const parentCost = daysInRange(s, fromKey, toKey).reduce(
-      (sum, d) => sum + d.parentEstimatedCost,
-      0
-    )
-
     const total = ed.low + ed.medium + ed.high + ed.ultrathink
     if (total > 0 && parentCost > 0) {
       costs.low += parentCost * (ed.low / total)
@@ -687,17 +1007,19 @@ function computeEffortAnalytics(
     avgCostPerTurn: totals[level] > 0 ? costs[level] / totals[level] : 0,
   }))
 
-  // Effort over time by session date
+  // Effort over time, by the day each response actually landed on — not by
+  // the session's last timestamp, which piled a session's whole lifetime
+  // distribution onto whichever day it last touched.
   const byDate = new Map<string, typeof totals>()
   for (const s of sessions) {
-    const date = toDateKey(s.lastTimestamp)
-    const existing = byDate.get(date) ?? { low: 0, medium: 0, high: 0, ultrathink: 0 }
-    const ed = s.observability.effortDistribution
-    existing.low += ed.low
-    existing.medium += ed.medium
-    existing.high += ed.high
-    existing.ultrathink += ed.ultrathink
-    byDate.set(date, existing)
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
+      const existing = byDate.get(d.day) ?? { low: 0, medium: 0, high: 0, ultrathink: 0 }
+      existing.low += d.effortDistribution.low
+      existing.medium += d.effortDistribution.medium
+      existing.high += d.effortDistribution.high
+      existing.ultrathink += d.effortDistribution.ultrathink
+      byDate.set(d.day, existing)
+    }
   }
 
   const effortOverTime = [...byDate.entries()]
@@ -709,25 +1031,38 @@ function computeEffortAnalytics(
 
 // ─── computeParallelToolAnalytics ─────────────────────────────────────────────
 
-function computeParallelToolAnalytics(sessions: SessionSummary[]): ParallelToolAnalytics {
+/**
+ * Each parallel-tool group is judged per response and lands on the day that
+ * response was flushed on (see `flushPendingResponse`), so — like effort —
+ * it is date-scopeable. Summing a session's lifetime `parallelToolCallCount`
+ * for any session active in the range made a single day's selection show a
+ * fortnight of parallelism.
+ */
+function computeParallelToolAnalytics(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string,
+  includeUndated: boolean
+): ParallelToolAnalytics {
   let totalParallelGroups = 0
   let maxParallelDegree = 0
   let totalToolsInGroups = 0
   const groupSizeCounts = new Map<number, number>()
 
   for (const s of sessions) {
-    const obs = s.observability
-    if (!obs) continue
-    totalParallelGroups += obs.parallelToolCallCount
-    if (obs.maxParallelDegree > maxParallelDegree) {
-      maxParallelDegree = obs.maxParallelDegree
-    }
-    // We only have counts from observability, not group size distribution
-    // Use maxParallelDegree as a proxy for group size distribution from the session
-    if (obs.parallelToolCallCount > 0 && obs.maxParallelDegree > 0) {
-      totalToolsInGroups += obs.parallelToolCallCount * obs.maxParallelDegree
-      const count = groupSizeCounts.get(obs.maxParallelDegree) ?? 0
-      groupSizeCounts.set(obs.maxParallelDegree, count + obs.parallelToolCallCount)
+    for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
+      totalParallelGroups += d.parallelToolGroups
+      if (d.maxParallelDegree > maxParallelDegree) {
+        maxParallelDegree = d.maxParallelDegree
+      }
+      // We only have counts from the day row, not a true group-size
+      // distribution. Use that day's maxParallelDegree as a proxy for the
+      // size of every group on the day, same approximation as before.
+      if (d.parallelToolGroups > 0 && d.maxParallelDegree > 0) {
+        totalToolsInGroups += d.parallelToolGroups * d.maxParallelDegree
+        const count = groupSizeCounts.get(d.maxParallelDegree) ?? 0
+        groupSizeCounts.set(d.maxParallelDegree, count + d.parallelToolGroups)
+      }
     }
   }
 
@@ -751,7 +1086,9 @@ const SES001_COST_THRESHOLD = 25.0
 const SES002_COMPACTION_THRESHOLD = 5
 const SES003_TOKEN_THRESHOLD = 2_000_000
 const SES004_STALE_DAYS = 14
-const SES004_MIN_MESSAGES = 10
+// Halved when message counting moved from records to API responses: the old
+// value of 10 was calibrated against counts inflated ~2.09x.
+const SES004_MIN_MESSAGES = 5
 const TOP_UNHEALTHY_LIMIT = 10
 
 function evaluateSessionFlags(session: SessionSummary): LintCheckId[] {
@@ -783,7 +1120,12 @@ function worstSeverityForFlags(flags: LintCheckId[]): LintSeverity {
   return 'info'
 }
 
-function computeSessionHealthSummary(sessions: SessionSummary[]): SessionHealthSummary {
+function computeSessionHealthSummary(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string,
+  includeUndated: boolean
+): SessionHealthSummary {
   let cleanCount = 0
   let warningCount = 0
   let errorCount = 0
@@ -791,20 +1133,18 @@ function computeSessionHealthSummary(sessions: SessionSummary[]): SessionHealthS
   const dailyMap = new Map<string, { clean: number; flagged: number }>()
 
   for (const session of sessions) {
-    const dateKey = toDateKey(session.lastTimestamp)
-    if (!dailyMap.has(dateKey)) dailyMap.set(dateKey, { clean: 0, flagged: 0 })
-    const day = dailyMap.get(dateKey)!
-
+    // The verdict is a judgement about the session as a whole (lifetime cost,
+    // compaction count, staleness), so it is computed once per session here —
+    // unlike the trend below, it does not move with the selected date range.
     const flags = evaluateSessionFlags(session)
+    const isClean = flags.length === 0
 
-    if (flags.length === 0) {
+    if (isClean) {
       cleanCount++
-      day.clean++
     } else {
       const severity = worstSeverityForFlags(flags)
       if (severity === 'error') errorCount++
       else warningCount++
-      day.flagged++
 
       unhealthyEntries.push({
         sessionId: session.id,
@@ -815,6 +1155,20 @@ function computeSessionHealthSummary(sessions: SessionSummary[]): SessionHealthS
         estimatedCost: session.estimatedCost,
         lastTimestamp: session.lastTimestamp,
       })
+    }
+
+    // Daily trend uses the same date-membership rule as every other
+    // date-scoped series (see `daysInRange`, mirrored from
+    // `computeEffortAnalytics`): a session active on two days contributes its
+    // verdict to both day rows, and a legacy session with no `dailyUsage`
+    // contributes to none — rather than piling the whole session onto
+    // `toDateKey(session.lastTimestamp)`, which moved a session active
+    // yesterday AND today entirely onto today.
+    for (const d of daysInRange(session, fromKey, toKey, includeUndated)) {
+      const day = dailyMap.get(d.day) ?? { clean: 0, flagged: 0 }
+      if (isClean) day.clean++
+      else day.flagged++
+      dailyMap.set(d.day, day)
     }
   }
 
@@ -840,29 +1194,70 @@ export function computeAnalytics(
   const { from, to } = resolveDateRange(dateRange)
   const fromKey = toDateKey(from)
   const toKey = toDateKey(to)
-  const filtered = filterByDateRange(sessions, from, to)
+
+  // The `all` preset is the one range that can honestly claim the undated
+  // bucket as part of "everything" — a calendar-bounded preset (`7d`, `30d`,
+  // `90d`, custom) cannot attribute undated activity to the window it names,
+  // so it stays excluded there. Computed once and passed down explicitly
+  // (see `daysInRange`'s doc comment) rather than re-derived at each call
+  // site, so every date-scoped total in this function agrees with every
+  // other one on which bucket is in play for this render.
+  const includeUndated = dateRange === 'all'
+  const filtered = filterByDateRange(sessions, from, to, includeUndated)
 
   // Distinct sessions active in the period — not the sum of per-day counts, in
   // which a session spanning three days would appear three times.
   const totalSessions = filtered.length
 
   // Totals cover the selected period, not each matching session's lifetime.
-  const inRange = totalsInRange(filtered, fromKey, toKey)
+  const inRange = totalsInRange(filtered, fromKey, toKey, includeUndated)
   const totalMessages = inRange.messages
   const totalTokens = inRange.tokens
   const totalCacheTokens = inRange.cacheTokens
   const totalCost = inRange.cost
+  const unpricedResponses = inRange.unpricedResponses
+  const incompleteUsageResponses = inRange.incompleteUsageResponses
+  const responsesWithoutCompletionSignal = inRange.responsesWithoutCompletionSignal
+  const reducedConfidenceResponses = inRange.reducedConfidenceResponses
 
-  const dailyUsage = buildDailyUsage(filtered, fromKey, toKey)
-  const projectCosts = buildProjectCosts(filtered, projects, fromKey, toKey)
-  const modelUsage = buildModelUsage(filtered, fromKey, toKey)
-  const cacheAnalytics = computeCacheAnalytics(filtered, dailyUsage, pricingTable, fromKey, toKey)
-  const modelEfficiency = computeModelEfficiency(filtered, fromKey, toKey)
-  const dailyModelCost = computeDailyModelCost(filtered, fromKey, toKey)
+  const dailyUsage = buildDailyUsage(filtered, fromKey, toKey, includeUndated)
+  const projectCosts = buildProjectCosts(filtered, projects, fromKey, toKey, includeUndated)
+  const modelUsage = buildModelUsage(filtered, fromKey, toKey, includeUndated)
+  const cacheAnalytics = computeCacheAnalytics(
+    filtered,
+    dailyUsage,
+    pricingTable,
+    fromKey,
+    toKey,
+    includeUndated
+  )
+  const modelEfficiency = computeModelEfficiency(filtered, fromKey, toKey, includeUndated)
+  const dailyModelCost = computeDailyModelCost(filtered, fromKey, toKey, includeUndated)
+  // No `includeUndated` here, unlike every sibling call above/below — this is
+  // the one aggregate that keeps undated turns excluded even under `all`. See
+  // `computeLatencyAnalytics`'s doc comment for the reasoning.
   const latencyAnalytics = computeLatencyAnalytics(filtered, fromKey, toKey)
-  const effortAnalytics = computeEffortAnalytics(filtered, fromKey, toKey)
-  const parallelToolAnalytics = computeParallelToolAnalytics(filtered)
-  const sessionHealthSummary = computeSessionHealthSummary(filtered)
+  const effortAnalytics = computeEffortAnalytics(filtered, fromKey, toKey, includeUndated)
+  const parallelToolAnalytics = computeParallelToolAnalytics(
+    filtered,
+    fromKey,
+    toKey,
+    includeUndated
+  )
+  const sessionHealthSummary = computeSessionHealthSummary(filtered, fromKey, toKey, includeUndated)
+  const sessionRows = buildSessionPeriodRows(filtered, fromKey, toKey, includeUndated)
+
+  // Reported regardless of `includeUndated`: a calendar-scoped range excludes
+  // this activity from every total above but must still disclose that it
+  // exists, and `all` both includes it above AND discloses it here — see
+  // `undatedActivityTotals`'s own doc comment for why this reads from the
+  // unfiltered `sessions`, not `filtered`.
+  const undated = undatedActivityTotals(sessions)
+  const undatedActivity: AnalyticsData['undatedActivity'] = {
+    messages: undated.messages,
+    responses: undated.responses,
+    includedInTotals: includeUndated,
+  }
 
   return {
     totalSessions,
@@ -870,6 +1265,10 @@ export function computeAnalytics(
     totalTokens,
     totalCacheTokens,
     totalCost,
+    unpricedResponses,
+    incompleteUsageResponses,
+    responsesWithoutCompletionSignal,
+    reducedConfidenceResponses,
     dailyUsage,
     projectCosts,
     modelUsage,
@@ -880,5 +1279,7 @@ export function computeAnalytics(
     effortAnalytics,
     parallelToolAnalytics,
     sessionHealthSummary,
+    sessionRows,
+    undatedActivity,
   }
 }
