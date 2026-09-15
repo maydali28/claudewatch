@@ -1,0 +1,113 @@
+/**
+ * The four completeness counts `AnalyticsData` and `CacheAnalytics` both carry
+ * (see their doc comments) are not the same kind of fact, and they are not
+ * shown the same way.
+ *
+ * - `unpricedResponses` / `incompleteUsageResponses` are ERROR-class: data
+ *   really is unpriced or only partially observed, and the number is 0 across
+ *   measured history (`verify:accounting` asserts that). Something being
+ *   non-zero here is news, so these go in the KPI card's inline badge, where
+ *   they are impossible to miss.
+ * - `responsesWithoutCompletionSignal` / `reducedConfidenceResponses` are
+ *   PROVENANCE: every one of those responses was fully priced and counted,
+ *   and the first of them stands at ~26% of all real responses (8,429 of
+ *   32,271 measured). These go behind a hover affordance instead.
+ *
+ * Why they were separated. Both classes used to be joined into one string on
+ * the KPI badge. On real history that made the badge unconditionally present
+ * — an 81-character pill beside a `text-2xl` value in a one-fifth-width card,
+ * for every user, forever. A badge that never turns off is not read as a
+ * signal; it is read as chrome, and the reader stops seeing it. That is
+ * precisely what destroys the error-class counts it was sharing the slot
+ * with: the two numbers that genuinely mean "look at this" become invisible
+ * behind a number that always says the same thing.
+ *
+ * This is the same prevalence trap the export layer already fixed once, where
+ * a 28%-prevalence provenance condition was firing a missing-data lead
+ * sentence on 22.5% of sessions. The resolution there and here is the same —
+ * prevalence decides the PROMINENCE, never whether the fact is reported.
+ *
+ * Nothing is collapsed and nothing is deleted: all four counts keep their own
+ * independent clause and their own wording, in the same vocabulary
+ * `export-service.ts`'s `diagnosticsNote` and `session-details-panel.tsx`
+ * use, so an export, the session panel and these two surfaces never describe
+ * the same count in different terms. Only the slot changed.
+ */
+export interface CompletenessCounts {
+  unpricedResponses: number
+  incompleteUsageResponses: number
+  responsesWithoutCompletionSignal: number
+  reducedConfidenceResponses: number
+}
+
+/** `N response`/`N responses`, with the count group-separated. */
+function plural(n: number, tail: string): string {
+  return `${n.toLocaleString()} response${n === 1 ? '' : 's'} ${tail}`
+}
+
+/**
+ * Error-class clauses only — the KPI card's inline badge.
+ *
+ * `undefined` when both error-class counts are zero, which is the case on all
+ * measured history, so the badge is absent for a real user unless something
+ * actually needs attention. Callers drop the `badge` prop entirely then.
+ *
+ * The provenance counts are deliberately NOT considered here; they are
+ * reported by `buildProvenanceNote` below and must stay reachable from the
+ * same card. Folding them back in is the regression this split exists to
+ * prevent — see this module's header.
+ */
+export function buildCompletenessBadge(counts: CompletenessCounts): string | undefined {
+  const clauses: string[] = []
+
+  // Unchanged from the original badge — this is the established pattern, and
+  // the wording is kept byte-identical rather than re-styled.
+  if (counts.unpricedResponses > 0) {
+    const n = counts.unpricedResponses
+    clauses.push(`Excludes ${n.toLocaleString()} unpriced response${n === 1 ? '' : 's'}`)
+  }
+
+  if (counts.incompleteUsageResponses > 0) {
+    clauses.push(plural(counts.incompleteUsageResponses, 'partially observed (incomplete usage)'))
+  }
+
+  return clauses.length > 0 ? clauses.join('; ') : undefined
+}
+
+/**
+ * Provenance-class clauses only — the KPI card's hover affordance.
+ *
+ * `undefined` when both provenance counts are zero, so the affordance is
+ * absent rather than empty. The wording is byte-identical to what the badge
+ * carried before the split: this moved where the text appears, not what it
+ * says, and never reads as "something is wrong", because nothing is — every
+ * response counted here was fully priced and fully counted.
+ */
+export function buildProvenanceNote(counts: CompletenessCounts): string | undefined {
+  const clauses: string[] = []
+
+  // Same fact as `export-service.ts`'s provenance clause and
+  // `session-details-panel.tsx`'s wording — "the maximum observed, not a
+  // reported final count" — never "missing" or "incomplete".
+  if (counts.responsesWithoutCompletionSignal > 0) {
+    clauses.push(
+      plural(
+        counts.responsesWithoutCompletionSignal,
+        'report output as the maximum observed, not a reported final count'
+      )
+    )
+  }
+
+  // Tokens and cost are still counted; only the response's identity fell back
+  // to the record uuid.
+  if (counts.reducedConfidenceResponses > 0) {
+    clauses.push(
+      plural(
+        counts.reducedConfidenceResponses,
+        'identified by record uuid (identity fell back, no message.id)'
+      )
+    )
+  }
+
+  return clauses.length > 0 ? clauses.join('; ') : undefined
+}

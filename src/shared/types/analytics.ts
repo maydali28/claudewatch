@@ -57,7 +57,10 @@ export interface ModelCacheSavings {
   model: string
   cacheReadTokens: number
   savingsPerMTok: number
+  /** Gross read-discount savings only — does not subtract the cache-write premium. */
   totalSavings: number
+  /** Savings after the cache-write premium; reconciles with CacheAnalytics.netSavings when summed. */
+  netSavings: number
 }
 
 export interface DailyHitRatio {
@@ -70,16 +73,33 @@ export interface SessionCompactionEntry {
   id: string // sessionId
   sessionTitle: string
   compactionCount: number
+  /**
+   * Sum of pre-compaction context sizes across this session's events — an
+   * observed high-water mark, not a measurement of tokens actually freed. A
+   * summary is retained after compaction and the summarisation call itself
+   * is billed, so this cannot be read as net tokens removed. UI must label
+   * it "Pre-compaction context".
+   */
   totalTokensRemoved: number
   peakContextTokens: number
+  /**
+   * Hypothetical only: prices `totalTokensRemoved` once at this session's
+   * dominant model's fresh-input rate, as if that whole context had been
+   * re-sent instead of compacted. Ignores the retained summary, the
+   * summarisation call's own cost, and any cache reuse the re-sent tokens
+   * might have gotten — so it is not a measured saving and must be labelled
+   * as an estimate wherever shown.
+   */
   estimatedCostAvoided: number
   primaryModel?: string
 }
 
 export interface CompactionAnalytics {
   totalCompactions: number
+  /** See `SessionCompactionEntry.totalTokensRemoved` — same caveat, summed across sessions. */
   totalTokensRemoved: number
   avgTokensRemovedPerSession: number
+  /** See `SessionCompactionEntry.estimatedCostAvoided` — same hypothetical pricing, summed across sessions. */
   estimatedCostAvoided: number
   topSessions: SessionCompactionEntry[]
 }
@@ -88,18 +108,61 @@ export interface CacheAnalytics {
   hitRatio: number
   totalCacheReadTokens: number
   totalCacheWriteTokens: number
-  costSavings: number
-  hypotheticalUncachedCost: number
+  grossReadSavings: number
+  writePremium: number
+  netSavings: number
+  uncachedSameWorkloadCost: number
   actualCost: number
-  averageReuseRate: number
+  averageReuseRate: number | null
   dailyHitRatio: DailyHitRatio[]
   totalCache5mTokens: number
   totalCache1hTokens: number
-  tierCostBreakdown: { cost5m: number; cost1h: number }
+  /**
+   * Cache-write tokens whose TTL split is unknown (a flat counter with no
+   * tiers reported). Kept apart from `totalCache5mTokens`/`totalCache1hTokens`
+   * so a fallback estimate is never mistaken for a known tier.
+   */
+  totalCacheUnknownTtlTokens: number
+  tierCostBreakdown: {
+    cost5m: number
+    cost1h: number
+    /** Unknown-TTL tokens priced at the 5-minute rate as a fallback estimate. */
+    costUnknownTtl: number
+  }
   sessionEfficiency: SessionCacheEfficiency[]
   modelSavings: ModelCacheSavings[]
-  cacheBustingDays: string[]
+  hitRatioDropDays: string[]
   compactionAnalytics: CompactionAnalytics
+  /**
+   * Responses in the period whose model could not be priced — same concept
+   * as `AnalyticsData.unpricedResponses`, scoped to this tab. Every cache
+   * figure above (`netSavings`, `modelSavings`, etc.) silently skips these
+   * responses' cache activity rather than guessing a rate, so a `0` savings
+   * figure can mean "no cache activity" or "cache activity we can't price" —
+   * this count is what lets the UI tell those apart instead of presenting an
+   * unknown as a confident zero.
+   */
+  unpricedResponses: number
+  /**
+   * Responses in the period whose usage shape was unreadable or self-
+   * contradictory — same concept as `SessionDiagnostics.incompleteUsageResponses`,
+   * scoped to this tab's range. Cache tokens and cost are still counted; this
+   * is "partially observed", not a filter.
+   */
+  incompleteUsageResponses: number
+  /**
+   * Responses in the period where no completion signal was ever seen — same
+   * concept as `SessionDiagnostics.responsesWithoutCompletionSignal`, scoped
+   * to this tab's range. Provenance about the retained output figure, not an
+   * error.
+   */
+  responsesWithoutCompletionSignal: number
+  /**
+   * Responses in the period with no `message.id`, identified by record uuid
+   * instead — same concept as `SessionDiagnostics.reducedConfidenceResponses`,
+   * scoped to this tab's range.
+   */
+  reducedConfidenceResponses: number
 }
 
 // ─── Model Efficiency ─────────────────────────────────────────────────────────
@@ -108,6 +171,19 @@ export interface ModelEfficiencyRow {
   id: string // model family
   model: string
   turnCount: number
+  /** Fresh (non-cache) input tokens. `totalOutputTokens` below is the output pool. */
+  inputTokens: number
+  cacheReadTokens: number
+  cacheCreation5mTokens: number
+  cacheCreation1hTokens: number
+  /**
+   * Remainder of cache-write tokens with no TTL split reported — see
+   * `SessionDayModelUsage.cacheCreationUnknownTtlTokens`. Kept apart from the
+   * two known tiers so a what-if projection can price it (at the same
+   * 5-minute fallback rate the cache tier display uses) instead of silently
+   * dropping it, which understated a same-model projection to $0.
+   */
+  cacheCreationUnknownTtlTokens: number
   totalOutputTokens: number
   avgOutputPerTurn: number
   totalCost: number
@@ -149,7 +225,13 @@ export interface LatencyAnalytics {
   slowestTurns: SlowTurnEntry[]
   postCompactionAvgMs: number
   normalAvgMs: number
-  degradingSessionIds: string[]
+  /**
+   * Lifetime, not period-scoped: a median-versus-max turn-duration comparison
+   * is a judgement about a session's whole trajectory and cannot be honestly
+   * narrowed to a window. UI should label this "Across each session's full
+   * history".
+   */
+  lifetimeDegradingSessionIds: string[]
 }
 
 // ─── Effort Analytics ─────────────────────────────────────────────────────────
@@ -189,6 +271,31 @@ export interface ParallelToolAnalytics {
   distribution: ParallelToolBucket[]
 }
 
+// ─── Session Period Rows ──────────────────────────────────────────────────────
+
+/**
+ * One session's contribution to the selected period, for the Overview tab's
+ * session table. Every field is scoped to the range `computeAnalytics` was
+ * called with — never the session's lifetime — so the renderer can display
+ * these directly instead of re-deriving date membership itself.
+ */
+export interface SessionPeriodRow {
+  id: string // sessionId
+  sessionId: string
+  projectId: string
+  title: string
+  hasError: boolean
+  /** The session's true last activity — a recency signal, not a period total, so it is not clipped to the range. */
+  lastTimestamp: string
+  /** Parent-transcript messages within the period. */
+  parentMessageCount: number
+  /** Parent + subagent messages within the period. */
+  messageCount: number
+  totalInputTokens: number
+  totalOutputTokens: number
+  estimatedCost: number
+}
+
 // ─── Top-level AnalyticsData ──────────────────────────────────────────────────
 
 export interface AnalyticsData {
@@ -197,6 +304,25 @@ export interface AnalyticsData {
   totalTokens: number
   totalCacheTokens: number
   totalCost: number
+  /** Responses in the period whose model could not be priced, excluded from `totalCost`. */
+  unpricedResponses: number
+  /**
+   * Responses in the period whose usage shape was unreadable or self-
+   * contradictory — see `SessionDiagnostics.incompleteUsageResponses`. Still
+   * counted in every total above; "partially observed", not a filter.
+   */
+  incompleteUsageResponses: number
+  /**
+   * Responses in the period where no completion signal was ever seen — see
+   * `SessionDiagnostics.responsesWithoutCompletionSignal`. Provenance about
+   * the retained output figure, not an error.
+   */
+  responsesWithoutCompletionSignal: number
+  /**
+   * Responses in the period with no `message.id`, identified by record uuid
+   * instead — see `SessionDiagnostics.reducedConfidenceResponses`.
+   */
+  reducedConfidenceResponses: number
   dailyUsage: DailyUsage[]
   projectCosts: ProjectCost[]
   modelUsage: ModelUsage[]
@@ -207,6 +333,22 @@ export interface AnalyticsData {
   effortAnalytics: EffortAnalytics
   parallelToolAnalytics: ParallelToolAnalytics
   sessionHealthSummary: SessionHealthSummary
+  sessionRows: SessionPeriodRow[]
+  /**
+   * Activity with no parsable timestamp (`UNDATED_DAY` in `date-ranges.ts`),
+   * reported regardless of which preset is selected. `messages`/`responses`
+   * are the totals across every session's undated bucket, independent of
+   * `dateRange` — a calendar-scoped preset (`7d`/`30d`/`90d`/custom) cannot
+   * honestly attribute this activity to the window it names, so it is always
+   * excluded from every total above for those; `includedInTotals` is `true`
+   * only for the `all` preset, the one range for which this activity IS
+   * folded into `totalMessages` and every other date-scoped figure above.
+   */
+  undatedActivity: {
+    messages: number
+    responses: number
+    includedInTotals: boolean
+  }
 }
 
 // ─── Session Health ───────────────────────────────────────────────────────────

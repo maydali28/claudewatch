@@ -29,6 +29,16 @@ export async function patchCachedSessionSummary(summary: SessionSummary): Promis
   await scanCache.patchSessionSummary(summary)
 }
 
+/** Re-export so the file watcher can drop a deleted session without importing scan-cache directly. */
+export function removeCachedSession(projectId: string, sessionId: string): void {
+  scanCache.removeSession(projectId, sessionId)
+}
+
+/** Re-export so the file watcher can enumerate a project's sessions without triggering a scan. */
+export function peekCachedSessionsForProject(projectId: string): SessionSummary[] {
+  return scanCache.peekProjectSessions(projectId)
+}
+
 export async function getOrScanProjects() {
   const scan = await scanCache.get()
   return scan.projects
@@ -64,7 +74,7 @@ export function registerSessionsHandlers(): void {
     try {
       const { sessionId, projectId } = validate(GetParsedSchema, payload)
       // Check LRU cache first
-      const cached = sessionCache.get(sessionId)
+      const cached = sessionCache.get(projectId, sessionId)
       if (cached) return ok(cached)
 
       const projectsDir = getProjectsDirPath()
@@ -77,7 +87,7 @@ export function registerSessionsHandlers(): void {
         projectId,
         pricingTable
       )
-      sessionCache.set(sessionId, parsedSession)
+      sessionCache.set(projectId, sessionId, parsedSession)
       return ok(parsedSession)
     } catch (e) {
       captureHandlerException(e)
