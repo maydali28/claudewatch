@@ -1,3 +1,30 @@
+## 1.4.0 (2026-09-15)
+
+> **Cache savings figures will drop, and cached session data is rebuilt on
+> first launch.** Cache savings ignored the premium paid to write the cache,
+> so the reported figure was too high; it is now reads saved minus that
+> premium and can legitimately show a loss where caching did not pay for
+> itself. Session details counted one API response as several messages, so
+> its figures disagreed with the list beside it. Usage that could not be
+> read — a missing counter, an unparsable timestamp — is now reported as
+> such instead of silently counting as zero.
+
+### Features
+
+* **sessions:** surface thinking, effort, service tiers and usage conflicts
+
+### Bug Fixes
+
+* **accounting:** count usage once per api response, not once per record
+* **accounting:** validate and price every response's usage consistently
+* **analytics:** correct cache savings and say what each number measures
+* **analytics:** scope every figure to the period you selected
+* **export:** carry usage completeness into json, csv and markdown
+* **lint:** keep message thresholds selecting the same sessions
+* **pricing:** reprice cached sessions when you change a rate
+* **sessions:** keep caches and live updates consistent with the files
+* **sessions:** order and date every list by time, not by text
+* **sessions:** show logical messages, effort and subagent activity
 ## 1.3.0 (2026-09-13)
 
 > **Your reported costs will drop, and historical charts will change shape.**

@@ -90,12 +90,14 @@ export function useTrayData(): TrayData {
     }
     const unsubUpdated = ipc.on(CHANNELS.PUSH_SESSION_UPDATED, invalidateAnalytics)
     const unsubCreated = ipc.on(CHANNELS.PUSH_SESSION_CREATED, invalidateAnalytics)
+    const unsubDeleted = ipc.on(CHANNELS.PUSH_SESSION_DELETED, invalidateAnalytics)
     const unsubUpdate = ipc.on<UpdateInfo>(CHANNELS.PUSH_UPDATE_AVAILABLE, (info) => {
       queryClient.setQueryData(TRAY_UPDATE_INFO_KEY, info)
     })
     return () => {
       unsubUpdated()
       unsubCreated()
+      unsubDeleted()
       unsubUpdate()
     }
   }, [queryClient])

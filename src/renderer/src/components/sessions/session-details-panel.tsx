@@ -3,9 +3,10 @@ import { X, Clock, Zap, AlertCircle, Layers, Cpu, Bot, Info, Scissors } from 'lu
 import * as Tooltip from '@radix-ui/react-tooltip'
 import { format, formatDuration, intervalToDuration } from 'date-fns'
 import { useSessionsStore } from '@renderer/store/sessions.store'
+import { useSettingsStore } from '@renderer/store/settings.store'
 import { formatTokens, formatCost } from '@shared/utils'
 import { getModelMeta } from '@renderer/lib/model-meta'
-import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
+import { getActivePricingTable } from '@shared/constants/pricing'
 import { getModelFamily } from '@shared/constants/models'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { SubagentSummary } from '@shared/types'
@@ -112,6 +113,12 @@ export default function SessionDetailsPanel({
   onClose,
 }: SessionDetailsPanelProps): React.JSX.Element {
   const { parsedSession, projects } = useSessionsStore()
+  // Active rates, not the built-in constant — an override left this panel's
+  // hypothetical resend-cost and cache-rate hints disagreeing with the actual
+  // costs shown elsewhere, which are priced from the active table in the main
+  // process.
+  const { prefs } = useSettingsStore()
+  const pricingTable = React.useMemo(() => getActivePricingTable(prefs), [prefs])
 
   if (!parsedSession) {
     return (
@@ -131,13 +138,20 @@ export default function SessionDetailsPanel({
     estimatedCost: 0,
   }
   const sessionTokens = metadata.totalInputTokens + metadata.totalOutputTokens
-  const hasSubagents = subagentTotals.inputTokens + subagentTotals.outputTokens > 0
 
   const sessionSummary = projects.flatMap((p) => p.sessions).find((s) => s.id === parsedSession.id)
 
   // estimatedCost comes from SessionSummary (includes subagent rollup from parseSessionMetadata)
   const totalCost = sessionSummary?.estimatedCost
   const subagents = sessionSummary?.subagents ?? []
+  // Actual child presence, not token volume: a subagent with only user-turn or
+  // cache-only activity contributes zero to `subagentTotals.inputTokens` and
+  // `.outputTokens`, which would otherwise make a real child session vanish
+  // from the scope controls and the message breakdown below. `subagents` is
+  // the discovered-children array `metadata-parser.ts` already produces for
+  // this session (see its `parseSubagents` call) — reused here rather than
+  // scanned or parsed again.
+  const hasSubagents = subagents.length > 0
   // Derive session-only cost: total minus subagent costs
   const subagentsCost = subagents.reduce((s, a) => s + a.estimatedCost, 0)
   const sessionOnlyCost = totalCost !== undefined ? totalCost - subagentsCost : undefined
@@ -148,6 +162,12 @@ export default function SessionDetailsPanel({
       : 0
 
   // ── Context efficiency (compaction) ──────────────────────────────────────────
+  // `totalTokensRemoved` sums each event's pre-compaction context size — an
+  // observed high-water mark, not a measurement of what was actually freed. A
+  // summary is retained after compaction, the summarisation call itself is
+  // billed, and later requests still draw on cache — none of that is netted
+  // out here, so the UI must present this as "Pre-compaction context", never
+  // as tokens removed.
   const compactionEvents = metadata.compactionEvents ?? []
   const totalTokensRemoved = compactionEvents.reduce((sum, e) => sum + (e.preTokens ?? 0), 0)
   const peakContextTokens =
@@ -155,12 +175,70 @@ export default function SessionDetailsPanel({
   const primaryModel = sessionSummary?.dominantModel ?? metadata.models[0]
   // Null when the model is unrecognised. `unknown` prices at zero, so a numeric
   // fallback here would render a confident $0.00 that reads as "no compaction
-  // happened" rather than "we cannot price this".
-  const compactionFamily = getModelFamily(primaryModel)
-  const estimatedCostAvoided =
-    compactionFamily === 'unknown'
+  // happened" rather than "we cannot price this". Also drives the cache-rate
+  // wording below, since both describe this session's own model.
+  //
+  // Even when priced, this is a hypothetical: it charges the whole
+  // pre-compaction total once at this model's fresh-input rate, as if it had
+  // all been re-sent instead of compacted — ignoring the retained summary,
+  // the summarisation call's own cost, and any cache reuse a re-send might
+  // have gotten. Not a measured saving; the UI must label it as an estimate.
+  const dominantModelFamily = getModelFamily(primaryModel)
+  const hypotheticalResendCost =
+    dominantModelFamily === 'unknown'
       ? null
-      : (totalTokensRemoved / 1_000_000) * ANTHROPIC_PRICING[compactionFamily].input
+      : (totalTokensRemoved / 1_000_000) * pricingTable[dominantModelFamily].input
+
+  // Cache rates are not one flat multiplier: Fable 5.1 / Mythos 5.1 read from
+  // cache at 2.5% of input while older models read at up to 10%, and writes
+  // have two tiers — 125% for a 5-minute write, 200% for a one-hour write —
+  // not the single 125% this tooltip used to quote. Deriving the percentages
+  // from this model's own ModelPricing entry keeps the wording correct as
+  // rates and models change, rather than re-hardcoding a new pair of numbers.
+  const dominantPricing =
+    dominantModelFamily === 'unknown' ? null : pricingTable[dominantModelFamily]
+  const ratePercent = (tierRate: number): string => {
+    const pct = Math.round((tierRate / (dominantPricing?.input ?? 1)) * 1000) / 10
+    return Number.isInteger(pct) ? `${pct}` : pct.toFixed(1)
+  }
+  const cacheReadHint = dominantPricing
+    ? `Tokens served from Anthropic's prompt cache — billed at ${ratePercent(dominantPricing.cacheRead)}% of this model's input rate`
+    : "Tokens served from Anthropic's prompt cache at a reduced rate — this session's model is unrecognised, so no rate can be quoted"
+  const cacheWriteHint = dominantPricing
+    ? `Tokens written into the prompt cache — billed at ${ratePercent(dominantPricing.cache5m)}% (5-minute) or ${ratePercent(dominantPricing.cache1h)}% (1-hour) of this model's input rate, amortised over future reads`
+    : "Tokens written into the prompt cache at a premium over input — this session's model is unrecognised, so no rate can be quoted"
+
+  // Bad input this session's parse could not simply absorb — see
+  // `SessionSummary.diagnostics`. `sessionSummary` (not `parsedSession`) is
+  // the source: it's the metadata-parser pass that produces this field.
+  // Lines and files are different things — a bad subagent transcript is a
+  // whole unreadable file, not a line — so they're reported separately
+  // rather than summed into one figure that would misdescribe either.
+  const diagnostics = sessionSummary?.diagnostics
+  // Each count below is independent and renders as its own sentence — see the
+  // diagnostics blocks further down. A session can trip exactly one of them
+  // (e.g. only a rejected negative counter), so each gate must OR every count
+  // in its class rather than checking a subset.
+  //
+  // Split into the same two classes `export-service.ts`'s `diagnosticsNote`
+  // uses, and for the same reason: error-class counts mean data really may be
+  // missing, unreadable, rejected, or unpriced, while provenance-class counts
+  // mean nothing is missing — a response was fully priced and counted either
+  // way, only its output figure's finality or its identity's reconcilability
+  // is weaker than usual. Rendering both in one "data problem" block would
+  // collapse that distinction right back into "something might be wrong",
+  // which is false for the provenance class.
+  const hasErrorDiagnostics =
+    !!diagnostics &&
+    (diagnostics.malformedLines > 0 ||
+      diagnostics.unreadableChildren > 0 ||
+      diagnostics.negativeCounters > 0 ||
+      diagnostics.conflictCount > 0 ||
+      diagnostics.unpricedResponses > 0 ||
+      diagnostics.incompleteUsageResponses > 0)
+  const hasProvenanceDiagnostics =
+    !!diagnostics &&
+    (diagnostics.responsesWithoutCompletionSignal > 0 || diagnostics.reducedConfidenceResponses > 0)
 
   const effortDist = metadata.effortDistribution
   const totalEffortTurns =
@@ -172,6 +250,16 @@ export default function SessionDetailsPanel({
     { label: 'High', count: effortDist.high, color: 'bg-orange-500/70' },
     { label: 'Ultra', count: effortDist.ultrathink, color: 'bg-red-500/70' },
   ].filter((e) => e.count > 0)
+
+  // Reported vs. inferred effort — see `UsageProjection.recordedEffortDistribution`
+  // for why these must never be merged. Keyed by whatever string the
+  // transcript wrote, so shown as raw chips rather than forced into the
+  // four-bucket scale the inferred bars above use.
+  const recordedEffortEntries = Object.entries(
+    sessionSummary?.recordedEffortDistribution ?? {}
+  ).filter(([, count]) => count > 0)
+  const serviceTiers = sessionSummary?.serviceTiers ?? []
+  const hasEffortSection = totalEffortTurns > 0 || recordedEffortEntries.length > 0
 
   return (
     <Tooltip.Provider>
@@ -260,20 +348,34 @@ export default function SessionDetailsPanel({
               value={formatTokens(metadata.totalOutputTokens)}
               hint="Tokens generated by the model in responses"
             />
+            {/*
+              Scope must match the row above: `sessionSummary.thinkingTokens` is
+              combined (parent + subagent), same as `metadata.totalOutputTokens`
+              only when there are no subagents to add. With subagents present,
+              this instead renders beside "Total output" below, where both
+              figures share the combined scope — see that block.
+            */}
+            {!hasSubagents && !!sessionSummary?.thinkingTokens && (
+              <StatRow
+                label="Reported thinking"
+                value={formatTokens(sessionSummary.thinkingTokens)}
+                hint="A subset of output tokens the model reported spending on reasoning — already counted in Output tokens above, not additional to it."
+              />
+            )}
             <StatRow
               label="Total tokens"
               value={formatTokens(sessionTokens)}
-              hint="Input + output tokens for this session (excludes subagents)"
+              hint="Fresh input + output tokens for this session (excludes subagents). Cache read and cache created, below, are billed separately and not included in this figure."
             />
             <StatRow
               label="Cache read"
               value={formatTokens(metadata.totalCacheReadTokens)}
-              hint="Tokens served from Anthropic's prompt cache — billed at ~10% of normal input rate"
+              hint={cacheReadHint}
             />
             <StatRow
               label="Cache created"
               value={formatTokens(metadata.totalCacheCreationTokens)}
-              hint="Tokens written into the prompt cache — billed at ~125% of normal input rate, amortised over future reads"
+              hint={cacheWriteHint}
             />
             {sessionOnlyCost !== undefined && (
               <StatRow
@@ -300,17 +402,17 @@ export default function SessionDetailsPanel({
                   hint="Largest context window size (tokens) recorded just before a compaction"
                 />
                 <StatRow
-                  label="Tokens removed"
+                  label="Pre-compaction context"
                   value={formatTokens(totalTokensRemoved)}
-                  hint="Sum of context tokens cleared across all compaction events — these were re-summarised rather than re-sent"
+                  hint="Sum of context size recorded just before each compaction — an observed high-water mark, not a measurement of tokens actually freed (a summary is retained afterward and the summarisation call itself is billed)"
                 />
                 <StatRow
-                  label="Cost avoided"
-                  value={estimatedCostAvoided === null ? '—' : formatCost(estimatedCostAvoided)}
+                  label="Hypothetical resend cost"
+                  value={hypotheticalResendCost === null ? '—' : formatCost(hypotheticalResendCost)}
                   hint={
-                    estimatedCostAvoided === null
+                    hypotheticalResendCost === null
                       ? `Not priced: ${primaryModel ?? 'this model'} is not a recognised model, so no rate applies`
-                      : `Estimated savings from not re-sending those tokens as fresh input (@ $${ANTHROPIC_PRICING[compactionFamily].input}/M for ${primaryModel ?? 'this model'})`
+                      : `Hypothetical: what re-sending that pre-compaction context as fresh input would have cost (@ $${pricingTable[dominantModelFamily].input}/M for ${primaryModel ?? 'this model'}). Ignores the retained summary, the summarisation call's own cost, and any later cache reuse — not a measured saving.`
                   }
                 />
               </div>
@@ -390,6 +492,13 @@ export default function SessionDetailsPanel({
                   value={formatTokens(metadata.totalOutputTokens + subagentTotals.outputTokens)}
                   hint="Parent session + all subagent output tokens combined"
                 />
+                {!!sessionSummary?.thinkingTokens && (
+                  <StatRow
+                    label="Reported thinking"
+                    value={formatTokens(sessionSummary.thinkingTokens)}
+                    hint="A subset of Total output — the model's reported reasoning spend, already counted above, not additional to it. Combined across parent and all subagent responses."
+                  />
+                )}
                 <StatRow
                   label="Total tokens"
                   value={formatTokens(
@@ -471,32 +580,169 @@ export default function SessionDetailsPanel({
             </>
           )}
 
-          {/* Effort distribution */}
-          {totalEffortTurns > 0 && (
+          {/* Service tiers: distinct values reported across this session's responses */}
+          {serviceTiers.length > 0 && (
             <>
-              <SectionHeader icon={Zap} title="Thinking Effort" />
-              <div className="space-y-1">
-                {effortBars.map(({ label, count, color }) => {
-                  const pct = (count / totalEffortTurns) * 100
-                  return (
-                    <div key={label} className="flex items-center gap-2">
-                      <span className="text-[10px] text-muted-foreground w-8 shrink-0">
-                        {label}
-                      </span>
-                      <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className={`h-full rounded-full ${color}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-muted-foreground w-6 text-right">
-                        {count}
-                      </span>
-                    </div>
-                  )
-                })}
+              <SectionHeader icon={Cpu} title="Service Tiers" />
+              <div className="flex flex-wrap gap-1">
+                {serviceTiers.map((tier) => (
+                  <span
+                    key={tier}
+                    className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground"
+                  >
+                    {tier}
+                  </span>
+                ))}
               </div>
             </>
+          )}
+
+          {/* Effort distribution: inferred (heuristic) beside recorded (from the transcript's own `effort` field) */}
+          {hasEffortSection && (
+            <>
+              <SectionHeader icon={Zap} title="Thinking Effort" />
+              {totalEffortTurns > 0 && (
+                <>
+                  <p className="text-[9px] uppercase tracking-wide text-muted-foreground/70 mb-1">
+                    Inferred (from output &amp; thinking length)
+                  </p>
+                  <div className="space-y-1">
+                    {effortBars.map(({ label, count, color }) => {
+                      const pct = (count / totalEffortTurns) * 100
+                      return (
+                        <div key={label} className="flex items-center gap-2">
+                          <span className="text-[10px] text-muted-foreground w-8 shrink-0">
+                            {label}
+                          </span>
+                          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${color}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] text-muted-foreground w-6 text-right">
+                            {count}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+              {recordedEffortEntries.length > 0 && (
+                <div className={totalEffortTurns > 0 ? 'mt-2.5' : undefined}>
+                  <p className="text-[9px] uppercase tracking-wide text-muted-foreground/70 mb-1">
+                    Reported by transcript (not inferred)
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {recordedEffortEntries.map(([key, count]) => (
+                      <span
+                        key={key}
+                        className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      >
+                        {key}: {count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/*
+            Error-class diagnostics: bad input this parse could not simply
+            absorb, or a response this session could not fully price/observe.
+            Each count below is its own independent sentence — a session can
+            trip exactly one (e.g. only a rejected negative counter, with no
+            malformed lines), so no sentence may depend on another having
+            rendered first.
+          */}
+          {hasErrorDiagnostics && diagnostics && (
+            <div className="mt-4 rounded-md bg-amber-500/10 border border-amber-500/20 px-2.5 py-2 flex items-start gap-1.5">
+              <AlertCircle className="h-3 w-3 text-amber-600 shrink-0 mt-0.5" />
+              <div className="text-[10px] text-muted-foreground space-y-1">
+                {diagnostics.malformedLines > 0 && (
+                  <p>
+                    {diagnostics.malformedLines} unreadable line
+                    {diagnostics.malformedLines === 1 ? '' : 's'} could not be parsed and{' '}
+                    {diagnostics.malformedLines === 1 ? 'is' : 'are'} excluded from these totals.
+                  </p>
+                )}
+                {diagnostics.unreadableChildren > 0 && (
+                  <p>
+                    {diagnostics.unreadableChildren} unreadable subagent file
+                    {diagnostics.unreadableChildren === 1 ? '' : 's'} could not be parsed and{' '}
+                    {diagnostics.unreadableChildren === 1 ? 'is' : 'are'} excluded from these
+                    totals.
+                  </p>
+                )}
+                {diagnostics.negativeCounters > 0 && (
+                  <p>
+                    {diagnostics.negativeCounters} usage counter
+                    {diagnostics.negativeCounters === 1 ? '' : 's'} reported a negative value and{' '}
+                    {diagnostics.negativeCounters === 1 ? 'was' : 'were'} treated as missing.
+                  </p>
+                )}
+                {diagnostics.conflictCount > 0 && (
+                  <p>
+                    {diagnostics.conflictCount} response
+                    {diagnostics.conflictCount === 1 ? '' : 's'} had repeated snapshots that
+                    disagreed with each other and may be inaccurate.
+                  </p>
+                )}
+                {diagnostics.unpricedResponses > 0 && (
+                  <p>
+                    {diagnostics.unpricedResponses} response
+                    {diagnostics.unpricedResponses === 1 ? '' : 's'} could not be priced (unknown
+                    model) and {diagnostics.unpricedResponses === 1 ? 'is' : 'are'} excluded from
+                    cost totals.
+                  </p>
+                )}
+                {diagnostics.incompleteUsageResponses > 0 && (
+                  <p>
+                    {diagnostics.incompleteUsageResponses} response
+                    {diagnostics.incompleteUsageResponses === 1 ? '' : 's'} had usage data that was
+                    unreadable or self-contradictory and{' '}
+                    {diagnostics.incompleteUsageResponses === 1 ? 'is' : 'are'} only partially
+                    observed.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/*
+            Provenance-class diagnostics: nothing is missing here — every
+            response below was fully priced and counted either way. Same
+            vocabulary as `export-service.ts`'s `diagnosticsNote` provenance
+            clause, so the export and this panel never describe the same
+            count two different ways. Deliberately a separate, neutral block
+            (no AlertCircle, no amber) rather than folded into the error-class
+            box above — that box's styling itself would say "something is
+            wrong", which is false for these two counts.
+          */}
+          {hasProvenanceDiagnostics && diagnostics && (
+            <div className="mt-2 rounded-md bg-muted/40 border border-border/40 px-2.5 py-2 flex items-start gap-1.5">
+              <Info className="h-3 w-3 text-muted-foreground shrink-0 mt-0.5" />
+              <div className="text-[10px] text-muted-foreground space-y-1">
+                {diagnostics.responsesWithoutCompletionSignal > 0 && (
+                  <p>
+                    {diagnostics.responsesWithoutCompletionSignal} response
+                    {diagnostics.responsesWithoutCompletionSignal === 1 ? '' : 's'} report an output
+                    count that is the maximum observed across snapshots, not a reported final count,
+                    because no completion signal was ever seen.
+                  </p>
+                )}
+                {diagnostics.reducedConfidenceResponses > 0 && (
+                  <p>
+                    {diagnostics.reducedConfidenceResponses} response
+                    {diagnostics.reducedConfidenceResponses === 1 ? '' : 's'} have
+                    reduced-confidence identity: no message.id was present, so identity fell back to
+                    the record uuid.
+                  </p>
+                )}
+              </div>
+            </div>
           )}
 
           {/* Errors */}

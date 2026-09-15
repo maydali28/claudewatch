@@ -46,7 +46,9 @@ const SES_THRESHOLDS = {
   compactions: 5,
   tokens: 2_000_000,
   staleDays: 14,
-  staleMinMessages: 10,
+  // Halved when message counting moved from records to API responses: the old
+  // value of 10 was calibrated against counts inflated ~2.09x.
+  staleMinMessages: 5,
 }
 
 function evaluateSessionLintFlags(session: SessionSummary): {
@@ -451,7 +453,7 @@ export default function SessionPanel(): React.JSX.Element {
                     combined figure is shown when subagents contributed, so the
                     header cannot silently disagree with the session list. */}
                 <span className="font-mono">
-                  {formatTokens(totalTokens)} tokens
+                  {formatTokens(totalTokens)} fresh input + output
                   {activeSessionSummary &&
                     activeSessionSummary.totalInputTokens + activeSessionSummary.totalOutputTokens >
                       totalTokens && (

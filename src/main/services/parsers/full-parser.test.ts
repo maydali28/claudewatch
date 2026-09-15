@@ -1,8 +1,21 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
+
+// See metadata-parser.test.ts for why this mock exists (vitest's `forks` pool
+// makes `@main/lib/logger`'s import-time electron-log init throw). Required
+// here too since this file imports metadata-parser.ts.
+vi.mock('@main/lib/logger', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}))
+
 import { parseSessionFull } from './full-parser'
 import { parseSessionMetadata } from './metadata-parser'
 
@@ -71,6 +84,69 @@ function write(name: string, records: unknown[]): string {
   const file = path.join(dir, `${name}.jsonl`)
   fs.writeFileSync(file, records.map((r) => JSON.stringify(r)).join('\n') + '\n')
   return file
+}
+
+/** Writes a subagent transcript beside a parent session file already created by `write()`. */
+function writeSubagent(sessionName: string, agentId: string, records: unknown[]): void {
+  const subDir = path.join(dir, sessionName, 'subagents')
+  fs.mkdirSync(subDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(subDir, `agent-${agentId}.jsonl`),
+    records.map((r) => JSON.stringify(r)).join('\n') + '\n'
+  )
+}
+
+/** An assistant record whose usage carries input/cache-read but no `output_tokens` at all. */
+function assistantMissingOutput(uuid: string, id = 'msg_1'): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id,
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: 'hi' }],
+      stop_reason: 'end_turn',
+      usage: {
+        input_tokens: 10,
+        cache_read_input_tokens: 5,
+      },
+    },
+  }
+}
+
+/** A clean, complete assistant record — has a `message.id` and a `stop_reason`. */
+function assistantClean(uuid: string, id: string): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id,
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: 'hi' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+/** An assistant record with no `message.id` — identity falls back to the record uuid. */
+function assistantNoId(uuid: string): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: 'hi' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
+    },
+  }
 }
 
 const user = {
@@ -150,5 +226,400 @@ describe('parseSessionFull — transcript content is untouched', () => {
     expect(kinds).toContain('thinking')
     expect(kinds).toContain('text')
     expect(kinds).toContain('tool_use')
+  })
+})
+
+/**
+ * The defect this branch fixes: the detail panel counted one assistant
+ * RECORD as one message, so a block-split response (thinking + text +
+ * tool_use, all sharing one `message.id`) was counted 2-5x. Measured on real
+ * history: 25,909 detail-panel messages vs 12,471 in the sessions sidebar.
+ */
+describe('parseSessionFull — logical message counts', () => {
+  it('counts one user prompt and one two-block assistant response as two messages, not three records', async () => {
+    // Only the thinking + text records of the shared fixture — two records,
+    // one response — so `records.length` (3, including the user prompt)
+    // stays visibly different from `messageCount` (2).
+    const twoBlockResponse = responseAsThreeRecords('msg_1').slice(0, 2)
+    const file = write('msg-count', [user, ...twoBlockResponse])
+
+    const { metadata, records } = await parseSessionFull(
+      file,
+      'msg-count',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(metadata.messageCount).toBe(2)
+    expect(metadata.assistantMessageCount).toBe(1)
+    expect(metadata.userMessageCount).toBe(1)
+    // The transcript viewer renders every content record — collapsing the
+    // count must not collapse the array it reads from.
+    expect(records).toHaveLength(3)
+  })
+})
+
+/**
+ * The invariant that was missing and let the defect ship: the detail panel
+ * and the sessions sidebar parse the same file and must agree on how many
+ * parent messages it contains. Pinning this here means a future change that
+ * breaks one parser without the other fails immediately instead of only
+ * showing up as a support report.
+ */
+describe('parseSessionFull — parity with the sessions sidebar', () => {
+  it('reports the same parent message count as parseSessionMetadata for block-split responses', async () => {
+    const file = write('parity', [
+      user,
+      ...responseAsThreeRecords('msg_1'),
+      ...responseAsThreeRecords('msg_2'),
+    ])
+
+    const full = await parseSessionFull(file, 'parity', 'proj', ANTHROPIC_PRICING)
+    const summary = await parseSessionMetadata(file, 'parity', 'proj', ANTHROPIC_PRICING)
+
+    expect(full.metadata.messageCount).toBe(summary.parentMessageCount)
+  })
+})
+
+/**
+ * A response's content blocks land as separate records with separate
+ * timestamps. Effort and turn-duration must be judged from the whole
+ * response, once — not once per record, which either inflates the vote
+ * count or (for duration) fabricates several sub-second "turns" out of one
+ * response's own interleaved blocks.
+ */
+describe('parseSessionFull — effort and turn duration counted once per response', () => {
+  /**
+   * Two records of one response, 600 thinking chars each. Neither crosses
+   * the 1000-char "high effort" threshold alone (`EFFORT_MEDIUM_THINKING_CHARS`
+   * in tuning.ts), but their sum, 1200, does. Judging each record on its own
+   * yields two "medium" votes for one response; judging the response once
+   * yields a single "high" vote.
+   */
+  function splitThinkingResponse(id: string, timestamps: string[]): Record<string, unknown>[] {
+    return timestamps.map((ts, i) => ({
+      type: 'assistant',
+      uuid: `${id}-${i}`,
+      timestamp: ts,
+      message: {
+        id,
+        role: 'assistant',
+        model: 'claude-opus-5',
+        usage: { input_tokens: 50, output_tokens: 10 },
+        content: [{ type: 'thinking', thinking: 'x'.repeat(600) }],
+      },
+    }))
+  }
+
+  it('judges effort from the accumulated thinking chars of the whole response, once', async () => {
+    const file = write('effort-split', [
+      user,
+      ...splitThinkingResponse('msg_1', ['2026-09-10T10:00:01.000Z', '2026-09-10T10:00:02.000Z']),
+    ])
+
+    const { metadata } = await parseSessionFull(file, 'effort-split', 'proj', ANTHROPIC_PRICING)
+
+    const totalVotes = Object.values(metadata.effortDistribution).reduce(
+      (a: number, b: number) => a + b,
+      0
+    )
+    expect(totalVotes).toBe(1)
+    expect(metadata.effortDistribution.high).toBe(1)
+    expect(metadata.effortDistribution.medium).toBe(0)
+  })
+
+  it("records exactly one turn duration per response, anchored to the response's first block", async () => {
+    const file = write('duration-split', [
+      user,
+      ...splitThinkingResponse('msg_1', ['2026-09-10T10:00:05.000Z', '2026-09-10T10:00:06.000Z']),
+    ])
+
+    const { metadata } = await parseSessionFull(file, 'duration-split', 'proj', ANTHROPIC_PRICING)
+
+    expect(metadata.turnDurations).toHaveLength(1)
+    expect(metadata.turnDurations[0].prevTimestamp).toBe(user.timestamp)
+    expect(metadata.turnDurations[0].assistantTimestamp).toBe('2026-09-10T10:00:05.000Z')
+    // 09:59:00.000 -> 10:00:05.000, not the ~1s gap between this response's
+    // own two records.
+    expect(metadata.turnDurations[0].durationMs).toBe(65_000)
+  })
+
+  /**
+   * This parser's merge block is the twin of `metadata-parser.ts`'s, and both
+   * repair a `timestamp` the response's FIRST record could not supply when a
+   * later record of the same response carries a usable one. The repair was
+   * added here at the same time as there precisely because divergent twin
+   * merge blocks are the condition that produced the split in the first
+   * place — but it shipped without a test, which made it the seventh
+   * structurally-unfailable check found on this branch.
+   *
+   * It is not a no-op. `timestamp` feeds `errorDetails` and, through
+   * `judgeResponse`, `turnDurations`: without the repair `durationMs` is
+   * computed from `'invalid'`, comes out `NaN`, fails the `> 0` gate, and the
+   * turn is dropped from this parser's output entirely — a real, measured
+   * duration silently lost because one of the response's records was
+   * malformed.
+   */
+  it('repairs a response whose first record has an unusable timestamp from a later one', async () => {
+    const file = write('duration-undated-first', [
+      user,
+      ...splitThinkingResponse('msg_1', ['invalid', '2026-09-10T10:00:05.000Z']),
+    ])
+
+    const { metadata } = await parseSessionFull(
+      file,
+      'duration-undated-first',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    // Without the repair this is an empty array: the turn is lost, not merely
+    // mis-dated.
+    expect(metadata.turnDurations).toHaveLength(1)
+    expect(metadata.turnDurations[0].assistantTimestamp).toBe('2026-09-10T10:00:05.000Z')
+    expect(metadata.turnDurations[0].durationMs).toBe(65_000)
+  })
+
+  /**
+   * One-directional here too, matching `activity-reducer.ts`'s `moveBump` and
+   * the ledger's own repair: a usable first timestamp is never overwritten by
+   * a malformed later one, or a single garbage record would erase a good
+   * attribution and take the turn's duration with it.
+   */
+  it('keeps a usable first timestamp when a later record of the response is malformed', async () => {
+    const file = write('duration-undated-second', [
+      user,
+      ...splitThinkingResponse('msg_1', ['2026-09-10T10:00:05.000Z', 'invalid']),
+    ])
+
+    const { metadata } = await parseSessionFull(
+      file,
+      'duration-undated-second',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(metadata.turnDurations).toHaveLength(1)
+    expect(metadata.turnDurations[0].assistantTimestamp).toBe('2026-09-10T10:00:05.000Z')
+    expect(metadata.turnDurations[0].durationMs).toBe(65_000)
+  })
+})
+
+/**
+ * Round 2 follow-up: `assistantResponseId`, `laterTimestamp` and the
+ * effort/error/duration judgement itself now live in one shared module
+ * (`response-observability.ts`) that both `parseSessionFull` and
+ * `parseSessionMetadata` import, instead of two hand-maintained copies. This
+ * is the parity test the extraction was supposed to make permanent: if the
+ * two parsers' judgement ever drifts apart again, this fails immediately
+ * instead of only showing up as a support report, the same way the earlier
+ * message-count parity test above does for `messageCount`.
+ */
+describe('parseSessionFull / parseSessionMetadata — effort and turn-duration parity', () => {
+  it('agree on effort distribution and turn-duration count for block-split responses', async () => {
+    const file = write('effort-duration-parity', [
+      user,
+      ...responseAsThreeRecords('msg_1'),
+      ...responseAsThreeRecords('msg_2'),
+    ])
+
+    const full = await parseSessionFull(file, 'effort-duration-parity', 'proj', ANTHROPIC_PRICING)
+    const summary = await parseSessionMetadata(
+      file,
+      'effort-duration-parity',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(full.metadata.effortDistribution).toEqual(summary.observability.effortDistribution)
+    expect(full.metadata.turnDurations).toHaveLength(summary.turnDurations.length)
+  })
+})
+
+/**
+ * `classifyError`'s `stop_reason === 'max_tokens'` branch doesn't look at
+ * block content, and `stop_reason` repeats byte-identical on every record of
+ * a response the same way `usage` does. Classifying it per record — the bug
+ * in both parsers before this module existed — pushed one
+ * `maxTokensTruncation` entry per record instead of one per truncated
+ * response: a duplicated truncation banner on the session detail panel
+ * (`session-details-panel.tsx`) for a single truncated turn.
+ */
+describe('parseSessionFull / parseSessionMetadata — truncation classified once per response', () => {
+  function maxTokensTruncatedResponse(id: string, timestamps: string[]): Record<string, unknown>[] {
+    return timestamps.map((ts, i) => ({
+      type: 'assistant',
+      uuid: `${id}-${i}`,
+      timestamp: ts,
+      message: {
+        id,
+        role: 'assistant',
+        model: 'claude-opus-5',
+        stop_reason: 'max_tokens',
+        usage: { input_tokens: 50, output_tokens: 6000 },
+        content: [{ type: 'text', text: `chunk ${i}` }],
+      },
+    }))
+  }
+
+  it('produces exactly one maxTokensTruncation entry per response, not one per record', async () => {
+    const file = write('truncated', [
+      user,
+      ...maxTokensTruncatedResponse('msg_1', [
+        '2026-09-10T10:00:01.000Z',
+        '2026-09-10T10:00:02.000Z',
+        '2026-09-10T10:00:03.000Z',
+      ]),
+    ])
+
+    const full = await parseSessionFull(file, 'truncated', 'proj', ANTHROPIC_PRICING)
+    const summary = await parseSessionMetadata(file, 'truncated', 'proj', ANTHROPIC_PRICING)
+
+    const fullTruncations = full.metadata.errorDetails.filter(
+      (e) => e.classification === 'maxTokensTruncation'
+    )
+    const summaryTruncations = summary.observability.errorClassifications.filter(
+      (c) => c === 'maxTokensTruncation'
+    )
+
+    expect(fullTruncations).toHaveLength(1)
+    expect(summaryTruncations).toHaveLength(1)
+  })
+})
+
+/** An assistant record whose model is unrecognised — priced as null, tokens still counted. */
+function assistantUnpriced(uuid: string, id = 'msg_1'): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id,
+      role: 'assistant',
+      model: 'totally-unrecognised-model-xyz',
+      content: [{ type: 'text', text: 'hi' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+/** A complete, priceable assistant record that never reports a `stop_reason` — no completion signal. */
+function assistantWithoutCompletionSignal(uuid: string, id = 'msg_1'): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id,
+      role: 'assistant',
+      model: 'claude-opus-5',
+      content: [{ type: 'text', text: 'hi' }],
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+/**
+ * Task 6: `parseSessionFull` builds `usage` from `[...ledger.entries()]`
+ * ALONE — unlike `parseSessionMetadata`, it never includes subagent entries
+ * in that projection (see `full-parser.ts`'s comment above `diagnostics`).
+ * So unlike the metadata parser, reading `usage.combined.*` here is only the
+ * PARENT's share; the four new completeness fields must be added to
+ * `childDiagnostics`'s own figures explicitly, the same way `malformedLines`
+ * and `negativeCounters` already are a few lines above. Skipping that combine
+ * step is exactly the trap this task's brief calls out: child-session
+ * completeness would silently read as zero while looking measured.
+ */
+describe('parseSessionFull — completeness contract', () => {
+  it('reports the incomplete-usage count when a parent response is missing output', async () => {
+    const file = write('full-missing-output', [user, assistantMissingOutput('a')])
+
+    const { diagnostics } = await parseSessionFull(
+      file,
+      'full-missing-output',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(diagnostics.incompleteUsageResponses).toBe(1)
+  })
+
+  it('distinguishes unpriced, incomplete, no-completion-signal and reduced-confidence responses from each other', async () => {
+    const file = write('full-distinguish', [user, assistantUnpriced('a')])
+
+    const { diagnostics } = await parseSessionFull(
+      file,
+      'full-distinguish',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(diagnostics).toMatchObject({
+      unpricedResponses: 1,
+      incompleteUsageResponses: 0,
+      responsesWithoutCompletionSignal: 0,
+      reducedConfidenceResponses: 0,
+    })
+  })
+
+  it('reports a response with no completion signal and one with no message.id separately', async () => {
+    const file = write('full-no-completion-signal-and-reduced', [
+      user,
+      assistantClean('b', 'msg_certified'),
+      assistantWithoutCompletionSignal('c', 'msg_no_completion_signal'),
+      assistantNoId('d'),
+    ])
+
+    const { diagnostics } = await parseSessionFull(
+      file,
+      'full-no-completion-signal-and-reduced',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(diagnostics.responsesWithoutCompletionSignal).toBe(1)
+    expect(diagnostics.reducedConfidenceResponses).toBe(1)
+    expect(diagnostics.incompleteUsageResponses).toBe(0)
+    expect(diagnostics.unpricedResponses).toBe(0)
+  })
+
+  /**
+   * The trap: this session's PARENT transcript has no defect of its own — the
+   * only incomplete-usage response is inside a subagent file. Before widening
+   * `SubagentDiagnostics` (and combining it in here), `usage.combined.*` in
+   * this function reflected the parent alone, so this would have read 0.
+   */
+  it('combines a subagent’s incomplete usage into the parent+child total, not the parent alone', async () => {
+    const file = write('full-with-subagent', [user, assistantClean('a', 'msg_parent')])
+    writeSubagent('full-with-subagent', 'abc', [assistantMissingOutput('ca1', 'cmsg_1')])
+
+    const { diagnostics } = await parseSessionFull(
+      file,
+      'full-with-subagent',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(diagnostics.incompleteUsageResponses).toBe(1)
+  })
+
+  /**
+   * Both parent and child contribute their own instance of the same
+   * condition — the combined total must ADD them (2), not just reflect
+   * whichever side happens to be read.
+   */
+  it('adds parent and subagent counts together rather than one overwriting the other', async () => {
+    const file = write('full-both-sides', [user, assistantMissingOutput('a')])
+    writeSubagent('full-both-sides', 'xyz', [assistantMissingOutput('ca1', 'cmsg_1')])
+
+    const { diagnostics } = await parseSessionFull(
+      file,
+      'full-both-sides',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(diagnostics.incompleteUsageResponses).toBe(2)
   })
 })

@@ -3,6 +3,8 @@ import * as readline from 'readline'
 import type { SessionSearchResult } from '@shared/types/session'
 import { assertSafePath } from '@main/lib/safe-path'
 import { getProjectsDirPath } from '@main/lib/claude-paths'
+import { pLimit } from '@main/lib/p-limit'
+import { SUBAGENT_PARSE_CONCURRENCY } from '@shared/constants/tuning'
 
 interface SearchRequest {
   query: string
@@ -106,12 +108,18 @@ async function searchProject(
     return []
   }
 
+  // Bounded: a project can hold hundreds of session files, and an unbounded
+  // fan-out opens that many file handles at once — the same concern the
+  // subagent parser has for a session's children, so it reuses that cap.
+  const limit = pLimit(SUBAGENT_PARSE_CONCURRENCY)
   const results = await Promise.all(
-    files.map((file) => {
-      const sessionId = file.replace(/\.jsonl$/, '')
-      const filePath = assertSafePath(projectsDir, projectId, file)
-      return searchSessionFile(filePath, sessionId, projectId, query, queryLower)
-    })
+    files.map((file) =>
+      limit(() => {
+        const sessionId = file.replace(/\.jsonl$/, '')
+        const filePath = assertSafePath(projectsDir, projectId, file)
+        return searchSessionFile(filePath, sessionId, projectId, query, queryLower)
+      })
+    )
   )
   return results.filter((r): r is SessionSearchResult => r !== null)
 }
@@ -129,8 +137,13 @@ export async function searchSessions(req: SearchRequest): Promise<SessionSearchR
   const queryLower = query.toLowerCase()
   const projectDirs = await listProjectDirs(projectsDir, projectIds)
 
+  // Same bound, one level up: a user can have hundreds of projects, and each
+  // one's search already opens up to SUBAGENT_PARSE_CONCURRENCY file handles.
+  const limit = pLimit(SUBAGENT_PARSE_CONCURRENCY)
   const perProject = await Promise.all(
-    projectDirs.map((projectId) => searchProject(projectsDir, projectId, query, queryLower))
+    projectDirs.map((projectId) =>
+      limit(() => searchProject(projectsDir, projectId, query, queryLower))
+    )
   )
 
   const results = perProject.flat()

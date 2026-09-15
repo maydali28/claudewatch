@@ -29,13 +29,17 @@ interface MessageBubbleProps {
   subagents?: SubagentSummary[]
 }
 
+// `preTokens` is the context size recorded just before this compaction, not a
+// measurement of what was actually freed — a summary is retained afterward
+// and the summarisation call itself is billed. Same framing as the cache tab
+// and session details panel: "pre-compaction context", never "removed".
 function CompactionBoundary({ preTokens }: { preTokens?: number }): React.JSX.Element {
   return (
     <div className="flex items-center gap-3 py-2">
       <div className="flex-1 h-px bg-border/50" />
       <span className="text-[10px] text-muted-foreground/60 shrink-0">
-        — Context compacted {preTokens ? `(${(preTokens / 1000).toFixed(0)}K tokens removed)` : ''}{' '}
-        —
+        — Context compacted{' '}
+        {preTokens ? `(${(preTokens / 1000).toFixed(0)}K pre-compaction context)` : ''} —
       </span>
       <div className="flex-1 h-px bg-border/50" />
     </div>

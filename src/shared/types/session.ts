@@ -140,6 +140,17 @@ export interface ParsedRecord {
   contentBlocks: ContentBlock[]
   isCompactionBoundary: boolean
   compactionPreTokens?: number
+  /**
+   * The API response this record belongs to — `message.id`, or a
+   * `uuid:<record uuid>` fallback when the response carries no id (see
+   * `assistantResponseId`). Only set for non-synthetic assistant records:
+   * Claude Code writes one response as several records (thinking, text, each
+   * tool_use) that all share this id and all repeat that response's full
+   * usage, which is exactly what lets a consumer (e.g. the CSV export)
+   * recognise a repeat and avoid re-summing it. Undefined for user/system
+   * records, which are not API responses.
+   */
+  responseId?: string
 }
 
 // ─── Tool Result Map ───────────────────────────────────────────────────────────
@@ -224,6 +235,17 @@ export interface ModelTokenBreakdown {
   cacheReadTokens: number
   cacheCreation5mTokens: number
   cacheCreation1hTokens: number
+  /**
+   * Remainder of this model's cache-write total that neither tier explains —
+   * a flat `cache_creation_input_tokens` reported with no TTL split. Priced
+   * at the 5-minute rate as a fallback estimate (see `cacheWriteUnknownTtl`
+   * in `ledger.ts`), but reported separately so it is never mistaken for a
+   * known 5-minute write — the same split-quantity bug class fixed on
+   * `SessionDayModelUsage.cacheCreationUnknownTtlTokens`. The two known tiers
+   * above plus this field always equal the effective write total the cost
+   * was actually computed from.
+   */
+  cacheCreationUnknownTtlTokens: number
   estimatedCost: number
   turnCount: number
 }
@@ -264,7 +286,22 @@ export interface SessionDayModelUsage {
   cacheReadTokens: number
   cacheCreation5mTokens: number
   cacheCreation1hTokens: number
-  estimatedCost: number
+  /**
+   * Remainder of this model's cache-write total that neither tier explains —
+   * a flat `cache_creation_input_tokens` reported with no TTL split. Priced
+   * at the 5-minute rate as a fallback estimate, but reported separately so
+   * it is never mistaken for a known 5-minute write.
+   */
+  cacheCreationUnknownTtlTokens: number
+  /**
+   * Null when this exact model could not be priced — never coerced to 0.
+   * A real zero (a priced model this day genuinely cost nothing) and an
+   * unpriced model both look like "$0.00" if collapsed together, which is
+   * exactly how Opus 5 was billed at a stranger's rate without anything
+   * appearing wrong. Consumers must skip null rows when summing rather than
+   * adding a zero.
+   */
+  estimatedCost: number | null
   turnCount: number
 }
 
@@ -277,10 +314,40 @@ export interface SessionDayUsage {
   cacheCreation5mTokens: number
   cacheCreation1hTokens: number
   cacheCreationTokens: number
+  /** Sum of priced responses only; see `unpricedResponses` for what it excludes. */
   estimatedCost: number
+  /** Responses on this day whose model could not be priced, excluded from `estimatedCost`. */
+  unpricedResponses: number
+  /**
+   * Responses on this day whose usage shape was unreadable or self-
+   * contradictory — a tier/flat mismatch, a multi-iteration array, or a
+   * missing/invalid counter. Tokens and cost are still counted; this is
+   * "partially observed", not a filter. See `SessionDiagnostics.incompleteUsageResponses`.
+   */
+  incompleteUsageResponses: number
+  /**
+   * Responses on this day where no snapshot ever reported a completion
+   * signal — the retained output figure is the maximum observed across
+   * snapshots, not a reported final count. Provenance, not an error. See
+   * `SessionDiagnostics.responsesWithoutCompletionSignal`.
+   */
+  responsesWithoutCompletionSignal: number
+  /**
+   * Responses on this day with no `message.id`, identified by record uuid
+   * instead. See `SessionDiagnostics.reducedConfidenceResponses`.
+   */
+  reducedConfidenceResponses: number
   /** Billable API responses on this day. */
   responseCount: number
-  /** Messages exchanged on this day, user and assistant. */
+  /** Parent-transcript messages on this day. */
+  parentMessageCount: number
+  /** Subagent messages on this day. */
+  childMessageCount: number
+  /**
+   * Messages on this day, parent and subagents combined. Always equal to
+   * `parentMessageCount + childMessageCount`, and the per-day rows always sum
+   * to `SessionSummary.messageCount`.
+   */
   messageCount: number
   /**
    * Parent-only cost. Effort is recorded for parent turns, so attributing
@@ -291,6 +358,24 @@ export interface SessionDayUsage {
   compactions: number
   /** Context tokens cleared by those compactions. */
   tokensRemovedByCompaction: number
+  /**
+   * Largest pre-compaction context of any single event on this day. A rollup
+   * that needs the true peak across a range must take `Math.max` over this
+   * field across days — summing (or averaging) per-day figures collapses
+   * distinct events and cannot recover it.
+   */
+  maxPreCompactionTokens: number
+  /** Effort votes cast by responses flushed on this day. */
+  effortDistribution: EffortDistribution
+  /** Responses on this day that issued 2+ tool calls in one turn. */
+  parallelToolGroups: number
+  /**
+   * Largest parallel-tool degree seen on this day. A rollup that needs the
+   * true peak across a range must take `Math.max` over this field across
+   * days, the same way `maxPreCompactionTokens` does — summing would not be
+   * a peak.
+   */
+  maxParallelDegree: number
   models: SessionDayModelUsage[]
 }
 
@@ -339,6 +424,92 @@ export interface SessionSummary {
    * session's last timestamp.
    */
   dailyUsage: SessionDayUsage[]
+  /**
+   * Bad input this session's parse encountered and could not simply absorb.
+   * All four are "we know this happened but not what it was" counts, not
+   * estimates: a transcript line that failed to parse, a subagent transcript
+   * that failed to read, a raw usage counter rejected for being negative
+   * (see `ledger.ts`'s `num()`), and a merge disagreement between repeated
+   * snapshots of the same response. Zero on real history is the expected
+   * state — this exists so a regression shows up instead of being silently
+   * absorbed.
+   */
+  diagnostics: SessionDiagnostics
+  /**
+   * Combined parent + subagent total, a SUBSET of `totalOutputTokens` — see
+   * `UsageTotals.thinkingTokens`. Zero when nothing in this session reported
+   * it, which is the common case for transcripts predating the field.
+   */
+  thinkingTokens: number
+  /**
+   * Effort as Claude Code itself recorded it, keyed by the exact string
+   * reported and combined across parent and subagent responses — see
+   * `UsageProjection.recordedEffortDistribution` for why this must stay
+   * distinct from `observability.effortDistribution` (inferred, four fixed
+   * buckets) rather than merged with or falling back to it.
+   */
+  recordedEffortDistribution: Record<string, number>
+  /** Distinct `service_tier` values reported across this session's responses. */
+  serviceTiers: string[]
+}
+
+/**
+ * See `SessionSummary.diagnostics`.
+ *
+ * The four fields below were previously detected by the ledger (see
+ * `UsageTotals` in `projection.ts`) but went no further than a `log.warn` —
+ * an exported artefact or a renderer reading this session lost the fact
+ * entirely. They are four DISTINCT conditions, not interchangeable, and
+ * collapsing them loses exactly the distinction each one exists to carry:
+ *
+ * - `unpricedResponses`: a price could not be computed (unknown model).
+ * - `incompleteUsageResponses`: the usage shape itself was unreadable or
+ *   self-contradictory. Partially observed, not a filter.
+ * - `responsesWithoutCompletionSignal`: no completion signal was ever seen;
+ *   the retained output figure is the maximum observed across snapshots, not
+ *   a reported final count. Provenance, not an error.
+ * - `reducedConfidenceResponses`: no `message.id`; identity fell back to the
+ *   record uuid.
+ */
+export interface SessionDiagnostics {
+  malformedLines: number
+  unreadableChildren: number
+  negativeCounters: number
+  /** Responses whose repeated snapshots disagreed in a non-output field — see `ResponseEntry.usageConflict`. */
+  conflictCount: number
+  /**
+   * Responses whose model could not be priced — see `UsageTotals.unpricedResponses`.
+   * Their tokens are still counted; this is coverage, not a filter.
+   */
+  unpricedResponses: number
+  /**
+   * Responses whose usage shape the ledger cannot price with confidence: a
+   * tier/flat mismatch, a multi-iteration array, or a missing/invalid
+   * counter — see `ResponseEntry.usageIncomplete`. Tokens and cost are still
+   * counted; this is "partially observed", not a filter.
+   */
+  incompleteUsageResponses: number
+  /**
+   * Responses where no snapshot ever reported a non-empty `stop_reason` —
+   * see `ResponseEntry.hasCompletionSignal`. NOT a tripwire for data that
+   * never occurs (measured at 28% of response groups in real history), and
+   * NOT a reason to treat the response as unpriceable.
+   *
+   * It records PROVENANCE, not a grade of confidence in the number: a
+   * completion signal means a stop reason was seen on SOME snapshot, while
+   * the retained `outputTokens` is the MAXIMUM across all of them. Those are
+   * two different observations — a later provisional snapshot can exceed the
+   * one that carried the stop reason — so the flag never certifies that the
+   * output figure is final. Provenance, not an error.
+   */
+  responsesWithoutCompletionSignal: number
+  /**
+   * Responses whose id fell back to `uuid:<record uuid>` because no record
+   * carried a `message.id` — see `ResponseEntry.reducedConfidenceId`. Their
+   * tokens and cost are still counted; this is a provenance count, not a
+   * filter.
+   */
+  reducedConfidenceResponses: number
 }
 
 // ─── Session Metadata ─────────────────────────────────────────────────────────
@@ -383,6 +554,15 @@ export interface ParsedSession {
   parentSessionId?: string
   isSubagent: boolean
   subagentTotals: SubagentTotals
+  /**
+   * Same rationale as `SessionSummary.diagnostics`: bad input this parse
+   * encountered and could not simply absorb. Carried on the full parse too
+   * (not just the lightweight summary) because export is a persisted,
+   * shareable artefact — unlike the on-screen views, which the same parse
+   * warning also reaches through the log, an exported file has no other way
+   * to disclose that data was dropped.
+   */
+  diagnostics: SessionDiagnostics
 }
 
 // ─── Tool Call Entry (for Tools rail) ────────────────────────────────────────

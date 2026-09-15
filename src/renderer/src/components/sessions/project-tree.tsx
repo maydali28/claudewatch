@@ -9,7 +9,9 @@ const SES_COST = 25.0
 const SES_COMPACTIONS = 5
 const SES_TOKENS = 2_000_000
 const SES_STALE_MS = 14 * 24 * 60 * 60 * 1000
-const SES_STALE_MIN_MSGS = 10
+// Halved when message counting moved from records to API responses: the old
+// value of 10 was calibrated against counts inflated ~2.09x.
+const SES_STALE_MIN_MSGS = 5
 
 function deriveSessionLintFlags(session: SessionSummary): {
   flags: LintCheckId[]

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Project, SessionSummary, ParsedSession } from '@shared/types'
-import { SessionCache } from '@shared/utils'
+import { SessionCache, compareTimestampsAscending } from '@shared/utils'
 import { ipc } from '@renderer/lib/ipc-client'
 
 // Renderer-side LRU of parsed sessions. The main process keeps its own larger
@@ -8,6 +8,72 @@ import { ipc } from '@renderer/lib/ipc-client'
 // and the skeleton flash. Sized small because a single user rarely cycles
 // through more than a handful of sessions in one navigation burst.
 const rendererSessionCache = new SessionCache(8, 50 * 1024 * 1024)
+
+// Two requests for the SAME session id can resolve out of order (a double
+// click, or a background re-validation racing a fresh navigation) — an
+// `activeSessionId === sessionId` check alone can't tell them apart, since
+// it's true for both regardless of which started first. This counter is
+// shared by every code path below that can publish `parsedSession` (the cold
+// navigation await, the cached-session background .then(), and the
+// push-driven refresh in handleSessionUpdated) so only the most recently
+// *started* fetch may ever write it.
+let parsedSessionGeneration = 0
+
+// `isLoadingSession`/`isRefreshingSession` are NOT gated by parsedSessionGeneration
+// above. That counter is shared across three flows with different flag
+// ownership; gating a flag-clear on it would let a fetch belonging to a
+// *different* flow supersede one whose flag it doesn't own, stranding that
+// flag true forever (nothing else would ever clear it). And leaving them
+// gated only by `activeSessionId === sessionId` (the pre-existing check) is
+// not enough either: two cold navigations to the same uncached session can
+// still resolve out of order, and the earlier one's completion would clear
+// isLoadingSession while the later, authoritative one is still in flight —
+// producing a blank pane instead of a skeleton.
+//
+// Instead, track how many requests of each flow are currently outstanding
+// and derive the flag from `count > 0`. It rises on every request that
+// could still supply data and falls exactly once per request in that
+// request's own `finally`, so it can never get stuck true (every request
+// settles eventually) and never clears early (as long as ANY request that
+// could still supply data is outstanding, the count stays above zero).
+//
+// `isLoadingSession` gates session-panel.tsx's full skeleton
+// (`isLoadingSession || !parsedSession`), so its count is scoped PER SESSION
+// ID (`loadingSessionInFlightBySession`) rather than kept as one global
+// number. A global count regressed against the pre-fix code: navigating
+// A -> B while A's fetch is still outstanding, with B resolving first, left
+// the global count at 1 (A's still in flight) even though B's own fetch had
+// already resolved and `parsedSession` already held B's correct data —
+// re-showing a full skeleton over already-loaded, correct content for
+// however long the abandoned A fetch took to drain. The pre-fix code never
+// had that window (it cleared unconditionally on `activeSessionId ===
+// sessionId`). Scoping the count by session id fixes this while keeping
+// every property above: `isLoadingSession` for a GIVEN session still rises
+// on every cold-load request for that id and falls exactly once per request
+// in its own `finally`.
+//
+// `isRefreshingSession`, by contrast, is deliberately kept as ONE global
+// counter (`refreshingSessionInFlight`) — not an oversight, a narrower
+// simplification that's safe specifically because of what this flag drives:
+// it only powers a small non-blocking spinner (session-panel.tsx), never the
+// skeleton or a blank-state gate. An abandoned session's background refetch
+// holding it true slightly longer than strictly necessary for the active
+// session has no content-hiding effect, so the extra bookkeeping of a
+// per-session map isn't justified here the way it is for isLoadingSession.
+//
+// Exported only so tests can assert this map doesn't leak entries (an entry
+// is deleted once its count reaches zero) — not part of the store's public
+// API, and not meant to be read by app code.
+export const loadingSessionInFlightBySession = new Map<string, number>()
+
+function bumpLoadingSessionInFlight(sessionId: string, delta: number): number {
+  const next = (loadingSessionInFlightBySession.get(sessionId) ?? 0) + delta
+  if (next <= 0) loadingSessionInFlightBySession.delete(sessionId)
+  else loadingSessionInFlightBySession.set(sessionId, next)
+  return next
+}
+
+let refreshingSessionInFlight = 0
 
 interface SessionsState {
   projects: Project[]
@@ -30,6 +96,7 @@ interface SessionsState {
   setActiveSession(sessionId: string | null): void
   handleSessionUpdated(summary: SessionSummary): void
   handleSessionCreated(summary: SessionSummary): void
+  handleSessionDeleted(payload: { sessionId: string; projectId: string }): void
 }
 
 function updateProjectSessions(
@@ -44,11 +111,16 @@ function updateProjectSessions(
   )
 }
 
+// Most-recently-active project first. The renderer can't import the main
+// process's copy of this (`@main/services/project-scanner`'s
+// `sortProjectsByLatestSession`) — `compareTimestampsAscending` in
+// `@shared/utils` is the one piece both processes can share, so both apply
+// the same parsed-instant rule instead of comparing `lastTimestamp` text.
 function sortProjectsByLatestSession(projects: Project[]): Project[] {
   return [...projects].sort((a, b) => {
     const aLatest = a.sessions[0]?.lastTimestamp ?? ''
     const bLatest = b.sessions[0]?.lastTimestamp ?? ''
-    return bLatest.localeCompare(aLatest)
+    return compareTimestampsAscending(bLatest, aLatest)
   })
 }
 
@@ -91,7 +163,9 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   async loadParsedSession(sessionId, projectId) {
     const state = get()
     const alreadyDisplayed = state.parsedSession?.id === sessionId
-    const cached = alreadyDisplayed ? state.parsedSession : rendererSessionCache.get(sessionId)
+    const cached = alreadyDisplayed
+      ? state.parsedSession
+      : rendererSessionCache.get(projectId, sessionId)
 
     if (cached) {
       // Two-phase commit so the click feels instant. Phase 1 updates only the
@@ -112,12 +186,17 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       }
       if (isSwitchingSession) requestAnimationFrame(commitParsed)
       else commitParsed()
+      const generation = ++parsedSessionGeneration
+      refreshingSessionInFlight += 1
       ipc.sessions
         .getParsed(sessionId, projectId)
         .then((result) => {
+          // A newer request for this (or another) session started after this
+          // one — its eventual publish must win instead.
+          if (generation !== parsedSessionGeneration) return
           if (get().activeSessionId !== sessionId) return
           if (result.ok) {
-            rendererSessionCache.set(sessionId, result.data)
+            rendererSessionCache.set(projectId, sessionId, result.data)
             set({ parsedSession: result.data })
           }
         })
@@ -125,12 +204,17 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
           /* non-critical */
         })
         .finally(() => {
-          if (get().activeSessionId === sessionId) set({ isRefreshingSession: false })
+          refreshingSessionInFlight = Math.max(0, refreshingSessionInFlight - 1)
+          if (get().activeSessionId === sessionId) {
+            set({ isRefreshingSession: refreshingSessionInFlight > 0 })
+          }
         })
       return
     }
 
     // Cold navigation — show skeleton until data arrives.
+    const generation = ++parsedSessionGeneration
+    bumpLoadingSessionInFlight(sessionId, 1)
     set({
       isLoadingSession: true,
       sessionError: null,
@@ -140,8 +224,9 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     })
     try {
       const result = await ipc.sessions.getParsed(sessionId, projectId)
+      if (generation !== parsedSessionGeneration) return
       if (result.ok) {
-        rendererSessionCache.set(sessionId, result.data)
+        rendererSessionCache.set(projectId, sessionId, result.data)
         if (get().activeSessionId === sessionId) {
           set({ parsedSession: result.data })
         }
@@ -151,12 +236,14 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         }
       }
     } catch (err) {
+      if (generation !== parsedSessionGeneration) return
       if (get().activeSessionId === sessionId) {
         set({ sessionError: String(err) })
       }
     } finally {
+      const remaining = bumpLoadingSessionInFlight(sessionId, -1)
       if (get().activeSessionId === sessionId) {
-        set({ isLoadingSession: false })
+        set({ isLoadingSession: remaining > 0 })
       }
     }
   },
@@ -178,9 +265,12 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         summary.projectId,
         (sessions) => {
           const patched = sessions.map((s) => (s.id === summary.id ? summary : s))
-          patched.sort(
-            (a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime()
-          )
+          // Descending by time; swap the arguments into
+          // `compareTimestampsAscending` rather than subtracting two
+          // `getTime()`s directly, which is `NaN` (and breaks
+          // `Array.prototype.sort`'s contract) whenever a `lastTimestamp` is
+          // unparsable.
+          patched.sort((a, b) => compareTimestampsAscending(b.lastTimestamp, a.lastTimestamp))
           return patched
         }
       )
@@ -192,17 +282,22 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     if (activeAtEventTime !== summary.id) {
       // Stale cached parse for a non-active session — drop it so the next
       // navigation refetches instead of showing outdated content instantly.
-      rendererSessionCache.invalidate(summary.id)
+      rendererSessionCache.invalidate(summary.projectId, summary.id)
       return
     }
 
     set({ isRefreshingSession: true })
+    const generation = ++parsedSessionGeneration
+    refreshingSessionInFlight += 1
     ipc.sessions
       .getParsed(summary.id, summary.projectId)
       .then((result) => {
+        // Same session id, but a newer request (another push event, or a
+        // fresh navigation) already started — let its result win instead.
+        if (generation !== parsedSessionGeneration) return
         if (get().activeSessionId !== summary.id) return
         if (result.ok) {
-          rendererSessionCache.set(summary.id, result.data)
+          rendererSessionCache.set(summary.projectId, summary.id, result.data)
           set({ parsedSession: result.data })
         }
       })
@@ -210,7 +305,10 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         /* non-critical background refresh */
       })
       .finally(() => {
-        if (get().activeSessionId === summary.id) set({ isRefreshingSession: false })
+        refreshingSessionInFlight = Math.max(0, refreshingSessionInFlight - 1)
+        if (get().activeSessionId === summary.id) {
+          set({ isRefreshingSession: refreshingSessionInFlight > 0 })
+        }
       })
   },
 
@@ -227,14 +325,40 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         state.projects,
         summary.projectId,
         (sessions) => {
-          const updated = [summary, ...sessions].sort(
-            (a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime()
+          // Same rationale as `handleSessionUpdated`'s sort above: compare
+          // parsed instants via `compareTimestampsAscending`, not a raw
+          // `getTime()` subtraction that can return `NaN`.
+          const updated = [summary, ...sessions].sort((a, b) =>
+            compareTimestampsAscending(b.lastTimestamp, a.lastTimestamp)
           )
           return updated
         }
       )
 
       return { projects: sortProjectsByLatestSession(updatedProjects) }
+    })
+  },
+
+  handleSessionDeleted({ sessionId, projectId }) {
+    rendererSessionCache.invalidate(projectId, sessionId)
+
+    set((state) => {
+      const updatedProjects = updateProjectSessions(state.projects, projectId, (sessions) =>
+        sessions.filter((s) => s.id !== sessionId)
+      )
+      const liveSessionIds = new Set(state.liveSessionIds)
+      liveSessionIds.delete(sessionId)
+
+      const wasActive = state.activeSessionId === sessionId
+      return {
+        projects: updatedProjects,
+        liveSessionIds,
+        // The deleted transcript can no longer be parsed — clear the
+        // selection rather than leave the panel showing content for a
+        // session that no longer exists on disk.
+        activeSessionId: wasActive ? null : state.activeSessionId,
+        parsedSession: wasActive ? null : state.parsedSession,
+      }
     })
   },
 }))

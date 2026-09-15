@@ -11,12 +11,36 @@ import {
   type SourceIdentity,
 } from '@main/services/accounting/ledger'
 import { projectUsage } from '@main/services/accounting/projection'
-import { isSyntheticAssistant, isToolResultCarrierUser } from './parser-helpers'
+import { createActivityAccumulator, type DayActivity } from './activity-reducer'
+
+/**
+ * See `SessionSummary.diagnostics` — this is that shape, scoped to subagents.
+ *
+ * The four usage-completeness fields are read from each child's own
+ * `projectUsage(entries)` (see `parseSingleSubagent` below) and summed across
+ * every subagent file, the same way `malformedLines` etc. are — the parent
+ * parsers that combine per-agent diagnostics into a session total need this
+ * aggregate, or child-session completeness silently reads as zero while
+ * looking measured.
+ */
+export interface SubagentDiagnostics {
+  malformedLines: number
+  unreadableChildren: number
+  negativeCounters: number
+  unpricedResponses: number
+  incompleteUsageResponses: number
+  responsesWithoutCompletionSignal: number
+  reducedConfidenceResponses: number
+}
 
 export interface SubagentParseResult {
   summaries: SubagentSummary[]
   /** Ledger entries for every subagent, for rollup into the parent session. */
   entries: ResponseEntry[]
+  /** Every subagent's per-day activity, summed into one map keyed by local day. */
+  childActivityByDay: Map<string, DayActivity>
+  /** Summed across every subagent file discovered, readable or not. */
+  diagnostics: SubagentDiagnostics
 }
 
 /**
@@ -43,7 +67,22 @@ export async function parseSubagents(
       .filter((e) => e.isFile() && e.name.endsWith('.jsonl') && !e.name.includes('compact'))
       .map((e) => e.name)
   } catch {
-    return { summaries: [], entries: [] }
+    // No subagents directory at all is a normal, common outcome (most
+    // sessions have no subagents) — not a read failure worth counting.
+    return {
+      summaries: [],
+      entries: [],
+      childActivityByDay: new Map(),
+      diagnostics: {
+        malformedLines: 0,
+        unreadableChildren: 0,
+        negativeCounters: 0,
+        unpricedResponses: 0,
+        incompleteUsageResponses: 0,
+        responsesWithoutCompletionSignal: 0,
+        reducedConfidenceResponses: 0,
+      },
+    }
   }
 
   // Bounded: a single session can have hundreds of subagents, and an unbounded
@@ -59,12 +98,44 @@ export async function parseSubagents(
 
   const summaries: SubagentSummary[] = []
   const entries: ResponseEntry[] = []
+  // Summed rather than kept per-child: the parent only needs one figure per
+  // day, and a child's own byDay map is not otherwise exposed anywhere.
+  const childActivityByDay = new Map<string, DayActivity>()
+  const diagnostics: SubagentDiagnostics = {
+    malformedLines: 0,
+    unreadableChildren: 0,
+    negativeCounters: 0,
+    unpricedResponses: 0,
+    incompleteUsageResponses: 0,
+    responsesWithoutCompletionSignal: 0,
+    reducedConfidenceResponses: 0,
+  }
   for (const result of parsed) {
-    if (!result) continue
+    diagnostics.malformedLines += result.diagnostics.malformedLines
+    diagnostics.unreadableChildren += result.diagnostics.unreadableChildren
+    diagnostics.negativeCounters += result.diagnostics.negativeCounters
+    diagnostics.unpricedResponses += result.diagnostics.unpricedResponses
+    diagnostics.incompleteUsageResponses += result.diagnostics.incompleteUsageResponses
+    diagnostics.responsesWithoutCompletionSignal +=
+      result.diagnostics.responsesWithoutCompletionSignal
+    diagnostics.reducedConfidenceResponses += result.diagnostics.reducedConfidenceResponses
+    if (!result.summary) continue
     summaries.push(result.summary)
     entries.push(...result.entries)
+    for (const [day, activity] of result.activityByDay) {
+      const existing = childActivityByDay.get(day)
+      childActivityByDay.set(
+        day,
+        existing
+          ? {
+              user: existing.user + activity.user,
+              assistant: existing.assistant + activity.assistant,
+            }
+          : { user: activity.user, assistant: activity.assistant }
+      )
+    }
   }
-  return { summaries, entries }
+  return { summaries, entries, childActivityByDay, diagnostics }
 }
 
 async function parseSingleSubagent(
@@ -73,14 +144,22 @@ async function parseSingleSubagent(
   sessionId: string,
   projectId: string,
   pricingTable: Record<ModelFamily, ModelPricing>
-): Promise<{ summary: SubagentSummary; entries: ResponseEntry[] } | null> {
+): Promise<{
+  summary: SubagentSummary | null
+  entries: ResponseEntry[]
+  activityByDay: Map<string, DayActivity>
+  diagnostics: SubagentDiagnostics
+}> {
   const agentId = fileName.replace(/^agent-/, '').replace(/\.jsonl$/, '')
   const source: SourceIdentity = { kind: 'subagent', projectId, sessionId, agentId }
   const accumulator = createResponseAccumulator(filePath, source, pricingTable)
 
-  let messageCount = 0
+  // Message counts come from the same response-grouping the ledger uses for
+  // usage, so a block-split child response counts once for both.
+  const activity = createActivityAccumulator()
   let firstTimestamp: string | undefined
   let lastTimestamp: string | undefined
+  let malformedLines = 0
 
   try {
     const rl = readline.createInterface({
@@ -94,30 +173,61 @@ async function parseSingleSubagent(
       try {
         raw = JSON.parse(line) as RawRecord
       } catch {
+        malformedLines++
         continue
       }
 
       if (!firstTimestamp && raw.timestamp) firstTimestamp = raw.timestamp
       if (raw.timestamp) lastTimestamp = raw.timestamp
 
-      if (raw.type === 'user' && !isToolResultCarrierUser(raw)) messageCount++
-      if (raw.type === 'assistant' && !isSyntheticAssistant(raw)) messageCount++
-
+      activity.add(raw)
       accumulator.add(raw)
     }
   } catch {
-    return null
+    // The file exists (it came from `readdir`) but could not be read — a
+    // distinct failure from "no subagents directory" above: there really was
+    // a child here, and its usage is now missing from the rollup unless this
+    // is counted rather than treated the same as a session with none at all.
+    return {
+      summary: null,
+      entries: [],
+      activityByDay: new Map(),
+      diagnostics: {
+        malformedLines,
+        unreadableChildren: 1,
+        negativeCounters: 0,
+        unpricedResponses: 0,
+        incompleteUsageResponses: 0,
+        responsesWithoutCompletionSignal: 0,
+        reducedConfidenceResponses: 0,
+      },
+    }
   }
 
-  if (messageCount === 0) return null
-
+  const activityCounts = activity.counts()
+  // Computed before `diagnostics` (unlike the pre-widening version of this
+  // function) so the four usage-completeness fields below can read off the
+  // same projection the summary itself is built from, rather than being
+  // filled in as zero and never revisited.
   const entries = accumulator.entries()
   const usage = projectUsage(entries)
+  const diagnostics: SubagentDiagnostics = {
+    malformedLines,
+    unreadableChildren: 0,
+    negativeCounters: accumulator.negativeCounters(),
+    unpricedResponses: usage.combined.unpricedResponses,
+    incompleteUsageResponses: usage.combined.incompleteUsageResponses,
+    responsesWithoutCompletionSignal: usage.combined.responsesWithoutCompletionSignal,
+    reducedConfidenceResponses: usage.combined.reducedConfidenceResponses,
+  }
+  if (activityCounts.total === 0) {
+    return { summary: null, entries: [], activityByDay: new Map(), diagnostics }
+  }
 
   return {
     summary: {
       agentId,
-      messageCount,
+      messageCount: activityCounts.total,
       totalInputTokens: usage.combined.inputTokens,
       totalOutputTokens: usage.combined.outputTokens,
       primaryModel: usage.modelBreakdown[0]?.model,
@@ -131,10 +241,13 @@ async function parseSingleSubagent(
         cacheReadTokens: m.cacheReadTokens,
         cacheCreation5mTokens: m.cacheWrite5m,
         cacheCreation1hTokens: m.cacheWrite1h,
+        cacheCreationUnknownTtlTokens: m.cacheWriteUnknownTtl,
         estimatedCost: m.estimatedCost ?? 0,
         turnCount: m.turnCount,
       })),
     },
     entries,
+    activityByDay: activityCounts.byDay,
+    diagnostics,
   }
 }
