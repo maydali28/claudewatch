@@ -17,7 +17,7 @@ export function registerExportHandlers(): void {
   ipcMain.handle(CHANNELS.SESSIONS_EXPORT, async (_event, payload) => {
     try {
       const { sessionId, projectId, format, outputPath } = validate(ExportSchema, payload)
-      let parsedSession = sessionCache.get(sessionId)
+      let parsedSession = sessionCache.get(projectId, sessionId)
       if (!parsedSession) {
         const claudeDir = getClaudeDir()
         const projectsDir = path.join(claudeDir, 'projects')
@@ -28,7 +28,7 @@ export function registerExportHandlers(): void {
           projectId,
           getActivePricingTable(Preferences.get())
         )
-        sessionCache.set(sessionId, parsedSession)
+        sessionCache.set(projectId, sessionId, parsedSession)
       }
       const writtenPath = await writeExport(parsedSession, format, outputPath)
       return ok(writtenPath)
