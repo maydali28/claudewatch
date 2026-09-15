@@ -84,7 +84,9 @@ export function TodayStats({
             <span className="text-[26px] font-bold tabular-nums tracking-tight leading-none text-foreground">
               {formatTokens(tokenCount)}
             </span>
-            <span className="text-[10px] font-medium text-muted-foreground">tokens</span>
+            <span className="text-[10px] font-medium text-muted-foreground">
+              fresh input + output
+            </span>
           </div>
         </div>
         <Delta current={todayTokens} previous={yesterdayTokens} />
