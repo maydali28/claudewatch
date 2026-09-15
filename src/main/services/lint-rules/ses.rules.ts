@@ -11,7 +11,9 @@ const SES001_COST_THRESHOLD = 25.0
 const SES002_COMPACTION_COUNT = 5
 const SES003_TOKEN_THRESHOLD = 2_000_000
 const SES004_STALE_DAYS = 14
-const SES004_MIN_MESSAGES = 10
+// Halved when message counting moved from records to API responses: the old
+// value of 10 was calibrated against counts inflated ~2.09x.
+const SES004_MIN_MESSAGES = 5
 const LOOKBACK_SESSIONS_DAYS = 7
 const MAX_RESULTS = 10
 

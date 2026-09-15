@@ -2,6 +2,7 @@ import * as path from 'path'
 import type { LintResult, LintContext } from '@shared/types/lint'
 import type { SessionSummary } from '@shared/types/session'
 import { scanFileLines } from '@main/services/secret-scanner'
+import { compareTimestampsAscending } from '@shared/utils/date-ranges'
 
 function makeId(): string {
   return Math.random().toString(36).slice(2)
@@ -10,7 +11,9 @@ function makeId(): string {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const LOOKBACK_SECRETS_DAYS = 30
-export const SEC_MIN_MESSAGES = 10
+// Halved when message counting moved from records to API responses: the old
+// value of 10 was calibrated against counts inflated ~2.09x.
+export const SEC_MIN_MESSAGES = 5
 const SEC_MAX_TOTAL = 20
 const LINES_TO_SCAN = 50
 const SEC_MAX_SESSIONS_SCANNED = 200
@@ -38,9 +41,15 @@ export function selectSessionsToScan(
   sessions: SessionSummary[],
   now: number = Date.now()
 ): SessionSummary[] {
+  // `isSecretScanEligible` already rejects an unparsable `lastTimestamp`
+  // (see its `Number.isNaN` guard below), so this sort never actually sees
+  // one on the current eligibility rule — but it uses
+  // `compareTimestampsAscending` (arguments swapped for descending order)
+  // rather than a raw `getTime()` subtraction anyway, so it stays correct on
+  // its own even if that upstream guard is ever loosened.
   return sessions
     .filter((s) => isSecretScanEligible(s, now))
-    .sort((a, b) => new Date(b.lastTimestamp).getTime() - new Date(a.lastTimestamp).getTime())
+    .sort((a, b) => compareTimestampsAscending(b.lastTimestamp, a.lastTimestamp))
     .slice(0, SEC_MAX_SESSIONS_SCANNED)
 }
 

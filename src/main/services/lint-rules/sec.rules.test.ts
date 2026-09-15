@@ -16,6 +16,10 @@ function at(daysAgo: number): string {
  * nothing.
  */
 describe('isSecretScanEligible', () => {
+  it('still treats a five-message session as substantial after the count correction', () => {
+    expect(isSecretScanEligible({ lastTimestamp: at(1), messageCount: 5 }, NOW)).toBe(true)
+  })
+
   it('accepts a recent session with enough messages', () => {
     expect(
       isSecretScanEligible({ lastTimestamp: at(1), messageCount: SEC_MIN_MESSAGES }, NOW)
@@ -74,5 +78,27 @@ describe('selectSessionsToScan', () => {
   it('caps the number of sessions scanned', () => {
     const many = Array.from({ length: 500 }, (_, i) => session(`s${i}`, 1))
     expect(selectSessionsToScan(many, NOW).length).toBeLessThanOrEqual(200)
+  })
+
+  /**
+   * `selectSessionsToScan`'s sort now compares via `compareTimestampsAscending`
+   * rather than a raw `getTime()` subtraction, matching every other
+   * timestamp-sort call site fixed on this branch — but through this
+   * function's own public API, a malformed (non-empty) `lastTimestamp` can
+   * never actually reach that sort: `isSecretScanEligible`'s
+   * `Number.isNaN(new Date(session.lastTimestamp).getTime())` guard (see
+   * above) rejects it first, the same way it already rejects an empty
+   * string. This pins that guarantee — a session with a non-empty but
+   * unparsable timestamp, otherwise perfectly eligible, must never appear in
+   * the scanned output at all — rather than testing the sort's NaN-handling
+   * directly, which this call site cannot expose no matter how the fix is
+   * written. (The `compareTimestampsAscending` swap itself is exercised
+   * directly by `shared/utils/date-ranges.test.ts` and by every other fixed
+   * call site's own tests.)
+   */
+  it('excludes a session with a non-empty unparsable timestamp before the sort ever sees it', () => {
+    const garbage = { ...session('garbage', 1), lastTimestamp: 'not-a-timestamp' }
+    const picked = selectSessionsToScan([garbage, session('good', 2)], NOW)
+    expect(picked.map((s) => s.id)).toEqual(['good'])
   })
 })
