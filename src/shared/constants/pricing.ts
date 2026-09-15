@@ -1,4 +1,5 @@
 import type { ModelPricing, ModelFamily, PricingProvider } from '@shared/types/pricing'
+import type { AppPreferences } from '@shared/types/preferences'
 
 // ─── Anthropic API Pricing (per million tokens) ───────────────────────────────
 // Source: platform.claude.com/docs/en/about-claude/pricing
@@ -7,12 +8,11 @@ import type { ModelPricing, ModelFamily, PricingProvider } from '@shared/types/p
 // Cache read = 0.1x base input, EXCEPT Fable 5.1, which Anthropic prices at a
 // flat $0.25 per million regardless of the input rate.
 //
-// Assumptions, both narrower than the published rates:
-//   - The 1.25x / 2x write multipliers are taken to hold for Fable 5.1 and
-//     Mythos 5.1; only the cache-read exception is published.
-//   - Mythos 5.1 is assumed to share Fable 5.1's $0.25 cache read. The
-//     published exception names Fable 5.1; whether Mythos 5.1 matches it is
-//     open. Revisit when documented.
+// Confirmed by the published pricing table (platform.claude.com/docs/en/
+// about-claude/pricing), not carried over as an assumption:
+//   - The 1.25x / 2x write multipliers hold for Fable 5.1 and Mythos 5.1,
+//     same as every other model here.
+//   - Mythos 5.1 shares Fable 5.1's flat $0.25 cache read rate.
 
 /**
  * Bump whenever any rate below changes, or whenever `getModelFamily` starts
@@ -80,6 +80,35 @@ export function getPricingTable(provider: PricingProvider): Record<ModelFamily, 
     case 'anthropic':
       return ANTHROPIC_PRICING
   }
+}
+
+// ─── getActivePricingTable ────────────────────────────────────────────────────
+//
+// Returns the base pricing table for the user's chosen provider/region, then
+// applies any per-model overrides configured in preferences.
+//
+// Lives here (not main-only) so both the main-process pricing engine and
+// renderer components that read `prefs` from the settings store — e.g. the
+// what-if calculator and the compaction cost panel — reprice at the same
+// effective rates the rest of the app uses, instead of a component quietly
+// falling back to the built-in table and disagreeing with an active override.
+export function getActivePricingTable(prefs: AppPreferences): Record<ModelFamily, ModelPricing> {
+  const base = getPricingTable(prefs.pricingProvider)
+
+  // Shallow-clone so we don't mutate the shared constant
+  const table: Record<ModelFamily, ModelPricing> = { ...base }
+
+  // Apply overrides
+  for (const [family, overrides] of Object.entries(prefs.pricingOverrides) as [
+    ModelFamily,
+    Partial<ModelPricing>,
+  ][]) {
+    if (overrides && Object.keys(overrides).length > 0) {
+      table[family] = { ...table[family], ...overrides }
+    }
+  }
+
+  return table
 }
 
 // ─── Cost Calculation ─────────────────────────────────────────────────────────
