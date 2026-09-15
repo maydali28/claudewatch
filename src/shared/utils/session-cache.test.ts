@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { ParsedRecord, ParsedSession } from '@shared/types/session'
 import { SessionCache } from './session-cache'
 
+/** A fixed project id for tests that aren't exercising cross-project keying. */
+const PROJ = 'proj'
+
 /** A session whose estimated footprint scales with the record count. */
 function session(id: string, records: number): ParsedSession {
   const record: ParsedRecord = {
@@ -20,25 +23,58 @@ function session(id: string, records: number): ParsedSession {
 describe('SessionCache — capacity', () => {
   it('evicts the least recently used entry past capacity', () => {
     const cache = new SessionCache(2, Number.MAX_SAFE_INTEGER)
-    cache.set('a', session('a', 1))
-    cache.set('b', session('b', 1))
-    cache.set('c', session('c', 1))
+    cache.set(PROJ, 'a', session('a', 1))
+    cache.set(PROJ, 'b', session('b', 1))
+    cache.set(PROJ, 'c', session('c', 1))
 
-    expect(cache.get('a')).toBeUndefined()
-    expect(cache.get('b')).toBeDefined()
-    expect(cache.get('c')).toBeDefined()
+    expect(cache.get(PROJ, 'a')).toBeUndefined()
+    expect(cache.get(PROJ, 'b')).toBeDefined()
+    expect(cache.get(PROJ, 'c')).toBeDefined()
     expect(cache.size).toBe(2)
   })
 
   it('treats a read as recent use', () => {
     const cache = new SessionCache(2, Number.MAX_SAFE_INTEGER)
-    cache.set('a', session('a', 1))
-    cache.set('b', session('b', 1))
-    cache.get('a')
-    cache.set('c', session('c', 1))
+    cache.set(PROJ, 'a', session('a', 1))
+    cache.set(PROJ, 'b', session('b', 1))
+    cache.get(PROJ, 'a')
+    cache.set(PROJ, 'c', session('c', 1))
 
-    expect(cache.get('a')).toBeDefined()
-    expect(cache.get('b')).toBeUndefined()
+    expect(cache.get(PROJ, 'a')).toBeDefined()
+    expect(cache.get(PROJ, 'b')).toBeUndefined()
+  })
+})
+
+/**
+ * Session ids are only unique within a project. Keying the cache on the bare
+ * session id let two projects sharing an id silently read and evict each
+ * other's parsed sessions.
+ */
+describe('SessionCache — project scoping', () => {
+  it('does not collide when two projects hold the same session id', () => {
+    const cache = new SessionCache(10, Number.MAX_SAFE_INTEGER)
+    const sameId = 'shared-session-id'
+    const forProjectA = session(sameId, 1)
+    const forProjectB = session(sameId, 5)
+
+    cache.set('project-a', sameId, forProjectA)
+    cache.set('project-b', sameId, forProjectB)
+
+    expect(cache.get('project-a', sameId)).toBe(forProjectA)
+    expect(cache.get('project-b', sameId)).toBe(forProjectB)
+    expect(cache.size).toBe(2)
+  })
+
+  it('invalidates only the named project’s entry for a shared session id', () => {
+    const cache = new SessionCache(10, Number.MAX_SAFE_INTEGER)
+    const sameId = 'shared-session-id'
+    cache.set('project-a', sameId, session(sameId, 1))
+    cache.set('project-b', sameId, session(sameId, 1))
+
+    cache.invalidate('project-a', sameId)
+
+    expect(cache.get('project-a', sameId)).toBeUndefined()
+    expect(cache.get('project-b', sameId)).toBeDefined()
   })
 })
 
@@ -55,34 +91,34 @@ describe('SessionCache — byte cap', () => {
     const cap = 24 * PER_RECORD
     const cache = new SessionCache(10, cap)
 
-    cache.set('a', session('a', 2))
-    cache.set('b', session('b', 2))
+    cache.set(PROJ, 'a', session('a', 2))
+    cache.set(PROJ, 'b', session('b', 2))
     // 'a' is re-parsed mid-stream and is now much larger.
-    cache.set('a', session('a', 20))
+    cache.set(PROJ, 'a', session('a', 20))
 
     expect(cache.totalBytesUsed).toBeLessThanOrEqual(cap)
-    expect(cache.get('a')).toBeDefined()
+    expect(cache.get(PROJ, 'a')).toBeDefined()
   })
 
   it('evicts other entries rather than exceeding the cap', () => {
     const cap = 24 * PER_RECORD
     const cache = new SessionCache(10, cap)
 
-    cache.set('a', session('a', 2))
-    cache.set('b', session('b', 2))
-    cache.set('c', session('c', 20))
+    cache.set(PROJ, 'a', session('a', 2))
+    cache.set(PROJ, 'b', session('b', 2))
+    cache.set(PROJ, 'c', session('c', 20))
 
     expect(cache.totalBytesUsed).toBeLessThanOrEqual(cap)
-    expect(cache.get('c')).toBeDefined()
+    expect(cache.get(PROJ, 'c')).toBeDefined()
   })
 
   it('does not cache an entry larger than the whole cap', () => {
     const cache = new SessionCache(10, 4 * PER_RECORD)
 
-    cache.set('huge', session('huge', 50))
+    cache.set(PROJ, 'huge', session('huge', 50))
 
     // Storing it would break the cap it exists to enforce; the caller re-parses.
-    expect(cache.get('huge')).toBeUndefined()
+    expect(cache.get(PROJ, 'huge')).toBeUndefined()
     expect(cache.totalBytesUsed).toBe(0)
   })
 
@@ -90,20 +126,20 @@ describe('SessionCache — byte cap', () => {
     // The estimator adds a fixed ~4KB base per session, so the cap has to clear
     // that before a one-record entry fits at all.
     const cache = new SessionCache(10, 12_000)
-    cache.set('keep', session('keep', 1))
+    cache.set(PROJ, 'keep', session('keep', 1))
 
-    cache.set('huge', session('huge', 50))
+    cache.set(PROJ, 'huge', session('huge', 50))
 
-    expect(cache.get('keep')).toBeDefined()
+    expect(cache.get(PROJ, 'keep')).toBeDefined()
   })
 
   it('reports a byte total that matches what it holds', () => {
     const cache = new SessionCache(10, Number.MAX_SAFE_INTEGER)
-    cache.set('a', session('a', 5))
-    cache.set('b', session('b', 5))
+    cache.set(PROJ, 'a', session('a', 5))
+    cache.set(PROJ, 'b', session('b', 5))
     const withBoth = cache.totalBytesUsed
 
-    cache.invalidate('b')
+    cache.invalidate(PROJ, 'b')
 
     expect(cache.totalBytesUsed).toBeLessThan(withBoth)
     expect(cache.totalBytesUsed).toBeGreaterThan(0)
@@ -111,7 +147,7 @@ describe('SessionCache — byte cap', () => {
 
   it('returns to zero bytes once cleared', () => {
     const cache = new SessionCache(10, Number.MAX_SAFE_INTEGER)
-    cache.set('a', session('a', 5))
+    cache.set(PROJ, 'a', session('a', 5))
     cache.clear()
 
     expect(cache.totalBytesUsed).toBe(0)
