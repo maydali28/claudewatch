@@ -1,10 +1,23 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
 import { toDateKey } from '@shared/utils/date-ranges'
 import { ingestFile } from './ledger'
+
+// See metadata-parser.test.ts for why this mock exists (vitest's `forks` pool
+// makes `@main/lib/logger`'s import-time electron-log init throw). Required
+// here too since this file imports metadata-parser.ts.
+vi.mock('@main/lib/logger', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  }),
+}))
+
 import { parseSessionMetadata } from '@main/services/parsers/metadata-parser'
 import { computeAnalytics } from '@main/services/analytics-engine'
 import type { Project } from '@shared/types/project'
@@ -289,10 +302,22 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
     for (const days of [30, 90] as const) {
       const start = windowStart(days)
       // Oracle: count the turns whose own timestamp falls in the window.
+      //
+      // The `!t.assistantTimestamp ||` disjunct that used to lead this filter
+      // mirrored an `if (td.assistantTimestamp)` guard in
+      // `computeLatencyAnalytics` that kept a timestamp-less turn in every
+      // range unconditionally. Both are gone: an undated turn is now excluded
+      // from a calendar window it cannot honestly claim, matching that
+      // function's stated policy. The set is empty either way — `judgeResponse`
+      // never emits a turn duration without a parsable timestamp (pinned in
+      // `response-observability.test.ts`) — so this edit changes no number
+      // here; it stops the oracle from asserting a policy the code no longer
+      // implements.
       const expected = summaries
         .flatMap((s) => s.turnDurations ?? [])
         .filter((t) => t.durationMs > 0)
-        .filter((t) => !t.assistantTimestamp || toDateKey(t.assistantTimestamp) >= start).length
+        .filter((t) => t.assistantTimestamp !== undefined)
+        .filter((t) => toDateKey(t.assistantTimestamp!) >= start).length
 
       const actual = computeAnalytics(summaries, [], rangeForDays(days), ANTHROPIC_PRICING)
       const counted = actual.latencyAnalytics.histogram.reduce((n, b) => n + b.count, 0)
