@@ -479,7 +479,7 @@ export default function SessionPanel(): React.JSX.Element {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold truncate text-foreground">
-                {parsedSession.slug ?? parsedSession.id.slice(0, 12)}
+                {activeSessionSummary?.title ?? parsedSession.slug ?? parsedSession.id.slice(0, 12)}
               </h2>
               <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground flex-wrap">
                 {metadata.firstTimestamp && (
