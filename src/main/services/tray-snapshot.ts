@@ -2,7 +2,7 @@ import type { SessionSummary } from '@shared/types/session'
 import type { Project } from '@shared/types/project'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import type { TraySnapshot, TraySnapshotSession } from '@shared/types/analytics'
-import { computeAnalytics } from './analytics-engine'
+import { computeAnalytics, buildSessionOwnerMap } from './analytics-engine'
 import { ACTIVE_SESSION_MS, TRAY_RECENT_SESSION_COUNT } from '@shared/constants/tuning'
 import { toDateKey, compareTimestampsAscending } from '@shared/utils/date-ranges'
 
@@ -35,7 +35,7 @@ export function buildTraySnapshot(
   // point in the last 7 days, which is not today's figure — daily rows carry
   // no per-project breakdown to recover it from, so it is derived separately
   // here instead of resurrecting a second full analytics pass for one field.
-  const projectCount = todaysProjectCount(sessions, todayKey)
+  const projectCount = todaysProjectCount(sessions, todayKey, buildSessionOwnerMap(projects))
 
   // Descending by time, via `compareTimestampsAscending` (arguments swapped,
   // not negated) rather than subtracting two `getTime()`s directly: `sessions`
@@ -50,16 +50,23 @@ export function buildTraySnapshot(
 
   return {
     today: {
-      // A quiet day has no row at all — that is a genuine zero, not a
-      // missing value, so it is fine to default it rather than propagate null.
+      // `'7d'` is a bounded preset, so `week.dailyUsage` is zero-filled to
+      // its full 7 calendar days (see `analytics-engine.ts`) and `todayRow`
+      // is never actually missing — but the `?? 0`/ternary defaults are kept
+      // as a safety net rather than asserted non-null, since this reads
+      // across the IPC boundary from a value this function does not itself
+      // guarantee the shape of.
       sessionCount: todayRow?.sessionCount ?? 0,
       tokenCount: todayRow ? todayRow.inputTokens + todayRow.outputTokens : 0,
       messageCount: todayRow?.messageCount ?? 0,
       cost: todayRow?.estimatedCost ?? 0,
       projectCount,
     },
-    // The renderer fills the calendar week; this carries only the days that
-    // have data, keeping the payload small.
+    // `week.dailyUsage` already carries all 7 calendar days, idle ones
+    // included (see above) — the renderer's `buildWeeklyUsage` re-applies
+    // the same zero-fill on top of this, which is redundant but harmless
+    // (idempotent), kept so it still degrades safely if this ever received
+    // a sparse series again (e.g. a future `all`-scoped caller).
     weekly: week.dailyUsage.map((d) => ({
       date: d.date,
       tokens: d.inputTokens + d.outputTokens,
@@ -87,11 +94,25 @@ export function buildTraySnapshot(
  * not — so this has to use the same inner gate `sessionCount` gets for free
  * from `dailyUsage`, or the two derived fields disagree with each other on
  * what "active today" means.
+ *
+ * `ownerOf` resolves each session to the id of the (possibly merged) `Project`
+ * that owns it — see `analytics-engine.ts`'s `buildSessionOwnerMap`, which
+ * `buildProjectCosts` uses for the identical reason. Counting distinct
+ * `s.projectId` directly, the session's own PHYSICAL directory, split one
+ * merged project (a checkout plus its git worktrees) back into up to N
+ * distinct entries here: the tray reported `projectCount: 3` for one project
+ * merged from three worktree directories, even though its token/cost totals
+ * (built from the SAME `sessions`, summed rather than counted) were already
+ * correct.
  */
-function todaysProjectCount(sessions: SessionSummary[], todayKey: string): number {
+function todaysProjectCount(
+  sessions: SessionSummary[],
+  todayKey: string,
+  ownerOf: Map<string, string>
+): number {
   const activeToday = (s: SessionSummary): boolean =>
     (s.dailyUsage ?? []).some((d) => d.day === todayKey)
-  return new Set(sessions.filter(activeToday).map((s) => s.projectId)).size
+  return new Set(sessions.filter(activeToday).map((s) => ownerOf.get(s.id) ?? s.projectId)).size
 }
 
 function toTraySession(s: SessionSummary): TraySnapshotSession {

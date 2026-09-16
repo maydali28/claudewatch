@@ -48,6 +48,7 @@ function makeParsedSession(sessionId: string, marker: number): ParsedSession {
     metadata: { marker } as unknown as ParsedSession['metadata'],
     isSubagent: false,
     subagentTotals: { inputTokens: 0, outputTokens: 0, messageCount: 0, estimatedCost: 0 },
+    responseUsage: {},
     diagnostics: {
       malformedLines: 0,
       unreadableChildren: 0,
@@ -390,5 +391,71 @@ describe('useSessionsStore — session-list ordering is NaN-safe on live updates
       .projects.find((p) => p.id === PROJECT_ID)
       ?.sessions.map((s) => s.id)
     expect(sessionIds).toEqual(['newest', 'oldest', 'garbage'])
+  })
+})
+
+/**
+ * Fix-round-1 finding 4/5: a project merged from several worktrees
+ * (`project-scanner.ts`'s `mergeProjectsByResolvedPath`) has a survivor `id`
+ * that is only ONE of the physical directories feeding it. Every live push
+ * event still carries the session's own PHYSICAL directory as its
+ * `projectId` (never rewritten — it locates the transcript on disk), so a
+ * push for a session in a NON-survivor directory used to find no matching
+ * project in `updateProjectSessions`'s `p.id === projectId` check and
+ * silently no-op, leaving the sidebar stale until the next full reload.
+ */
+describe('useSessionsStore — live updates find a merged project by its physical directory id', () => {
+  function makeMergedProject(): Project {
+    return {
+      id: 'main-dir',
+      name: 'merged',
+      path: '/merged',
+      sessions: [
+        makeSummary('s-main', 'main-dir', '2026-09-10T00:00:00.000Z'),
+        makeSummary('s-worktree', 'worktree-dir', '2026-09-09T00:00:00.000Z'),
+      ],
+      sessionCount: 2,
+      localSkills: [],
+      localClaudeMd: null,
+    }
+  }
+
+  it('handleSessionUpdated updates a session in the merged project even though the event carries a different (non-survivor) physical projectId', () => {
+    useSessionsStore.setState({ projects: [makeMergedProject()] })
+
+    useSessionsStore.getState().handleSessionUpdated({
+      ...makeSummary('s-worktree', 'worktree-dir', '2026-09-09T00:00:00.000Z'),
+      messageCount: 99,
+    })
+
+    const project = useSessionsStore.getState().projects.find((p) => p.id === 'main-dir')
+    expect(project?.sessions.find((s) => s.id === 's-worktree')?.messageCount).toBe(99)
+  })
+
+  it('handleSessionDeleted removes a session from the merged project even though the payload carries its physical projectId', () => {
+    useSessionsStore.setState({ projects: [makeMergedProject()] })
+
+    useSessionsStore.getState().handleSessionDeleted({
+      sessionId: 's-worktree',
+      projectId: 'worktree-dir',
+    })
+
+    const project = useSessionsStore.getState().projects.find((p) => p.id === 'main-dir')
+    expect(project?.sessions.map((s) => s.id)).toEqual(['s-main'])
+    expect(project?.sessionCount).toBe(1)
+  })
+
+  it('handleSessionCreated adds a new session to the merged project when it arrives under an already-known non-survivor physical projectId', () => {
+    useSessionsStore.setState({ projects: [makeMergedProject()] })
+
+    useSessionsStore
+      .getState()
+      .handleSessionCreated(
+        makeSummary('s-worktree-new', 'worktree-dir', '2026-09-11T00:00:00.000Z')
+      )
+
+    const project = useSessionsStore.getState().projects.find((p) => p.id === 'main-dir')
+    expect(project?.sessions.map((s) => s.id)).toEqual(['s-worktree-new', 's-main', 's-worktree'])
+    expect(project?.sessionCount).toBe(3)
   })
 })

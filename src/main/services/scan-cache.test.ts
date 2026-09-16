@@ -427,6 +427,99 @@ describe('ScanCache — removeSession', () => {
   })
 })
 
+/**
+ * Fix-round-1 findings 4/5: `project-scanner.ts` merges a git worktree and
+ * its main checkout into one `Project` (see `mergeProjectsByResolvedPath`)
+ * whose own `id` is only ONE of the physical directories that feed it —
+ * every session still carries the real physical directory it was parsed
+ * from as its own `projectId` (never rewritten, since that's what locates
+ * its file on disk). A file-watcher event for the NON-survivor directory
+ * therefore carries a `projectId` that doesn't equal the merged `Project`'s
+ * own `id`, so a lookup keyed only on `p.id === physicalProjectId` misses
+ * it — forcing an unnecessary full rescan for `applyPatch`, and silently
+ * dropping the removal for `applyRemoval`/`peekProjectSessions`.
+ */
+describe('ScanCache — merged (multi-worktree) projects', () => {
+  function makeMergedProject(): Project {
+    return makeProject({
+      id: 'main-dir',
+      sessions: [
+        makeSummary({ id: 's-main', projectId: 'main-dir', messageCount: 1 }),
+        makeSummary({ id: 's-worktree', projectId: 'worktree-dir', messageCount: 1 }),
+      ],
+      sessionCount: 2,
+    })
+  }
+
+  it('applyPatch updates a merged project via a session physically in a non-survivor directory', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const priming = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(priming.promise)
+    const primed = cache.refresh()
+    priming.resolve(makeScan([makeMergedProject()]))
+    await primed
+
+    // Safety net: if the lookup below still can't place the physical
+    // directory, `patchSessionSummary` falls back to a full rescan. Queuing
+    // one lets a still-broken implementation resolve cleanly (with the
+    // STALE messageCount) instead of hanging on an unconsumed mock.
+    mockScanProjects.mockReturnValueOnce(Promise.resolve(makeScan([makeMergedProject()])))
+
+    await cache.patchSessionSummary(
+      makeSummary({ id: 's-worktree', projectId: 'worktree-dir', messageCount: 99 })
+    )
+
+    const sessions = await cache.getSessionsForProject('main-dir')
+    expect(sessions.find((s) => s.id === 's-worktree')?.messageCount).toBe(99)
+    // The fix applies the patch directly; it must not need the safety-net rescan.
+    expect(mockScanProjects).toHaveBeenCalledTimes(1)
+    // `vi.clearAllMocks()` in this file's `beforeEach` clears call history but
+    // NOT a still-queued `mockReturnValueOnce` — drain it explicitly so an
+    // unconsumed safety net never leaks into a later test's own `refresh()`.
+    mockScanProjects.mockReset()
+  })
+
+  it('peekProjectSessions finds a merged project by a non-survivor physical directory id, scoped to that directory’s own sessions', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const priming = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(priming.promise)
+    const primed = cache.refresh()
+    priming.resolve(makeScan([makeMergedProject()]))
+    await primed
+
+    // handleUnlinkDir calls this with the PHYSICAL directory that vanished —
+    // "worktree-dir" here — never the merged survivor id "main-dir". It must
+    // return only worktree-dir's own session, not main-dir's too, since the
+    // caller rebuilds each session's file path by joining this same
+    // physical id with the session's own id.
+    const sessions = cache.peekProjectSessions('worktree-dir')
+
+    expect(sessions.map((s) => s.id)).toEqual(['s-worktree'])
+  })
+
+  it('removeSession removes a session from a merged project via its non-survivor physical directory id', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const priming = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(priming.promise)
+    const primed = cache.refresh()
+    priming.resolve(makeScan([makeMergedProject()]))
+    await primed
+
+    // handleParentRemoved/removeSession is called with the session's own
+    // physical directory, exactly like peekProjectSessions above.
+    cache.removeSession('worktree-dir', 's-worktree')
+
+    const sessions = await cache.getSessionsForProject('main-dir')
+    expect(sessions.map((s) => s.id)).toEqual(['s-main'])
+  })
+})
+
 // Task 12 / defect 1: `refresh()`'s replay loop called `applyPatch(result,
 // patch)` and discarded the boolean, then cleared `pendingPatches` wholesale
 // regardless of the result. `applyPatch` returns false when the summary's

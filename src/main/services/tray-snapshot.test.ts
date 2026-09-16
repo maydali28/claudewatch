@@ -224,6 +224,43 @@ describe('buildTraySnapshot', () => {
     expect(snapshot.today.projectCount).toBe(1)
   })
 
+  /**
+   * Fix-round-2 finding A: a project merged from several worktree directories
+   * (`project-scanner.ts`'s `mergeProjectsByResolvedPath`) has sessions whose
+   * own `projectId` is each session's PHYSICAL directory, never the merged
+   * survivor id. Counting those directly, as before, reported one merged
+   * project as three ("today.projectCount: 3") even though its token/cost
+   * totals — summed, not counted — were already correct.
+   */
+  it('counts a project merged from three worktree directories as one, not one per physical directory', () => {
+    const mainSession = session('s-main', 'main-dir', [
+      day({ day: TODAY_KEY, inputTokens: 1000, outputTokens: 100, estimatedCost: 1 }),
+    ])
+    const worktreeASession = session('s-worktree-a', 'alpha-worktree-dir', [
+      day({ day: TODAY_KEY, inputTokens: 1000, outputTokens: 100, estimatedCost: 1 }),
+    ])
+    const worktreeBSession = session('s-worktree-b', 'beta-worktree-dir', [
+      day({ day: TODAY_KEY, inputTokens: 1000, outputTokens: 100, estimatedCost: 1 }),
+    ])
+    const mergedProject: Project = {
+      id: 'main-dir',
+      name: 'merged',
+      path: '/merged',
+      sessions: [mainSession, worktreeASession, worktreeBSession],
+      sessionCount: 3,
+      localSkills: [],
+      localClaudeMd: null,
+    }
+
+    const snapshot = buildTraySnapshot([mergedProject], ANTHROPIC_PRICING)
+
+    expect(snapshot.today.projectCount).toBe(1)
+    // Tokens were already correct before this fix — summing, unlike
+    // counting distinct ids, is naturally immune to which id a session
+    // carries.
+    expect(snapshot.today.tokenCount).toBe(3300)
+  })
+
   it('reports zeroes, not undefined or NaN, on a quiet day with no activity today', () => {
     const quietSession = session('quiet-1', 'quiet', [
       day({ day: THREE_DAYS_AGO_KEY, inputTokens: 10, outputTokens: 5, estimatedCost: 1 }),
