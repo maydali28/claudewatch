@@ -93,6 +93,7 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
+    turnOpen: false,
     serviceTiers: [],
     ...overrides,
   }
@@ -557,14 +558,18 @@ describe('ScanCache — replay does not drop a patch its own scan still cannot p
 
     // The in-flight scan resolves with a result from BEFORE the new project
     // was discovered — replaying the patch onto it still can't place it.
+    // Queue the next scan's result first: an unplaceable mid-scan patch
+    // chains one follow-up scan behind the running one (see
+    // `patchSessionSummary`), and that follow-up is what consumes it.
+    const scan3 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan3.promise)
     scan2.resolve(makeScan([makeProject({ id: 'proj', sessions: [makeSummary()] })]))
     await second
 
     // Prove the patch survived (rather than being cleared alongside patches
     // that DID apply) by letting a later scan discover the project and
-    // checking the patch replays onto it instead of having vanished.
-    const scan3 = deferred<ScanProjectsResult>()
-    mockScanProjects.mockReturnValueOnce(scan3.promise)
+    // checking the patch replays onto it instead of having vanished. This
+    // `refresh()` joins the chained follow-up scan, which is still in flight.
     const third = cache.refresh()
     scan3.resolve(
       makeScan([
@@ -611,5 +616,68 @@ describe('ScanCache — applyPatch sort with an unparsable lastTimestamp', () =>
     // recency, so it deterministically sorts last — not wherever NaN's
     // comparison semantics happen to leave it.
     expect(sessions.map((s) => s.id)).toEqual(['newest', 'oldest', 'garbage'])
+  })
+})
+
+describe('ScanCache — a patch is readable while the scan it is buffered against is still running', () => {
+  it('get() reflects a watcher patch that landed mid-scan before that scan resolves', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject({ sessions: [makeSummary({ messageCount: 1 })] })]))
+    await first
+
+    // A rescan is in flight (the dashboard sidebar just mounted) and a live
+    // session writes. The tray refetches its snapshot on that push and must
+    // see the new summary now, not whenever the scan happens to finish.
+    const scan2 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan2.promise)
+    void cache.refresh()
+    await cache.patchSessionSummary(makeSummary({ messageCount: 2 }))
+
+    const duringScan = await cache.get()
+    expect(duringScan.projects[0].sessions[0].messageCount).toBe(2)
+
+    // And the replay onto the fresh result still holds once the scan lands.
+    scan2.resolve(makeScan([makeProject({ sessions: [makeSummary({ messageCount: 1 })] })]))
+    await cache.refresh()
+    const afterScan = await cache.get()
+    expect(afterScan.projects[0].sessions[0].messageCount).toBe(2)
+  })
+})
+
+describe('ScanCache — a mid-scan patch for a project the in-flight scan cannot place', () => {
+  it('schedules one follow-up scan after the in-flight one, so the session does not wait for an unrelated refresh', async () => {
+    const { ScanCache } = await import('./scan-cache')
+    const cache = new ScanCache()
+
+    const scan1 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan1.promise)
+    const first = cache.refresh()
+    scan1.resolve(makeScan([makeProject()]))
+    await first
+
+    // A long rescan is running; it enumerated project directories before
+    // the new worktree directory existed, so its result cannot place the
+    // patch either.
+    const scan2 = deferred<ScanProjectsResult>()
+    const scan3 = deferred<ScanProjectsResult>()
+    mockScanProjects.mockReturnValueOnce(scan2.promise).mockReturnValueOnce(scan3.promise)
+    const second = cache.refresh()
+    const fresh = makeSummary({ id: 'fresh', projectId: 'new-worktree' })
+    await cache.patchSessionSummary(fresh)
+    scan2.resolve(makeScan([makeProject()]))
+    await second
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(mockScanProjects).toHaveBeenCalledTimes(3)
+
+    scan3.resolve(makeScan([makeProject(), makeProject({ id: 'new-worktree', sessions: [] })]))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const sessions = await cache.getSessionsForProject('new-worktree')
+    expect(sessions.map((s) => s.id)).toEqual(['fresh'])
   })
 })

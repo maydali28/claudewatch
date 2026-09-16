@@ -207,7 +207,30 @@ export class ScanCache {
 
     if (this.inFlight || !this.current) {
       this.pendingPatches.set(summary.id, summary)
-      if (!this.current && !this.inFlight) await this.refresh()
+      if (!this.current) {
+        if (!this.inFlight) await this.refresh()
+        return
+      }
+      // Buffering alone made the patch invisible until the scan landed:
+      // `get()` hands out `current` untouched while a scan is running, so
+      // the tray's refetch on this very push (see `use-tray-data.ts`) read
+      // the pre-patch snapshot and showed no live session until its next
+      // poll. Apply to the published snapshot too — the buffer still
+      // replays it onto the fresh result, which is what makes the
+      // eventual swap-in revision-consistent rather than a regression.
+      if (!this.applyPatch(this.current, summary) && this.inFlight) {
+        // A project neither the snapshot nor, most likely, the running scan
+        // knows (it enumerated directories before this one existed). The
+        // replay will park the patch as unresolved, and nothing else would
+        // ever retry it — the tray's poll reads `get()`, which never scans.
+        // Chain one follow-up scan behind the running one; `refresh()`'s
+        // in-flight dedup collapses a burst of such patches onto that one
+        // scan, and the `has` check skips it if the replay placed it after all.
+        const followUp = (): void => {
+          if (this.pendingPatches.has(summary.id)) void this.refresh()
+        }
+        this.inFlight.then(followUp, followUp)
+      }
       return
     }
 
