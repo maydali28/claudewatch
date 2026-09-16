@@ -457,6 +457,15 @@ function HealthTrendChart({
 }: {
   trend: SessionHealthSummary['dailyHealthTrend']
 }): React.JSX.Element {
+  // Same reasoning as `DailyUsageChart`/`EffortOverTimeChart` (see their own
+  // comments, including why the fill clamps to today): `dailyHealthTrend` is
+  // zero-filled for every bounded preset of 2+ days (see
+  // `analytics-engine.ts`), so this branch is now reachable for `today`
+  // (always exactly 1 point — genuinely not enough for a trend, filled or
+  // not), for `all`/a span-cap-exceeded custom range, and for a custom
+  // range lying entirely after today (0 points, since there is nothing to
+  // fill) — all of which stay sparse and can still legitimately have 0 or 1
+  // point.
   if (trend.length < 2) {
     return (
       <p className="py-4 text-center text-xs text-muted-foreground">Not enough data for a trend</p>

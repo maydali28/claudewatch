@@ -15,11 +15,11 @@ import { classifyEffort, classifyError } from './parser-helpers'
  * never mistaken for continuing another response.
  *
  * Shared by every parser that groups records into responses
- * (`activity-reducer.ts` re-derives it internally for the same reason;
- * `metadata-parser.ts` and `full-parser.ts` both call this one) so the
- * grouping can't drift between them. It used to be copy-pasted into
- * `full-parser.ts` by hand, which is exactly how that parser's message count
- * silently fell out of step with the sidebar's before this module existed.
+ * (`activity-reducer.ts`, `metadata-parser.ts` and `full-parser.ts` all call
+ * this one) so the grouping can't drift between them. It used to be
+ * copy-pasted by hand into each of them, which is exactly how `full-parser.ts`'s
+ * message count silently fell out of step with the sidebar's before this
+ * module existed.
  * `||`, not `??`: an empty-string `message.id` must fall through to the uuid
  * key too, agreeing with `ledger.ts`'s `id ? id : ...`, which already treats
  * an empty string as absent.

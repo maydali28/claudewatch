@@ -1,6 +1,10 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
+import * as fs from 'fs'
+import * as os from 'os'
+import * as path from 'path'
 import type { Project } from '@shared/types/project'
 import type { SessionSummary } from '@shared/types/session'
+import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
 
 // project-scanner.ts pulls in the full session-parser → metadata-parser
 // chain, which imports '@main/lib/logger'; that module calls electron-log's
@@ -24,7 +28,31 @@ vi.mock('@main/lib/logger', () => ({
   },
 }))
 
-import { sortProjectsByLatestSession, sortSessionsByLatestTimestamp } from './project-scanner'
+// Used only by the `scanProjects — the merge is actually wired into the
+// scan` describe block below, to redirect `getClaudeDir()`
+// (`@main/lib/claude-paths.ts`'s `path.join(os.homedir(), '.claude')`) at a
+// real fixture directory instead of the real `~/.claude`. `vi.spyOn(os,
+// 'homedir')` can't do this — vitest's ESM transform makes the `os` module
+// namespace non-configurable ("Cannot redefine property: homedir") — so the
+// whole module is mocked instead, keeping every other `os` export real via
+// `importOriginal`. The mock factory is hoisted above this file's imports and
+// evaluated once, before any test runs, so the redirect target has to be a
+// mutable box (`vi.hoisted`) a test can set later rather than a plain
+// variable closed over by value.
+const fixtureHome = vi.hoisted(() => ({ path: '' }))
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof os>()
+  return { ...actual, homedir: () => fixtureHome.path }
+})
+
+import {
+  sortProjectsByLatestSession,
+  sortSessionsByLatestTimestamp,
+  mergeProjectsByResolvedPath,
+  scanProjects,
+} from './project-scanner'
+import type { ScannedProject } from './project-scanner'
+import { configureMetadataCacheDir } from './metadata-cache'
 
 function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -91,6 +119,26 @@ function makeProject(id: string, lastTimestamp: string): Project {
     localSkills: [],
     localClaudeMd: null,
   }
+}
+
+/** Like `makeProject`, but with an explicit `path` and session list — used by
+ * the `mergeProjectsByResolvedPath` tests below, where several `Project`s
+ * sharing one resolved `path` (or deliberately NOT sharing one) is the whole
+ * point. */
+function makeProjectAt(id: string, path: string, sessions: SessionSummary[]): Project {
+  return {
+    id,
+    name: id,
+    path,
+    sessions,
+    sessionCount: sessions.length,
+    localSkills: [],
+    localClaudeMd: null,
+  }
+}
+
+function scanned(project: Project, resolved: boolean): ScannedProject {
+  return { project, resolved }
 }
 
 /**
@@ -193,5 +241,301 @@ describe('sortSessionsByLatestTimestamp', () => {
     sortSessionsByLatestTimestamp(input)
 
     expect(input.map((s) => s.id)).toEqual(['a', 'b'])
+  })
+})
+
+/**
+ * A git worktree gets its own `~/.claude/projects/<encoded-cwd>` directory
+ * even though it is the same working directory as the main checkout, so
+ * `scanProjects` can see several directories that all resolved to one real
+ * `cwd` — see task-6-brief.md. `mergeProjectsByResolvedPath` collapses those
+ * into one `Project` after `getProjectDetails` has resolved each directory's
+ * real path, which is exactly where the resolved/unresolved distinction
+ * (ruling 5) is still available.
+ */
+describe('mergeProjectsByResolvedPath', () => {
+  const cwd = '/Users/mo/dash/claudewatch'
+  const main = makeProjectAt('-Users-mo-dash-claudewatch', cwd, [
+    makeSummary({ id: 'main-1', lastTimestamp: '2026-09-10T00:00:00.000Z' }),
+  ])
+  const worktreeRelease = makeProjectAt(
+    '-Users-mo-dash-claudewatch--claude-worktrees-release-automation',
+    cwd,
+    [makeSummary({ id: 'release-1', lastTimestamp: '2026-09-12T00:00:00.000Z' })]
+  )
+  const worktreeAccounting = makeProjectAt(
+    '-Users-mo-dash-claudewatch--claude-worktrees-token-accounting-redesign',
+    cwd,
+    [makeSummary({ id: 'accounting-1', lastTimestamp: '2026-09-11T00:00:00.000Z' })]
+  )
+
+  it('merges directories that resolve to the same real cwd into one project', () => {
+    const merged = mergeProjectsByResolvedPath([
+      scanned(main, true),
+      scanned(worktreeRelease, true),
+      scanned(worktreeAccounting, true),
+    ])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].path).toBe(cwd)
+  })
+
+  it('unions and re-sorts sessions from every merged directory; sessionCount matches', () => {
+    const merged = mergeProjectsByResolvedPath([
+      scanned(main, true),
+      scanned(worktreeRelease, true),
+      scanned(worktreeAccounting, true),
+    ])
+
+    expect(merged[0].sessionCount).toBe(3)
+    // Most-recent-first across the union, via the existing time-based
+    // comparator — not the order the three directories happened to arrive in.
+    expect(merged[0].sessions.map((s) => s.id)).toEqual(['release-1', 'accounting-1', 'main-1'])
+  })
+
+  it('picks the lexicographically smallest id as the deterministic survivor, regardless of input order', () => {
+    const forward = mergeProjectsByResolvedPath([
+      scanned(main, true),
+      scanned(worktreeRelease, true),
+      scanned(worktreeAccounting, true),
+    ])
+    const reversed = mergeProjectsByResolvedPath([
+      scanned(worktreeAccounting, true),
+      scanned(worktreeRelease, true),
+      scanned(main, true),
+    ])
+
+    expect(forward[0].id).toBe('-Users-mo-dash-claudewatch')
+    expect(reversed[0].id).toBe(forward[0].id)
+  })
+
+  it('keeps two different real cwds separate even when they share a trailing path segment', () => {
+    // "/a/web" and "/b/web" both display as "web" but are not the same
+    // project — merging must go by the resolved path, never the name.
+    const projectA = {
+      ...makeProjectAt('-a-web', '/a/web', [makeSummary({ id: 's-a' })]),
+      name: 'web',
+    }
+    const projectB = {
+      ...makeProjectAt('-b-web', '/b/web', [makeSummary({ id: 's-b' })]),
+      name: 'web',
+    }
+
+    const merged = mergeProjectsByResolvedPath([scanned(projectA, true), scanned(projectB, true)])
+
+    expect(merged).toHaveLength(2)
+    expect(merged.map((p) => p.id).sort()).toEqual(['-a-web', '-b-web'])
+  })
+
+  it('never merges unresolved projects with each other, even when decodeProjectId collapses them to the same fallback path', () => {
+    // Simulates decodeProjectId's lossiness: two different encoded directory
+    // names that happen to decode to the identical (wrong) path.
+    const fallbackPath = '/mohamedali/may'
+    const projectA = makeProjectAt('-mohamedali-may', fallbackPath, [makeSummary({ id: 's-a' })])
+    const projectB = makeProjectAt('-mohamedali.may', fallbackPath, [makeSummary({ id: 's-b' })])
+
+    const merged = mergeProjectsByResolvedPath([scanned(projectA, false), scanned(projectB, false)])
+
+    expect(merged).toHaveLength(2)
+    expect(merged.map((p) => p.id).sort()).toEqual(['-mohamedali-may', '-mohamedali.may'])
+  })
+
+  it('never merges a resolved project with an unresolved one even if their paths match', () => {
+    const sharedPath = '/Users/mo/dash/claudewatch'
+    const resolvedProject = makeProjectAt('-Users-mo-dash-claudewatch', sharedPath, [
+      makeSummary({ id: 's-resolved' }),
+    ])
+    const unresolvedProject = makeProjectAt('-some-other-dir', sharedPath, [
+      makeSummary({ id: 's-unresolved' }),
+    ])
+
+    const merged = mergeProjectsByResolvedPath([
+      scanned(resolvedProject, true),
+      scanned(unresolvedProject, false),
+    ])
+
+    expect(merged).toHaveLength(2)
+  })
+
+  it('unions localSkills across the merged group, deduped by skill id', () => {
+    const skillFoo = {
+      id: 'foo',
+      name: 'foo',
+      displayName: 'Foo',
+      metadata: {},
+      body: 'body-foo',
+      sizeBytes: 10,
+    }
+    const skillBar = {
+      id: 'bar',
+      name: 'bar',
+      displayName: 'Bar',
+      metadata: {},
+      body: 'body-bar',
+      sizeBytes: 10,
+    }
+    const withFoo = {
+      ...makeProjectAt('-main', cwd, [makeSummary({ id: 's1' })]),
+      localSkills: [skillFoo],
+    }
+    const withBoth = {
+      ...makeProjectAt('-worktree', cwd, [makeSummary({ id: 's2' })]),
+      localSkills: [skillFoo, skillBar],
+    }
+
+    const merged = mergeProjectsByResolvedPath([scanned(withFoo, true), scanned(withBoth, true)])
+
+    expect(merged[0].localSkills.map((s) => s.id).sort()).toEqual(['bar', 'foo'])
+  })
+
+  it('keeps the first non-null localClaudeMd in the merged group, tolerating a failed read on another member', () => {
+    const withoutClaudeMd = {
+      ...makeProjectAt('-main', cwd, [makeSummary({ id: 's1' })]),
+      localClaudeMd: null,
+    }
+    const withClaudeMd = {
+      ...makeProjectAt('-worktree', cwd, [makeSummary({ id: 's2' })]),
+      localClaudeMd: '# notes',
+    }
+
+    const merged = mergeProjectsByResolvedPath([
+      scanned(withoutClaudeMd, true),
+      scanned(withClaudeMd, true),
+    ])
+
+    expect(merged[0].localClaudeMd).toBe('# notes')
+  })
+
+  it('passes a lone project through unchanged (same reference) when nothing else shares its resolved path', () => {
+    const lone = makeProjectAt('-Users-mo-dash-claudewatch', cwd, [makeSummary({ id: 's1' })])
+
+    const merged = mergeProjectsByResolvedPath([scanned(lone, true)])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toBe(lone)
+  })
+
+  /**
+   * Fix-round-1 finding 8: the survivor id must stay stable not just across
+   * scan order but across a NEW worktree sibling appearing later — a fresh
+   * worktree whose own name happens to sort first must not steal the
+   * survivor id out from under a user who has the project selected.
+   *
+   * A Claude Code worktree's directory id is always the checkout's own id
+   * with a literal `--claude-worktrees-<name>` suffix appended (verified
+   * against this repo's real `~/.claude/projects/` entries), so it is always
+   * a strict superstring of the checkout's id — and a string that is a
+   * strict prefix of another always sorts first lexicographically,
+   * regardless of what follows the prefix. That means the checkout's id can
+   * never stop being the smallest of the group no matter how the new
+   * worktree is named, so the existing lexicographic-sort survivor rule is
+   * already stable against this — this test pins that property rather than
+   * assuming it.
+   */
+  it('a new worktree sibling never flips the survivor, whatever its own name sorts as', () => {
+    const checkout = '-Users-mo-dash-claudewatch'
+    const worktreeZ = `${checkout}--claude-worktrees-zzz-late-worktree`
+    const worktreeA = `${checkout}--claude-worktrees-aaa-earlier-sounding-worktree`
+
+    const checkoutProject = makeProjectAt(checkout, cwd, [makeSummary({ id: 's1' })])
+    const worktreeZProject = makeProjectAt(worktreeZ, cwd, [makeSummary({ id: 's2' })])
+    const worktreeAProject = makeProjectAt(worktreeA, cwd, [makeSummary({ id: 's3' })])
+
+    const beforeNewSibling = mergeProjectsByResolvedPath([
+      scanned(checkoutProject, true),
+      scanned(worktreeZProject, true),
+    ])
+    const afterNewSiblingArrives = mergeProjectsByResolvedPath([
+      scanned(checkoutProject, true),
+      scanned(worktreeZProject, true),
+      scanned(worktreeAProject, true),
+    ])
+
+    expect(beforeNewSibling[0].id).toBe(checkout)
+    expect(afterNewSiblingArrives[0].id).toBe(checkout)
+  })
+})
+
+/**
+ * Fix-round-1 finding 3: every `mergeProjectsByResolvedPath` behaviour above
+ * is fully covered in isolation, but nothing proved `scanProjects` itself
+ * actually CALLS it — silently reverting that one call site to
+ * `scanned.map((s) => s.project)` left the whole suite green. This drives
+ * the real, exported `scanProjects` end-to-end against an on-disk fixture
+ * shaped exactly like the reported defect (a main checkout plus two
+ * `.claude/worktrees/`-style directories, all three recording the same
+ * `cwd`), so a regression to the unwired call is caught here rather than
+ * only in the pure-function tests above.
+ *
+ * `os.homedir()` is redirected (not `@main/lib/claude-paths` mocked) so
+ * `getClaudeDir()`/`getProjectsDirPath()` run for real against a temp
+ * directory — this is the same `os` module `claude-paths.ts` itself imports,
+ * so the redirect is real, not a stand-in for the code under test.
+ */
+describe('scanProjects — the merge is actually wired into the scan', () => {
+  afterEach(() => {
+    fixtureHome.path = ''
+  })
+
+  it('collapses three on-disk worktree-style directories sharing one cwd into a single scanned project', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-wiring-home-'))
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-wiring-cache-'))
+
+    try {
+      fixtureHome.path = homeRoot
+      // Without this, the disk-cache's background flush (fired ~1s after
+      // setCachedSummary, well after this test's own assertions run) throws
+      // "Metadata cache directory not configured" as an unhandled error.
+      configureMetadataCacheDir(cacheDir)
+
+      const projectsDir = path.join(homeRoot, '.claude', 'projects')
+      fs.mkdirSync(projectsDir, { recursive: true })
+
+      const fixtureCwd = '/fixture/one-project'
+      const dirNames = [
+        '-fixture-one-project',
+        '-fixture-one-project--claude-worktrees-alpha',
+        '-fixture-one-project--claude-worktrees-beta',
+      ]
+      dirNames.forEach((dirName, i) => {
+        const projectDir = path.join(projectsDir, dirName)
+        fs.mkdirSync(projectDir, { recursive: true })
+        const records = [
+          {
+            type: 'user',
+            uuid: `u-${i}`,
+            cwd: fixtureCwd,
+            timestamp: `2026-09-1${i}T09:59:00.000Z`,
+            message: { role: 'user', content: 'hi' },
+          },
+          {
+            type: 'assistant',
+            uuid: `a-${i}`,
+            timestamp: `2026-09-1${i}T10:00:00.000Z`,
+            message: {
+              id: `msg-${i}`,
+              role: 'assistant',
+              model: 'claude-opus-5',
+              content: [{ type: 'text', text: 'hello' }],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 10, output_tokens: 5 },
+            },
+          },
+        ]
+        fs.writeFileSync(
+          path.join(projectDir, `session-${i}.jsonl`),
+          records.map((r) => JSON.stringify(r)).join('\n') + '\n'
+        )
+      })
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+
+      const named = projects.filter((p) => p.name === 'one-project')
+      expect(named).toHaveLength(1)
+      expect(named[0].sessionCount).toBe(3)
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
   })
 })

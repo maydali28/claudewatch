@@ -544,6 +544,39 @@ export interface SubagentTotals {
   estimatedCost: number
 }
 
+/**
+ * One response's usage as the accounting ledger settled on it after merging
+ * every snapshot Claude Code wrote for it — never a single record's raw,
+ * possibly-provisional `message.usage`.
+ *
+ * Exists because a streamed response is written as several JSONL records
+ * that carry DIFFERENT usage: a provisional snapshot (`output_tokens: 1`,
+ * no `stop_reason` yet) followed by the final record with the real count.
+ * `export-service.ts` used to read usage off whichever record happened to
+ * be first, which for a streamed response is the placeholder — see
+ * `ParsedSession.responseUsage`'s own comment for the numbers. This shape
+ * carries the number every other resolved total (`SessionMetadata.total*`,
+ * `SubagentSummary`, the analytics ledger) is already built from, so a
+ * consumer keyed on `responseId` gets the same truth rather than a fifth
+ * re-derivation of it.
+ *
+ * `cacheCreationTokens` is the EFFECTIVE write volume — `cacheWriteFlat`, or
+ * the TTL-tier sum when the tiers report more than the flat counter (see
+ * `effectiveCacheWriteTotal` in `ledger.ts`) — the same quantity `costUsd`
+ * was priced from, not the raw flat counter alone.
+ *
+ * `costUsd` is `null` exactly when the response's model could not be priced
+ * (see `ResponseEntry.costUsd`) — never coerced to `0`, which would read as
+ * a real, free response instead of an unpriced one.
+ */
+export interface ResolvedResponseUsage {
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  cacheCreationTokens: number
+  costUsd: number | null
+}
+
 export interface ParsedSession {
   id: string
   projectId: string
@@ -563,6 +596,32 @@ export interface ParsedSession {
    * to disclose that data was dropped.
    */
   diagnostics: SessionDiagnostics
+  /**
+   * Every PARENT-transcript response's merged, ledger-resolved usage, keyed
+   * by `responseId` (`message.id`, or a `uuid:` fallback — see
+   * `assistantResponseId`). Populated in `full-parser.ts` straight from the
+   * same ledger entries `SessionMetadata.total*` is summed from — never a
+   * copy re-derived from raw records.
+   *
+   * This is the fix for a real defect: `export-service.ts`'s CSV used to
+   * stamp a response's usage from whichever RECORD happened to be first, and
+   * for a streamed response the first record is a provisional snapshot
+   * (`output_tokens: 1`) while the final record — left with an EMPTY token
+   * cell, since usage is written once per response — carries the real count
+   * (`output_tokens: 100`). Measured prevalence: 5,780 of 24,661 responses
+   * carry this streamed shape. Reading the RESOLVED total here instead of
+   * the first snapshot fixes it: the ledger already merges every snapshot
+   * and keeps the largest output count (see `ResponseEntry` in `ledger.ts`).
+   *
+   * Scope: PARENT transcript only, deliberately not parent+subagent
+   * combined. A subagent's own resolved usage lives in its own transcript's
+   * parse, not here — mirroring `SessionMetadata.total*` in this same file,
+   * which (unlike `SessionSummary.total*` from `metadata-parser.ts`) is also
+   * parent-only. A consumer needing the whole session's usage must add
+   * `subagentTotals` explicitly, the same way the session details panel
+   * already does for `metadata.totalOutputTokens`.
+   */
+  responseUsage: Record<string, ResolvedResponseUsage>
 }
 
 // ─── Tool Call Entry (for Tools rail) ────────────────────────────────────────

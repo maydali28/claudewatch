@@ -36,6 +36,8 @@ import {
   toDayKeyOrUndated,
   isWithinRange,
   UNDATED_DAY,
+  zeroFillDailySeries,
+  dateKeysInRange,
 } from '@shared/utils/date-ranges'
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
@@ -121,6 +123,40 @@ function undatedActivityTotals(sessions: SessionSummary[]): {
 
 // ─── buildDailyUsage ─────────────────────────────────────────────────────────
 
+/** An idle day's row: every figure zero, nothing yet attributed to it. */
+function zeroDailyUsage(date: string): DailyUsage {
+  return {
+    id: date,
+    date,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    cacheCreation5mTokens: 0,
+    cacheCreation1hTokens: 0,
+    sessionCount: 0,
+    messageCount: 0,
+    estimatedCost: 0,
+  }
+}
+
+/**
+ * One row per day that had activity — NOT one row per day in the range. A day
+ * with no session active on it never reaches the loop below, so it never gets
+ * a `Map` entry, and simply isn't in the returned array.
+ *
+ * That is exactly the "7d shows 6 days" defect: this function's own idea of
+ * "the range" is implicit in whichever sessions happen to have activity in
+ * it, not the calendar span the caller resolved. Zero-filling in here would
+ * require this function to also know whether it may (`today`/`7d`/`30d`/
+ * custom) or may not (`all`, `new Date(0)`-bounded) synthesise empty days —
+ * `computeAnalytics` already carries that distinction as `includeUndated`, so
+ * the fill happens exactly once, there, via `zeroFillDailySeries` — see its
+ * call site below for the reasoning. `effortAnalytics.effortOverTime` is
+ * filled the same way, and `cacheAnalytics.dailyHitRatio` inherits this
+ * fixed `dailyUsage` as its own input, so every day-keyed series in this
+ * file ends up agreeing on how many days the selected range has.
+ */
 function buildDailyUsage(
   sessions: SessionSummary[],
   fromKey: string,
@@ -133,19 +169,7 @@ function buildDailyUsage(
     for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       let existing = byDate.get(d.day)
       if (!existing) {
-        existing = {
-          id: d.day,
-          date: d.day,
-          inputTokens: 0,
-          outputTokens: 0,
-          cacheReadTokens: 0,
-          cacheCreationTokens: 0,
-          cacheCreation5mTokens: 0,
-          cacheCreation1hTokens: 0,
-          sessionCount: 0,
-          messageCount: 0,
-          estimatedCost: 0,
-        }
+        existing = zeroDailyUsage(d.day)
         byDate.set(d.day, existing)
       }
       existing.inputTokens += d.inputTokens
@@ -217,6 +241,36 @@ function totalsInRange(
 // ─── buildProjectCosts ────────────────────────────────────────────────────────
 
 /**
+ * Maps a session's own id to the id of the `Project` that currently owns it,
+ * per `projects[].sessions` — which, after `project-scanner.ts`'s
+ * `mergeProjectsByResolvedPath`, can be a DIFFERENT id than the session's own
+ * physical `projectId` (a git worktree and its main checkout share one
+ * merged `Project`, but each session still carries the real on-disk
+ * directory it was parsed from — see that function's doc comment for why
+ * `SessionSummary.projectId` is never rewritten). Grouping by the session's
+ * raw `projectId` instead of this owner id split one merged project back
+ * into up to N rows keyed by physical directory, undercounting the survivor
+ * row and — worse — making the merged project vanish entirely from a date
+ * range that only covers a non-survivor directory's sessions, since no row
+ * would ever carry the survivor's id in that case.
+ *
+ * Exported so every consumer that needs "which project does this session
+ * belong to" (as opposed to "which physical directory is its transcript
+ * in", which stays `session.projectId`) builds it the same way instead of
+ * re-deriving it — `tray-snapshot.ts`'s `todaysProjectCount` and this file's
+ * own `computeLatencyAnalytics` both use it.
+ */
+export function buildSessionOwnerMap(projects: Project[]): Map<string, string> {
+  const owner = new Map<string, string>()
+  for (const project of projects) {
+    for (const session of project.sessions) {
+      owner.set(session.id, project.id)
+    }
+  }
+  return owner
+}
+
+/**
  * Per-project totals for the selected period.
  *
  * These are a breakdown of the period's total, so they must sum to it. Summing
@@ -232,23 +286,40 @@ function buildProjectCosts(
 ): ProjectCost[] {
   const byProject = new Map<string, ProjectCost>()
   const projectMap = new Map(projects.map((p) => [p.id, p]))
+  const ownerOf = buildSessionOwnerMap(projects)
 
   for (const s of sessions) {
     const days = daysInRange(s, fromKey, toKey, includeUndated)
     if (days.length === 0) continue
 
-    let existing = byProject.get(s.projectId)
+    // `ownerOf.get(s.id)` misses, and this falls back to the session's own
+    // physical `projectId`, whenever `s` isn't listed in any
+    // `projects[].sessions`. That is NOT a hypothetical: both real production
+    // callers (`analytics.handlers.ts`, `tray-snapshot.ts`) derive `sessions`
+    // as `projects.flatMap((p) => p.sessions)` so it can't happen there, but
+    // this file's own `PROJECTS` test fixture deliberately leaves
+    // `PROJECTS[0].sessions` empty and passes each test's real session
+    // objects only through the `sessions` parameter — a convention roughly
+    // 40 tests in this file rely on — so this branch is genuinely exercised,
+    // repeatedly, right now. Verified directly, not assumed: forcing this
+    // whole branch to skip the session instead of falling back breaks two of
+    // those tests (`expected 1 to be 0`); only the identifying STRING it
+    // substitutes is inconsequential to any current assertion (those tests
+    // check that costs sum correctly, not which project id backs them),
+    // which is a materially weaker claim than "unreachable."
+    const projectId = ownerOf.get(s.id) ?? s.projectId
+    let existing = byProject.get(projectId)
     if (!existing) {
       existing = {
-        id: s.projectId,
-        projectId: s.projectId,
-        projectName: projectMap.get(s.projectId)?.name ?? s.projectId,
+        id: projectId,
+        projectId,
+        projectName: projectMap.get(projectId)?.name ?? projectId,
         totalCost: 0,
         totalTokens: 0,
         sessionCount: 0,
         messageCount: 0,
       }
-      byProject.set(s.projectId, existing)
+      byProject.set(projectId, existing)
     }
     // One session counts once for the project however many days it spans.
     existing.sessionCount++
@@ -852,6 +923,7 @@ function computeDailyModelCost(
  */
 function computeLatencyAnalytics(
   sessions: SessionSummary[],
+  projects: Project[],
   fromKey: string,
   toKey: string
 ): LatencyAnalytics {
@@ -859,6 +931,13 @@ function computeLatencyAnalytics(
   const postCompactionDurations: number[] = []
   const normalDurations: number[] = []
   const slowTurnEntries: SlowTurnEntry[] = []
+  // Same fix as `buildProjectCosts`: `SlowTurnEntry.projectId` must identify
+  // the OWNING (possibly merged) project, not the turn's session's physical
+  // directory — `latency-tab.tsx` filters `slowestTurns` by
+  // `selectedProjectIds`, which are always survivor ids from the merged
+  // project list, so a physical id here would silently drop every slow turn
+  // from a merged-away directory whenever its project is selected.
+  const ownerOf = buildSessionOwnerMap(projects)
 
   for (const s of sessions) {
     for (const td of s.turnDurations ?? []) {
@@ -896,7 +975,14 @@ function computeLatencyAnalytics(
       slowTurnEntries.push({
         id: `${s.id}-${td.turnIndex}`,
         sessionId: s.id,
-        projectId: s.projectId,
+        // Falls back to the physical id when this session isn't reachable
+        // from any project in `projects` — see `buildProjectCosts`'s
+        // identical fallback for why that's not hypothetical: both real
+        // production callers avoid it, but this file's own `PROJECTS` test
+        // fixture (used below, e.g. the `slowestTurns` test) deliberately
+        // leaves `.sessions` empty, so this branch is genuinely exercised
+        // here too — only the specific string it substitutes is untested.
+        projectId: ownerOf.get(s.id) ?? s.projectId,
         sessionTitle: s.title,
         turnIndex: td.turnIndex,
         durationMs: td.durationMs,
@@ -1185,6 +1271,19 @@ function computeSessionHealthSummary(
 
 // ─── computeAnalytics (main entry point) ─────────────────────────────────────
 
+/**
+ * The most days a bounded range's day-keyed series will ever be zero-filled
+ * out to. Zero-filling exists to make a short, glanceable window (a week, a
+ * month) honest about its idle days — not to synthesise years of empty rows
+ * for a pathological custom range (2015 → today is ~4,000 days). `all` is
+ * excluded from the fill outright, for the same underlying reason, via its
+ * own check below; this cap is the same reasoning applied to a bounded
+ * range large enough to cause the identical problem `all` was excluded for.
+ * Comfortably above every built-in preset (30 days) with headroom for a
+ * future "year" view.
+ */
+const MAX_ZERO_FILL_DAYS = 366
+
 export function computeAnalytics(
   sessions: SessionSummary[],
   projects: Project[],
@@ -1205,6 +1304,32 @@ export function computeAnalytics(
   const includeUndated = dateRange === 'all'
   const filtered = filterByDateRange(sessions, from, to, includeUndated)
 
+  // ── Zero-fill gate for bounded day-keyed series ──────────────────────────
+  //
+  // `zeroFillTo` clamps only where the FILL is willing to manufacture a zero
+  // row, not what data survives: the built-in presets never resolve `to`
+  // later than today, but a custom range's `to` is user-supplied, and the
+  // date picker does not stop someone from choosing a day next year —
+  // filling out to that day would fabricate future zeros. A response
+  // genuinely dated after today (clock skew, a timezone edge) is real
+  // observed data, not a row this clamp should ever cause to disappear —
+  // `zeroFillDailySeries` only ADDS missing days up to `zeroFillTo`, it never
+  // drops an existing entry outside that bound (see its own doc comment).
+  //
+  // `shouldZeroFill` is also false for a custom range wide enough to exceed
+  // `MAX_ZERO_FILL_DAYS` — the same reasoning as `all`, applied to a bounded
+  // range large enough to cause the identical "synthesise thousands of empty
+  // rows" problem. `all`'s lower bound is `new Date(0)`, so it would always
+  // fail this same cap on its own (tens of thousands of days); the explicit
+  // `dateRange !== 'all'` check ahead of it is not there to change that
+  // outcome — it is there to short-circuit `&&` before `dateKeysInRange`
+  // materialises and dates-formats that entire multi-decade array just to
+  // measure its length, on every single `all`-scoped render.
+  const today = new Date()
+  const zeroFillTo = toDateKey(to) > toDateKey(today) ? today : to
+  const shouldZeroFill =
+    dateRange !== 'all' && dateKeysInRange(from, zeroFillTo).length <= MAX_ZERO_FILL_DAYS
+
   // Distinct sessions active in the period — not the sum of per-day counts, in
   // which a session spanning three days would appear three times.
   const totalSessions = filtered.length
@@ -1220,7 +1345,36 @@ export function computeAnalytics(
   const responsesWithoutCompletionSignal = inRange.responsesWithoutCompletionSignal
   const reducedConfidenceResponses = inRange.reducedConfidenceResponses
 
-  const dailyUsage = buildDailyUsage(filtered, fromKey, toKey, includeUndated)
+  // Zero-fill every calendar day in a BOUNDED range — `today`/`7d`/`30d`/
+  // custom — so an idle day (most visibly today, early in it) shows up as an
+  // explicit zero row instead of silently vanishing from the axis. This is
+  // the fix for "7d shows 6 days": `resolveDateRange('7d')` already resolves
+  // to exactly 7 keys, but `buildDailyUsage` only ever emits a row for a day
+  // that HAD activity (see its own doc comment).
+  //
+  // `observedDailyUsage` is already scoped to the FULL, unclamped
+  // `[fromKey, toKey]` (via `daysInRange`, using the real `toKey` — not
+  // `zeroFillTo`), so a genuinely future-dated day within the selected range
+  // is already in it before the fill ever runs. `zeroFillDailySeries` only
+  // ADDS zero rows up to `zeroFillTo`; it never drops that future day, so it
+  // survives into `dailyUsage` right where a plain sum over the series
+  // expects it — see the gate's own comment above for why the clamp cannot
+  // be allowed to silently discard observed data.
+  //
+  // `zeroFillDailySeries` never manufactures `UNDATED_DAY` itself (its fill
+  // keys come from `dateKeysInRange`, which only emits real calendar days),
+  // and `observedDailyUsage` never contains it here regardless (`includeUndated`
+  // is false for every bounded preset), so there is no `UNDATED_DAY` entry for
+  // the fill to either drop or preserve.
+  //
+  // Zero rows add nothing to any sum, and `computeCacheAnalytics`'s
+  // `dailyHitRatio` (built from this same `dailyUsage`, below) already
+  // filters out zero-denominator days, so it continues to show only days
+  // with real cache-relevant activity.
+  const observedDailyUsage = buildDailyUsage(filtered, fromKey, toKey, includeUndated)
+  const dailyUsage = shouldZeroFill
+    ? zeroFillDailySeries(observedDailyUsage, from, zeroFillTo, zeroDailyUsage)
+    : observedDailyUsage
   const projectCosts = buildProjectCosts(filtered, projects, fromKey, toKey, includeUndated)
   const modelUsage = buildModelUsage(filtered, fromKey, toKey, includeUndated)
   const cacheAnalytics = computeCacheAnalytics(
@@ -1232,19 +1386,81 @@ export function computeAnalytics(
     includeUndated
   )
   const modelEfficiency = computeModelEfficiency(filtered, fromKey, toKey, includeUndated)
+  // The rows themselves are NOT zero-filled here, unlike `dailyUsage` and
+  // `effortOverTime` below. Those are one row per day, so an idle day has
+  // one obvious zero shape. This is one row per (day, model) pair — an idle
+  // day has no "model" to hang a zero-cost row off, and inventing one (an
+  // empty model id, or reusing `'unknown'`) would inject a fabricated model
+  // into every consumer that reads this list, including the chart's own
+  // legend, on any range with even one idle day. Left as observed-(day,
+  // model)-pairs only, matching this file's other composite-keyed series
+  // (`modelUsage`).
+  //
+  // The chart still needs to agree with `dailyUsage` on how many days the
+  // range has (see `DailyModelCostChart`'s `dateKeys` prop, wired in
+  // `models-tab.tsx` from this same `dailyUsage`): the DATE axis is filled
+  // at the chart boundary, where a missing day can honestly become "no bars
+  // that day" without inventing a model to own them; the MODEL dimension is
+  // never touched.
   const dailyModelCost = computeDailyModelCost(filtered, fromKey, toKey, includeUndated)
   // No `includeUndated` here, unlike every sibling call above/below — this is
   // the one aggregate that keeps undated turns excluded even under `all`. See
   // `computeLatencyAnalytics`'s doc comment for the reasoning.
-  const latencyAnalytics = computeLatencyAnalytics(filtered, fromKey, toKey)
-  const effortAnalytics = computeEffortAnalytics(filtered, fromKey, toKey, includeUndated)
+  const latencyAnalytics = computeLatencyAnalytics(filtered, projects, fromKey, toKey)
+  const effortAnalyticsRaw = computeEffortAnalytics(filtered, fromKey, toKey, includeUndated)
+  // Same zero-fill, same gate, as `dailyUsage` above: `effortOverTime` is
+  // one row per day (a per-level distribution, not per-model), so it zero-
+  // fills cleanly the same way. `EffortOverTimeChart` defaults every level to
+  // 0 already (`d.distribution.low ?? 0`, etc.), so an all-zero distribution
+  // renders as an empty stacked bar for that day rather than no bar at all.
+  const effortAnalytics: EffortAnalytics = shouldZeroFill
+    ? {
+        ...effortAnalyticsRaw,
+        effortOverTime: zeroFillDailySeries(
+          effortAnalyticsRaw.effortOverTime,
+          from,
+          zeroFillTo,
+          (date) => ({
+            id: date,
+            date,
+            distribution: { low: 0, medium: 0, high: 0, ultrathink: 0 },
+          })
+        ),
+      }
+    : effortAnalyticsRaw
   const parallelToolAnalytics = computeParallelToolAnalytics(
     filtered,
     fromKey,
     toKey,
     includeUndated
   )
-  const sessionHealthSummary = computeSessionHealthSummary(filtered, fromKey, toKey, includeUndated)
+  const sessionHealthSummaryRaw = computeSessionHealthSummary(
+    filtered,
+    fromKey,
+    toKey,
+    includeUndated
+  )
+  // Same zero-fill, same gate, as `dailyUsage`/`effortOverTime` above.
+  // `dailyHealthTrend` is drawn as `<Line type="monotone">` in
+  // `HealthTrendChart` (insights-tab.tsx) — a line chart interpolates
+  // BETWEEN its points, so two real days three idle days apart used to draw
+  // a smooth, plausible-looking slope straight across days that had no
+  // sessions at all. That is worse than a missing bar: a missing point is
+  // visibly absent, an interpolated one looks like data. Zero-filling gives
+  // every idle day its own `{ clean: 0, flagged: 0 }` point, so the line
+  // correctly flattens to zero on those days instead of inventing a trend
+  // through them.
+  const sessionHealthSummary: SessionHealthSummary = shouldZeroFill
+    ? {
+        ...sessionHealthSummaryRaw,
+        dailyHealthTrend: zeroFillDailySeries(
+          sessionHealthSummaryRaw.dailyHealthTrend,
+          from,
+          zeroFillTo,
+          (date) => ({ date, clean: 0, flagged: 0 })
+        ),
+      }
+    : sessionHealthSummaryRaw
   const sessionRows = buildSessionPeriodRows(filtered, fromKey, toKey, includeUndated)
 
   // Reported regardless of `includeUndated`: a calendar-scoped range excludes

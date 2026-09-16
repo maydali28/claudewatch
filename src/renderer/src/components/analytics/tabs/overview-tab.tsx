@@ -272,8 +272,17 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
           {/* Same treatment as `DailyUsageChart` above: this chart sorts dates
               alphabetically and plots one axis tick per day, so the
               `(undated)` sentinel would render as a stray, out-of-order tick
-              rather than a real day. Totals elsewhere still include it. */}
-          <DailyModelCostChart data={data.dailyModelCost.filter((d) => d.date !== UNDATED_DAY)} />
+              rather than a real day. Totals elsewhere still include it.
+
+              `dateKeys` from `dailyUsage` (see `models-tab.tsx`'s identical
+              wiring): without it, this chart's date axis was only as wide as
+              the days that had model cost, while `DailyUsageChart` right
+              above it already shows every day in the range — the exact
+              "30 ticks above 2 ticks" mismatch this fixes. */}
+          <DailyModelCostChart
+            data={data.dailyModelCost.filter((d) => d.date !== UNDATED_DAY)}
+            dateKeys={data.dailyUsage.map((d) => d.date).filter((d) => d !== UNDATED_DAY)}
+          />
         </ChartCard>
       </div>
 

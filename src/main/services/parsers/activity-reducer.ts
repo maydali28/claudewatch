@@ -1,6 +1,7 @@
 import type { RawRecord } from '@shared/types/session'
 import { toDayKeyOrUndated, UNDATED_DAY } from '@shared/utils/date-ranges'
 import { isToolResultCarrierUser, isSyntheticAssistant } from './parser-helpers'
+import { assistantResponseId } from './response-observability'
 
 /**
  * Counts conversational activity once per logical message.
@@ -123,12 +124,12 @@ export function createActivityAccumulator(): ActivityAccumulator {
 
       if (raw.type !== 'assistant' || isSyntheticAssistant(raw)) return
 
-      // One response, however many content records carried it. A response with
-      // no id keys off its own record uuid rather than being dropped. `||`,
-      // not `??`: an empty-string `message.id` must fall through to the uuid
-      // key too, or every such record collapses into one response here while
-      // the ledger (which keys the same shape) still tells them apart.
-      const responseId = raw.message?.id || `uuid:${raw.uuid ?? raw.timestamp ?? ''}`
+      // One response, however many content records carried it. Shared with
+      // `metadata-parser.ts` and `full-parser.ts` via `assistantResponseId` —
+      // see that function's doc comment for why a response with no id keys
+      // off its own record uuid instead of being dropped, and why `||` (not
+      // `??`) is what keeps this in step with the ledger's own derivation.
+      const responseId = assistantResponseId(raw)
       if (seenResponses.has(responseId)) {
         // A later content-block record of an already-counted response. If it
         // was provisionally placed in the undated bucket for lack of a
