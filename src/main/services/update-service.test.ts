@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // update-service imports electron and electron-log at module load; stub both so
 // the module can be imported in a plain node environment.
@@ -6,19 +6,54 @@ vi.mock('electron', () => ({
   app: { getVersion: () => '1.2.0' },
   net: { request: () => ({ on: () => {}, setHeader: () => {}, end: () => {} }) },
 }))
+const updaterHandlers = vi.hoisted(() => new Map<string, (...args: unknown[]) => void>())
 vi.mock('electron-updater', () => ({
-  autoUpdater: { on: () => {}, setFeedURL: () => {} },
+  autoUpdater: {
+    autoDownload: true,
+    autoInstallOnAppQuit: true,
+    on: (event: string, handler: (...args: unknown[]) => void) => {
+      updaterHandlers.set(event, handler)
+    },
+    setFeedURL: vi.fn(),
+    checkForUpdates: vi.fn(),
+    downloadUpdate: vi.fn().mockResolvedValue(undefined),
+    quitAndInstall: vi.fn(),
+  },
 }))
 vi.mock('electron-log', () => ({
   default: { info: () => {}, warn: () => {}, error: () => {} },
 }))
-vi.mock('@main/window-manager', () => ({ broadcastToRenderers: () => {} }))
+const broadcast = vi.hoisted(() => vi.fn())
+vi.mock('@main/window-manager', () => ({ broadcastToRenderers: broadcast }))
+vi.mock('@main/lib/app-config', () => ({
+  AppConfig: {
+    githubReleasesUrl: 'https://github.com/maydali28/claudewatch/releases',
+    releaseServerUrl: '',
+    sentryDsn: '',
+  },
+}))
 
 // A static import is safe here: vitest hoists the `vi.mock` calls above it, so
 // the stubs are registered before the module is evaluated. Top-level `await`
 // cannot be used — this project compiles to CommonJS for the Electron main
 // process, where TypeScript rejects it.
 import { parseGithubRepo, htmlReleaseNotesToMarkdown } from './update-service'
+
+// `checkForUpdate()` branches on `process.platform`: the CI runner is Linux,
+// which takes the Hazel-polling path instead of the electron-updater path
+// these tests exercise (the Hazel path would hang forever against the bare
+// `net.request` stub above, which never fires a response/error event). Force
+// a non-Linux platform for the duration of a test, then restore it — other
+// tests in this file never depend on the real platform.
+async function withNonLinuxPlatform(run: () => Promise<void>): Promise<void> {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform')!
+  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+  try {
+    await run()
+  } finally {
+    Object.defineProperty(process, 'platform', original)
+  }
+}
 
 describe('parseGithubRepo', () => {
   // Regression guard for the 1.2.0 updater outage: the feed was pointed at the
@@ -140,5 +175,120 @@ describe('htmlReleaseNotesToMarkdown', () => {
 
   it('keeps a less-than sign that is ordinary prose', () => {
     expect(htmlReleaseNotesToMarkdown('<p>works when a &lt; b</p>')).toBe('works when a < b')
+  })
+})
+
+describe('installUpdate lifecycle', () => {
+  beforeEach(async () => {
+    vi.resetModules()
+    updaterHandlers.clear()
+    broadcast.mockClear()
+  })
+
+  it('rejects when nothing has been downloaded', async () => {
+    const svc = await import('./update-service')
+    svc.initUpdateService()
+    await expect(svc.installUpdate()).rejects.toThrow('No update has been downloaded yet')
+  })
+
+  it('moves to installing, and a second call while installing is refused', async () => {
+    const svc = await import('./update-service')
+    svc.initUpdateService()
+    updaterHandlers.get('update-downloaded')!({})
+    await svc.installUpdate()
+    expect(svc.getUpdatePhase()).toBe('installing')
+    await expect(svc.installUpdate()).rejects.toThrow('An install is already in progress')
+  })
+
+  it('an updater error during install resets to idle, forgets the download, and reports phase=install', async () => {
+    const svc = await import('./update-service')
+    svc.initUpdateService()
+    updaterHandlers.get('update-downloaded')!({})
+    await svc.installUpdate()
+    updaterHandlers.get('error')!(
+      new Error('The operation couldn’t be completed. (SQRLInstallerErrorDomain error -1.)')
+    )
+    expect(svc.getUpdatePhase()).toBe('idle')
+    expect(broadcast).toHaveBeenCalledWith(
+      'push:update-service-error',
+      expect.objectContaining({ phase: 'install' })
+    )
+    // Retry must go through download again — install alone is refused.
+    await expect(svc.installUpdate()).rejects.toThrow('No update has been downloaded yet')
+  })
+
+  it('an updater error during a real check reports phase=check and leaves the service idle', async () => {
+    await withNonLinuxPlatform(async () => {
+      const svc = await import('./update-service')
+      const { autoUpdater } = await import('electron-updater')
+      svc.initUpdateService()
+      vi.mocked(autoUpdater.checkForUpdates).mockImplementation(async () => {
+        // The phase must actually be 'checking' while the check is under
+        // way — this is what the old test (which fired the 'error' handler
+        // without ever calling checkForUpdate()) failed to exercise.
+        expect(svc.getUpdatePhase()).toBe('checking')
+        // Simulate electron-updater failing mid-check: it reports the
+        // failure through the 'error' event rather than rejecting cleanly.
+        updaterHandlers.get('error')!(new Error('net::ERR_INTERNET_DISCONNECTED'))
+        throw new Error('net::ERR_INTERNET_DISCONNECTED')
+      })
+      await expect(svc.checkForUpdate()).rejects.toThrow('net::ERR_INTERNET_DISCONNECTED')
+      expect(broadcast).toHaveBeenCalledWith(
+        'push:update-service-error',
+        expect.objectContaining({ phase: 'check' })
+      )
+      expect(svc.getUpdatePhase()).toBe('idle')
+    })
+  })
+
+  it('an updater error during a real download reports phase=download and leaves the service idle', async () => {
+    const svc = await import('./update-service')
+    const { autoUpdater } = await import('electron-updater')
+    svc.initUpdateService()
+    vi.mocked(autoUpdater.downloadUpdate).mockImplementation(async () => {
+      expect(svc.getUpdatePhase()).toBe('downloading')
+      updaterHandlers.get('error')!(new Error('net::ERR_CONNECTION_RESET'))
+      throw new Error('net::ERR_CONNECTION_RESET')
+    })
+    await expect(svc.downloadUpdate()).rejects.toThrow('net::ERR_CONNECTION_RESET')
+    expect(broadcast).toHaveBeenCalledWith(
+      'push:update-service-error',
+      expect.objectContaining({ phase: 'download' })
+    )
+    expect(svc.getUpdatePhase()).toBe('idle')
+  })
+
+  it('a successful download moves the phase to downloaded', async () => {
+    const svc = await import('./update-service')
+    const { autoUpdater } = await import('electron-updater')
+    svc.initUpdateService()
+    vi.mocked(autoUpdater.downloadUpdate).mockResolvedValue([])
+    await svc.downloadUpdate()
+    expect(svc.getUpdatePhase()).toBe('downloaded')
+  })
+
+  it('a check that runs while an install is in flight does not disturb the installing phase', async () => {
+    await withNonLinuxPlatform(async () => {
+      const svc = await import('./update-service')
+      const { autoUpdater } = await import('electron-updater')
+      svc.initUpdateService()
+      updaterHandlers.get('update-downloaded')!({})
+      await svc.installUpdate()
+      expect(svc.getUpdatePhase()).toBe('installing')
+
+      // The tray popover triggers a check regardless of what else is going
+      // on; it must not steal the phase away from the in-flight install.
+      vi.mocked(autoUpdater.checkForUpdates).mockResolvedValue(null)
+      await svc.checkForUpdate()
+      expect(svc.getUpdatePhase()).toBe('installing')
+
+      // An error arriving after that check must still be attributed to the
+      // install it actually belongs to.
+      updaterHandlers.get('error')!(new Error('SQRLInstallerErrorDomain error -1'))
+      expect(broadcast).toHaveBeenCalledWith(
+        'push:update-service-error',
+        expect.objectContaining({ phase: 'install' })
+      )
+    })
   })
 })

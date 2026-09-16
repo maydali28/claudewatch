@@ -30,7 +30,7 @@ export function registerUpdateHandlers(): void {
   // ── updates:install ────────────────────────────────────────────────────────
   ipcMain.handle(CHANNELS.UPDATES_INSTALL, async () => {
     try {
-      installUpdate()
+      await installUpdate()
       return ok(undefined)
     } catch (e) {
       captureHandlerException(e)

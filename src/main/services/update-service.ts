@@ -5,9 +5,11 @@ import { app, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import logPkg from 'electron-log'
 import semver from 'semver'
+import * as fs from 'fs'
+import * as path from 'path'
 const log = logPkg
 import { CHANNELS } from '@shared/ipc/channels'
-import type { UpdateInfo } from '@shared/types/project'
+import type { UpdateInfo, UpdatePhase, UpdateServiceError } from '@shared/types/project'
 import { broadcastToRenderers } from '@main/window-manager'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -48,6 +50,12 @@ export function parseGithubRepo(url: string): { owner: string; repo: string } | 
 let _latestInfo: UpdateInfo | null = null
 let _updateDownloaded = false
 let _autoUpdaterInitialised = false
+let _phase: UpdatePhase = 'idle'
+let _installHint: string | undefined
+
+export function getUpdatePhase(): UpdatePhase {
+  return _phase
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -178,9 +186,25 @@ export function htmlReleaseNotesToMarkdown(input: string): string {
     .trim()
 }
 
-function pushUpdateServiceError(message: string): void {
-  log.error('[UpdateService] health event:', message)
-  broadcastToRenderers(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, { message })
+function pushUpdateServiceError(error: UpdateServiceError): void {
+  log.error('[UpdateService] health event:', error)
+  broadcastToRenderers(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, error)
+}
+
+function errorForPhase(err: unknown): UpdateServiceError {
+  const message = err instanceof Error ? err.message : String(err)
+  switch (_phase) {
+    case 'installing':
+      return {
+        phase: 'install',
+        message: `The update could not be installed: ${message}`,
+        hint: _installHint,
+      }
+    case 'downloading':
+      return { phase: 'download', message: `The update could not be downloaded: ${message}` }
+    default:
+      return { phase: 'check', message: `Could not check for updates: ${message}` }
+  }
 }
 
 // ─── Linux: Hazel update check ────────────────────────────────────────────────
@@ -277,9 +301,10 @@ function initAutoUpdater(): void {
     log.warn(
       '[UpdateService] MAIN_VITE_GITHUB_RELEASES_URL is missing or not a github.com URL — auto-updater disabled'
     )
-    pushUpdateServiceError(
-      'The update source is not configured for this build. Auto-updates are disabled.'
-    )
+    pushUpdateServiceError({
+      phase: 'check',
+      message: 'The update source is not configured for this build. Auto-updates are disabled.',
+    })
     return
   }
 
@@ -310,13 +335,18 @@ function initAutoUpdater(): void {
 
   autoUpdater.on('update-downloaded', () => {
     _updateDownloaded = true
+    _phase = 'downloaded'
   })
 
   autoUpdater.on('error', (err) => {
     log.error('[UpdateService] electron-updater error:', err)
-    pushUpdateServiceError(
-      'An error occurred while checking for updates. Please try again later or visit github.com/maydali28/claudewatch/releases.'
-    )
+    const report = errorForPhase(err)
+    if (_phase === 'installing') {
+      // Ruling 1: a failed or cancelled install invalidates the staged update.
+      _updateDownloaded = false
+    }
+    _phase = 'idle'
+    pushUpdateServiceError(report)
   })
 }
 
@@ -331,6 +361,12 @@ export function initUpdateService(): void {
 }
 
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
+  // The tray popover runs a check every time it opens. If a download or an
+  // install is already under way, do not steal the phase out from under it —
+  // an 'error' event mid-check must still be attributed to that download/
+  // install, not reported as a plain check failure.
+  const trackPhase = _phase !== 'downloading' && _phase !== 'installing'
+  if (trackPhase) _phase = 'checking'
   try {
     // Linux still polls Hazel directly for the latest version — the deb/rpm
     // packages aren't served through electron-updater's generic feed.
@@ -384,16 +420,43 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   } catch (e) {
     log.error('[UpdateService] checkForUpdate error:', e)
     throw e
+  } finally {
+    // Only clear the phase this call set — an 'error' event handled during
+    // the check (or a download/install this check deliberately left alone)
+    // may already have moved it on.
+    if (_phase === 'checking') _phase = 'idle'
   }
 }
 
 export async function downloadUpdate(): Promise<void> {
-  await autoUpdater.downloadUpdate()
+  _phase = 'downloading'
+  try {
+    await autoUpdater.downloadUpdate()
+    if (_phase === 'downloading') _phase = 'downloaded'
+  } catch (e) {
+    if (_phase === 'downloading') _phase = 'idle'
+    throw e
+  }
 }
 
-export function installUpdate(): void {
-  if (!_updateDownloaded) {
-    throw new Error('No update has been downloaded yet')
-  }
+export async function installUpdate(): Promise<void> {
+  if (_phase === 'installing') throw new Error('An install is already in progress')
+  if (!_updateDownloaded) throw new Error('No update has been downloaded yet')
+  _installHint = await bundleWritabilityHint()
+  _phase = 'installing'
   autoUpdater.quitAndInstall(false, true)
+}
+
+/** macOS only: ShipIt asks for a password when the current user cannot write the bundle. */
+async function bundleWritabilityHint(): Promise<string | undefined> {
+  if (process.platform !== 'darwin') return undefined
+  // <App>.app/Contents/MacOS/ClaudeWatch → <App>.app
+  const bundle = path.resolve(process.execPath, '..', '..', '..')
+  try {
+    await fs.promises.access(bundle, fs.constants.W_OK)
+    return undefined
+  } catch {
+    log.warn('[UpdateService] app bundle is not writable by the current user:', bundle)
+    return `macOS asked for a password because ${bundle} is not writable by your user. Fix it once with: sudo chown -R "$(id -un)" "${bundle}"`
+  }
 }
