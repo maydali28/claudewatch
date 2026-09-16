@@ -74,6 +74,7 @@ function makeSession(over: Partial<ParsedSession> = {}): ParsedSession {
     isSubagent: false,
     subagentTotals: { inputTokens: 0, outputTokens: 0, messageCount: 0, estimatedCost: 0 },
     diagnostics: diagnostics(),
+    responseUsage: {},
     ...over,
   }
 }
@@ -474,6 +475,397 @@ describe('CSV export — response usage is written once per response, not once p
     expect(new Set(body.map((r) => cell(r, header, 'response_id'))).size).toBe(1)
     expect(cell(body[1], header, 'inputTokens')).toBe('')
     expect(cell(body[1], header, 'outputTokens')).toBe('')
+  })
+})
+
+// ─── Task 1: CSV exports the ledger's RESOLVED usage, not a snapshot ───────
+//
+// Claude Code writes one API response as several JSONL records. For a
+// STREAMED response those records carry DIFFERENT usage: a provisional
+// snapshot (`output_tokens: 1`, no `stop_reason` yet) followed by the final
+// record with the real count (`output_tokens: 100`). The ledger already
+// merges these and settles on 100 (see `ledger.ts`'s "Merge, rather than
+// pick" comment) — but `export-service.ts` used to stamp a response's row
+// with whichever RECORD happened to be first, which for this shape is the
+// placeholder, leaving the row that actually held the truth blank. Measured
+// prevalence: 5,780 of 24,661 responses carry this streamed shape.
+//
+// Every fixture below goes through a real `parseSessionFull` parse — a
+// hand-built `ParsedSession` literal would pass unchanged whether or not the
+// parser and exporter actually resolve anything, since a literal's
+// `responseUsage` is just whatever the test typed in.
+
+/** A response with two snapshots: a provisional one, then the final one with the real count. */
+function assistantStreamedSnapshot(
+  uuid: string,
+  outputTokens: number,
+  stopReason: string | null
+): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id: 'msg_streamed',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      stop_reason: stopReason,
+      content: [{ type: 'text', text: 'partial' }],
+      usage: { input_tokens: 10, output_tokens: outputTokens, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+/** A response whose only record carries no text/thinking/tool_use block — ruling 3's repro. */
+function assistantNoExportableBlock(uuid: string): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id: 'msg_no_content',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      stop_reason: 'end_turn',
+      content: [],
+      usage: { input_tokens: 10, output_tokens: 50, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+/** Writes a subagent transcript beside a parent session file already created by `writeSession()`. */
+function writeSubagent(sessionName: string, agentId: string, records: unknown[]): void {
+  const subDir = path.join(dir, sessionName, 'subagents')
+  fs.mkdirSync(subDir, { recursive: true })
+  fs.writeFileSync(
+    path.join(subDir, `agent-${agentId}.jsonl`),
+    records.map((r) => JSON.stringify(r)).join('\n') + '\n'
+  )
+}
+
+/** A subagent response with a large, distinctive usage — must never leak into the parent's CSV. */
+function assistantSubagentUsage(uuid: string): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id: 'msg_subagent',
+      role: 'assistant',
+      model: 'claude-opus-5',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'subagent work' }],
+      usage: { input_tokens: 99999, output_tokens: 88888, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+function tokenColumnSum(csv: string, columnName: string): number {
+  const rows = csv.split('\n').filter((l) => l && !l.startsWith('#'))
+  const header = rows[0].split(',')
+  return sumColumn(rows.slice(1), header, columnName)
+}
+
+describe('CSV export — response usage is the ledger-resolved total, not the first snapshot', () => {
+  it('csv output column sums to the resolved response total, not the first snapshot', async () => {
+    const file = writeSession('streamed-response', [
+      USER_RECORD,
+      assistantStreamedSnapshot('a1', 1, null),
+      assistantStreamedSnapshot('a2', 100, 'end_turn'),
+    ])
+    const session = await parseSessionFull(file, 'streamed-response', 'proj', ANTHROPIC_PRICING)
+
+    expect(session.responseUsage['msg_streamed']?.outputTokens).toBe(100)
+    expect(tokenColumnSum(exportAsCsv(session), 'outputTokens')).toBe(100)
+  })
+
+  it('a response whose records carry no exportable block still contributes its usage', async () => {
+    const file = writeSession('no-exportable-block', [USER_RECORD, assistantNoExportableBlock('a')])
+    const session = await parseSessionFull(file, 'no-exportable-block', 'proj', ANTHROPIC_PRICING)
+
+    // The parent-only resolved total this session's single response
+    // actually settled on — never `session.metadata.totalOutputTokens`,
+    // which (see full-parser.ts's own comment above `diagnostics`) happens
+    // to equal it here only because this fixture has no subagent; the
+    // invariant test below is the one that actually exercises that gap.
+    const expectedParentOutput = session.responseUsage['msg_no_content']?.outputTokens
+    expect(expectedParentOutput).toBe(50)
+
+    const csv = exportAsCsv(session)
+    expect(tokenColumnSum(csv, 'outputTokens')).toBe(expectedParentOutput)
+
+    const rows = csv.split('\n').filter((l) => l && !l.startsWith('#'))
+    const header = rows[0].split(',')
+    const usageRows = rows.slice(1).filter((r) => cell(r, header, 'type') === 'usage')
+    expect(usageRows).toHaveLength(1)
+    expect(cell(usageRows[0], header, 'text')).toBe('')
+    expect(cell(usageRows[0], header, 'response_id')).toBe('msg_no_content')
+  })
+
+  it('still emits usage exactly once per response when two blocks share identical usage', async () => {
+    const file = writeSession('two-blocks-regression', [
+      USER_RECORD,
+      assistantTwoBlocksOneRecord('a'),
+    ])
+    const session = await parseSessionFull(file, 'two-blocks-regression', 'proj', ANTHROPIC_PRICING)
+
+    expect(tokenColumnSum(exportAsCsv(session), 'inputTokens')).toBe(10)
+    expect(tokenColumnSum(exportAsCsv(session), 'outputTokens')).toBe(20)
+  })
+
+  /**
+   * The single most valuable test here: for a fixture with SEVERAL
+   * responses (a streamed one, a two-block one, and a no-exportable-block
+   * one) plus a SUBAGENT transcript, the CSV token column sum equals the
+   * PARENT-ONLY resolved total — never the parent+subagent combined figure.
+   *
+   * The subagent is not decoration: `metadata.totalOutputTokens` and
+   * `session.responseUsage` both happen to be parent-only already in this
+   * parser (see `full-parser.ts`'s comment above its `diagnostics` build),
+   * but the CAUTION in this task's brief is to assert against the
+   * parent-only resolved total on principle, not against `metadata.total*`
+   * — so this fixture gives a subagent a LARGE, distinctive usage of its
+   * own. If the CSV (or `responseUsage`) ever leaked subagent tokens into
+   * the parent transcript's export, this test's exact-number assertions
+   * would fail loudly instead of silently passing by coincidence.
+   */
+  it('invariant: the CSV token column sum equals the parent-only resolved total across several responses', async () => {
+    const file = writeSession('multi-response-invariant', [
+      USER_RECORD,
+      assistantStreamedSnapshot('a1', 1, null),
+      assistantStreamedSnapshot('a2', 100, 'end_turn'),
+      assistantTwoBlocksOneRecord('b'),
+      assistantNoExportableBlock('c'),
+    ])
+    writeSubagent('multi-response-invariant', 'xyz', [USER_RECORD, assistantSubagentUsage('sub1')])
+    const session = await parseSessionFull(
+      file,
+      'multi-response-invariant',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    const parentOnlyOutput = Object.values(session.responseUsage).reduce(
+      (n, u) => n + u.outputTokens,
+      0
+    )
+    const parentOnlyInput = Object.values(session.responseUsage).reduce(
+      (n, u) => n + u.inputTokens,
+      0
+    )
+
+    // Sanity: the subagent really did contribute usage of its own, and it is
+    // large enough that leaking it into the parent sum would be impossible
+    // to miss.
+    expect(session.subagentTotals.outputTokens).toBeGreaterThan(0)
+
+    expect(parentOnlyOutput).toBe(100 + 20 + 50)
+    expect(parentOnlyInput).toBe(10 + 10 + 10)
+
+    const csv = exportAsCsv(session)
+    expect(tokenColumnSum(csv, 'outputTokens')).toBe(parentOnlyOutput)
+    expect(tokenColumnSum(csv, 'inputTokens')).toBe(parentOnlyInput)
+  })
+})
+
+// ─── Round 1 review, finding 1: the `cost` column was dead ─────────────────
+//
+// `ResolvedResponseUsage.costUsd` was computed and documented but nothing
+// ever wrote it into the CSV — the trailing column was hard-coded `''` on
+// every row — so a priced response and an unpriced one rendered identically
+// as an empty cell. Now that the resolved cost exists, it must be written:
+// once per response (same row as its tokens), and left EMPTY specifically
+// for `costUsd === null` so "unpriced" stays distinguishable from "priced at
+// zero" — nothing in this fixture is actually priced at exactly zero, but the
+// distinction this preserves is the same one `SessionDayModelUsage.estimatedCost`'s
+// own doc comment protects elsewhere in this codebase.
+
+/** A priced, single-block response — model resolves, so `costUsd` is a real number. */
+function assistantPriced(uuid: string, id: string): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:00:00.000Z',
+    message: {
+      id,
+      role: 'assistant',
+      model: 'claude-opus-5',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'priced' }],
+      usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+/** An unpriced response (unrecognised model) — `costUsd` must resolve to `null`. */
+function assistantUnpricedForCost(uuid: string): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp: '2026-09-10T10:01:00.000Z',
+    message: {
+      id: 'msg_unpriced_cost',
+      role: 'assistant',
+      model: 'totally-unrecognised-model-xyz',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'unpriced' }],
+      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+describe('CSV export — the cost column carries the resolved, ledger-priced cost', () => {
+  it('writes the resolved cost once per response: present when priced, empty when unpriced, blank on continuation rows', async () => {
+    const file = writeSession('cost-column', [
+      USER_RECORD,
+      assistantPriced('p1', 'msg_priced'),
+      assistantUnpricedForCost('u2'),
+      assistantTwoBlocksOneRecord('c1'),
+    ])
+    const session = await parseSessionFull(file, 'cost-column', 'proj', ANTHROPIC_PRICING)
+
+    const pricedCost = session.responseUsage['msg_priced']?.costUsd
+    expect(pricedCost).not.toBeNull()
+    expect(pricedCost as number).toBeGreaterThan(0)
+    expect(session.responseUsage['msg_unpriced_cost']?.costUsd).toBeNull()
+    const twoBlockCost = session.responseUsage['msg_two_blocks']?.costUsd
+    expect(twoBlockCost).not.toBeNull()
+
+    const csv = exportAsCsv(session)
+    const allRows = csv.split('\n').filter((l) => l && !l.startsWith('#'))
+    const header = allRows[0].split(',')
+    const body = allRows.slice(1)
+
+    const pricedRow = body.find((r) => cell(r, header, 'response_id') === 'msg_priced')
+    expect(pricedRow).toBeDefined()
+    expect(cell(pricedRow!, header, 'cost')).toBe(String(pricedCost))
+
+    // The unpriced response's cell is EMPTY, not `0` — `0` would misrepresent
+    // "not priced" as "priced at zero".
+    const unpricedRow = body.find((r) => cell(r, header, 'response_id') === 'msg_unpriced_cost')
+    expect(unpricedRow).toBeDefined()
+    expect(cell(unpricedRow!, header, 'cost')).toBe('')
+
+    // Two blocks, one response: cost on the first row, blank on the
+    // continuation row — the same once-per-response rule tokens already
+    // follow.
+    const twoBlockRows = body.filter((r) => cell(r, header, 'response_id') === 'msg_two_blocks')
+    expect(twoBlockRows).toHaveLength(2)
+    expect(cell(twoBlockRows[0], header, 'cost')).toBe(String(twoBlockCost))
+    expect(cell(twoBlockRows[1], header, 'cost')).toBe('')
+
+    // Summing the column (empty cells as 0) equals the parent-only resolved
+    // cost — the same invariant shape as the token-sum tests above, now
+    // extended to cost.
+    const costIdx = header.indexOf('cost')
+    const costColumnSum = body.reduce((n, r) => {
+      const raw = r.split(',')[costIdx]
+      return n + (raw === '' ? 0 : Number(raw))
+    }, 0)
+    const expectedParentCost = Object.values(session.responseUsage).reduce(
+      (n, u) => n + (u.costUsd ?? 0),
+      0
+    )
+    expect(costColumnSum).toBeCloseTo(expectedParentCost, 10)
+  })
+})
+
+// ─── Round 1 review, finding 2: synthetic rows broke chronological order ───
+//
+// A blockless response's synthetic `usage` row was appended after the whole
+// per-record loop, so it always landed at the end of the file regardless of
+// its own timestamp — the rest of the CSV is chronological, so a consumer
+// reading it as a transcript saw that row out of place.
+
+/** A single-block response at an explicit timestamp, for pinning row order. */
+function assistantTextAt(uuid: string, id: string, timestamp: string): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp,
+    message: {
+      id,
+      role: 'assistant',
+      model: 'claude-opus-5',
+      stop_reason: 'end_turn',
+      content: [{ type: 'text', text: 'hi' }],
+      usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+/** A blockless response (ruling 3's synthetic-row case) at an explicit timestamp. */
+function assistantBlocklessAt(
+  uuid: string,
+  id: string,
+  timestamp: string
+): Record<string, unknown> {
+  return {
+    type: 'assistant',
+    uuid,
+    timestamp,
+    message: {
+      id,
+      role: 'assistant',
+      model: 'claude-opus-5',
+      stop_reason: 'end_turn',
+      content: [],
+      usage: { input_tokens: 10, output_tokens: 50, cache_read_input_tokens: 0 },
+    },
+  }
+}
+
+describe('CSV export — synthetic rows keep chronological order', () => {
+  it('places a blockless response’s synthetic row at its own chronological position, not at the end of the file', async () => {
+    const file = writeSession('chronological-order', [
+      USER_RECORD,
+      assistantTextAt('early', 'msg_early', '2026-09-10T10:00:00.000Z'),
+      assistantBlocklessAt('mid', 'msg_mid_blockless', '2026-09-10T10:05:00.000Z'),
+      assistantTextAt('late', 'msg_late', '2026-09-10T10:10:00.000Z'),
+    ])
+    const session = await parseSessionFull(file, 'chronological-order', 'proj', ANTHROPIC_PRICING)
+
+    const csv = exportAsCsv(session)
+    const rows = csv.split('\n').filter((l) => l && !l.startsWith('#'))
+    const header = rows[0].split(',')
+    const body = rows.slice(1)
+
+    // USER_RECORD (uuid 'u1') produces its own row too, ahead of all three
+    // assistant responses — excluded here since this test is only about the
+    // relative order of the three assistant responses.
+    const assistantResponseOrder = body
+      .map((r) => cell(r, header, 'response_id'))
+      .filter((id) => id !== 'u1')
+
+    expect(assistantResponseOrder).toEqual(['msg_early', 'msg_mid_blockless', 'msg_late'])
+  })
+
+  // Final branch review, finding 2: the sort above used to compare raw
+  // timestamp text (`localeCompare`) rather than parsed instants — the exact
+  // defect class this branch family spent the rest of its commits
+  // eradicating elsewhere. It is invisible with same-offset (`Z`) fixtures
+  // like the one above, so this pins it with an offset-bearing timestamp:
+  // `10:00+02:00` names an earlier instant (08:00Z) than `09:00Z`, but as
+  // raw text `'...09:00...' < '...10:00...'` lexically, so `localeCompare`
+  // places the later response first.
+  it('orders an offset-bearing timestamp by instant, not by its raw text', async () => {
+    const file = writeSession('offset-order', [
+      USER_RECORD,
+      assistantTextAt('offset', 'msg_offset_earlier', '2026-09-15T10:00:00.000+02:00'),
+      assistantTextAt('utc', 'msg_utc_later', '2026-09-15T09:00:00.000Z'),
+    ])
+    const session = await parseSessionFull(file, 'offset-order', 'proj', ANTHROPIC_PRICING)
+
+    const csv = exportAsCsv(session)
+    const rows = csv.split('\n').filter((l) => l && !l.startsWith('#'))
+    const header = rows[0].split(',')
+    const body = rows.slice(1)
+
+    const assistantResponseOrder = body
+      .map((r) => cell(r, header, 'response_id'))
+      .filter((id) => id !== 'u1')
+
+    expect(assistantResponseOrder).toEqual(['msg_offset_earlier', 'msg_utc_later'])
   })
 })
 

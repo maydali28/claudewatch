@@ -80,5 +80,25 @@ export const SUBAGENT_PARSE_CONCURRENCY = 6
 /** A session counts as live if it was written to within this window. */
 export const ACTIVE_SESSION_MS = 60_000
 
+/**
+ * How often a surface showing a live indicator re-judges it against the
+ * clock. Shared by the dashboard row and the tray popover so both age a
+ * session out at the same moment.
+ */
+export const LIVE_REFRESH_INTERVAL_MS = 15_000
+
 /** How many finished sessions the tray lists under "Recent". */
 export const TRAY_RECENT_SESSION_COUNT = 3
+
+/**
+ * How long a session whose turn is still OPEN (a tool call waiting for its
+ * result, or a prompt the assistant has not answered yet) stays live after its
+ * last write. Claude Code writes nothing while a tool runs or a long response
+ * generates, and measured over three days of real history a session went
+ * silent mid-turn for over a minute roughly ten times per session — so the
+ * short `ACTIVE_SESSION_MS` window alone drops the live indicator while
+ * Claude is still working. Ten minutes matches the longest run a single tool
+ * call is allowed; past it an open turn is taken to be abandoned (a killed
+ * process, an interrupted prompt) rather than still running.
+ */
+export const OPEN_TURN_ACTIVE_MS = 10 * 60_000

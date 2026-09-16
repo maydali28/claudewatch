@@ -10,6 +10,8 @@ import {
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip'
 import type { SessionSummary, LintCheckId, LintSeverity } from '@shared/types'
+import { isSessionLive } from '@shared/utils/live-session'
+import { ACTIVE_SESSION_MS, LIVE_REFRESH_INTERVAL_MS } from '@shared/constants/tuning'
 import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 
 interface LintIndicatorProps {
@@ -56,13 +58,10 @@ interface SessionListItemProps {
   onClick: () => void
 }
 
-const LIVE_REFRESH_INTERVAL_MS = 15_000
-const JUST_NOW_THRESHOLD_MS = 60_000
-
 function formatShortRelativeTime(timestamp: string): string {
   if (!timestamp) return '—'
   const diffMs = Date.now() - new Date(timestamp).getTime()
-  if (diffMs < JUST_NOW_THRESHOLD_MS) return 'just now'
+  if (diffMs < ACTIVE_SESSION_MS) return 'just now'
 
   const distance = formatDistanceToNowStrict(new Date(timestamp), {
     roundingMethod: 'floor',
@@ -119,7 +118,9 @@ export default function SessionListItem({
     return () => clearInterval(id)
   }, [isLive])
 
-  const live = isLive && now - new Date(session.lastTimestamp).getTime() < JUST_NOW_THRESHOLD_MS
+  // `isLive` gates on "this window saw a push for it"; the shared rule then
+  // ages it exactly as the tray does, so the two surfaces agree.
+  const live = isLive && isSessionLive(session, now)
   const sessionTokens = session.totalInputTokens + session.totalOutputTokens
   const pct = projectTotalTokens > 0 ? Math.min(100, (sessionTokens / projectTotalTokens) * 100) : 0
 

@@ -31,6 +31,12 @@ const EFFORT_ORDER = ['low', 'medium', 'high', 'ultrathink'] as const
 // ─── Stacked effort-over-time chart ───────────────────────────────────────────
 
 function EffortOverTimeChart({ data }: { data: DailyEffort[] }): React.JSX.Element {
+  // Same reasoning as `DailyUsageChart` (see its own comment for why the
+  // fill clamps to today): `effortOverTime` is zero-filled for every bounded
+  // preset (see `analytics-engine.ts`), but `data.length === 0` is still
+  // reachable under `all` with no history, a custom range past the span
+  // cap, or a custom range lying entirely after today — all three fall back
+  // to the sparse, observed-days-only series `all` always had.
   if (data.length === 0) {
     return <p className="py-6 text-center text-xs text-muted-foreground">No daily effort data</p>
   }

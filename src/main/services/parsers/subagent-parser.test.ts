@@ -242,6 +242,57 @@ describe('parseSubagents — completeness contract', () => {
     })
   })
 
+  /**
+   * Task 2: `SubagentDiagnostics` used to have no `conflictCount` field at
+   * all, so a genuine usage conflict inside a subagent's own transcript
+   * never reached the parent's rollup — `full-parser.ts` read
+   * `usage.conflictCount` off its parent-only projection and had nothing
+   * from `childDiagnostics` to add. Two snapshots of the same response
+   * disagreeing on `input_tokens` (10 then 20) is a real conflict, not the
+   * tolerated growing-output case.
+   */
+  it('rolls up a usage conflict inside a subagent transcript', async () => {
+    const parent = path.join(dir, 'sess-conflict.jsonl')
+    fs.writeFileSync(parent, '')
+    const subdir = path.join(dir, 'sess-conflict', 'subagents')
+    fs.mkdirSync(subdir, { recursive: true })
+
+    const lines = [
+      {
+        type: 'assistant',
+        uuid: 'ca1',
+        timestamp: '2026-09-10T10:00:01.000Z',
+        message: {
+          id: 'cmsg_1',
+          model: 'claude-opus-5',
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: 'part 1' }],
+          usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
+        },
+      },
+      {
+        type: 'assistant',
+        uuid: 'ca2',
+        timestamp: '2026-09-10T10:00:02.000Z',
+        message: {
+          id: 'cmsg_1',
+          model: 'claude-opus-5',
+          stop_reason: 'end_turn',
+          content: [{ type: 'text', text: 'part 2' }],
+          usage: { input_tokens: 20, output_tokens: 5, cache_read_input_tokens: 0 },
+        },
+      },
+    ]
+    fs.writeFileSync(
+      path.join(subdir, 'agent-abc.jsonl'),
+      lines.map((l) => JSON.stringify(l)).join('\n')
+    )
+
+    const { diagnostics } = await parseSubagents(parent, 'sess-conflict', 'proj', ANTHROPIC_PRICING)
+
+    expect(diagnostics.conflictCount).toBe(1)
+  })
+
   it('zeroes the completeness fields when there is no subagents directory at all', async () => {
     const parent = path.join(dir, 'sess-no-subagents.jsonl')
     fs.writeFileSync(parent, '')
@@ -257,6 +308,7 @@ describe('parseSubagents — completeness contract', () => {
       malformedLines: 0,
       unreadableChildren: 0,
       negativeCounters: 0,
+      conflictCount: 0,
       unpricedResponses: 0,
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,

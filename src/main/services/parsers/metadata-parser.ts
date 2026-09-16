@@ -43,7 +43,7 @@ const log = createLogger('MetadataParser')
 interface MetadataAccumulator {
   // Identity
   slug: string | undefined
-  title: string
+  aiTitle: string | undefined
   cwd: string | undefined
 
   // Timestamps
@@ -80,6 +80,8 @@ interface MetadataAccumulator {
 
   // Turn tracking
   lastMessageTimestamp: string | undefined
+  /** See `SessionSummary.turnOpen`. Set by `processTurnState`. */
+  turnOpen: boolean
   turnIndex: number
   turnsSinceLastCompaction: number
 
@@ -98,10 +100,10 @@ interface MetadataAccumulator {
   pendingResponse?: PendingResponse & { toolNames: string[] }
 }
 
-function createMetadataAccumulator(sessionId: string): MetadataAccumulator {
+function createMetadataAccumulator(): MetadataAccumulator {
   return {
     slug: undefined,
-    title: sessionId,
+    aiTitle: undefined,
     cwd: undefined,
     firstTimestamp: undefined,
     lastTimestamp: undefined,
@@ -122,6 +124,7 @@ function createMetadataAccumulator(sessionId: string): MetadataAccumulator {
     effortByDay: new Map(),
     parallelByDay: new Map(),
     lastMessageTimestamp: undefined,
+    turnOpen: false,
     turnIndex: 0,
     turnsSinceLastCompaction: 0,
   }
@@ -136,6 +139,57 @@ function shouldSkipRecord(raw: RawRecord, seenUuids: Set<string>): boolean {
     seenUuids.add(raw.uuid)
   }
   return false
+}
+
+/**
+ * User records Claude Code writes that are never answered by an assistant
+ * record. Opening the turn on one would hold the session "live" for the whole
+ * `OPEN_TURN_ACTIVE_MS` cap after the user has walked away — where the plain
+ * last-write rule dropped it after `ACTIVE_SESSION_MS`. Measured over the
+ * local history: local slash commands (`/model`, `/cost`), the caveat that
+ * accompanies them, and the Esc interrupt marker. Meta records (`isMeta`) are
+ * injected context that always rides alongside a real prompt or tool_result,
+ * which is what opens the turn.
+ */
+const UNANSWERED_USER_PREFIXES = [
+  '<command-name>',
+  '<local-command-stdout>',
+  '<local-command-caveat>',
+] as const
+const INTERRUPT_PREFIX = '[Request interrupted by user'
+
+function userTurnEffect(raw: RawRecord): 'open' | 'close' | 'none' {
+  if (raw.isMeta === true) return 'none'
+  if (isToolResultCarrierUser(raw)) return 'open'
+  const text = getRawBlocks(raw)
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text ?? '')
+    .join('')
+    .trimStart()
+  // An interrupt ENDS whatever was running (a tool call, a generation), so
+  // it closes rather than merely not opening.
+  if (text.startsWith(INTERRUPT_PREFIX)) return 'close'
+  if (UNANSWERED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) return 'none'
+  return 'open'
+}
+
+/**
+ * Whether the turn is still in progress after this record. Only message
+ * records move it — the queue, attachment and prompt-history records Claude
+ * Code trails a response with say nothing about the turn. A user record
+ * (a prompt, or a tool_result the assistant has yet to react to) opens it,
+ * except the never-answered kinds `userTurnEffect` sets aside; a synthetic
+ * assistant record (an API error, "no response requested") ends it. A real
+ * assistant record is judged in `processAssistantRecord`, off the response's
+ * MERGED `stop_reason`, so the two never read the field by different rules.
+ */
+function processTurnState(raw: RawRecord, acc: MetadataAccumulator): void {
+  if (raw.type === 'user') {
+    const effect = userTurnEffect(raw)
+    if (effect !== 'none') acc.turnOpen = effect === 'open'
+  } else if (raw.type === 'assistant' && isSyntheticAssistant(raw)) {
+    acc.turnOpen = false
+  }
 }
 
 function processTimestamps(raw: RawRecord, acc: MetadataAccumulator): void {
@@ -318,6 +372,11 @@ function processAssistantRecord(
   }
 
   const pending = acc.pendingResponse
+  // Off the merged value, not this record's own field: a later record of the
+  // same response may omit `stop_reason` without un-finishing the response.
+  // Open while a `tool_use` result is still owed, or while nothing has
+  // reported a stop reason yet (still streaming).
+  acc.turnOpen = !pending.stopReason || pending.stopReason === 'tool_use'
   let hasToolError = false
 
   for (const block of blocks) {
@@ -432,9 +491,12 @@ function buildSessionSummary(
     projectId,
     projectPath: acc.cwd ?? decodeProjectId(projectId),
     slug: acc.slug,
-    title: acc.title,
+    // Display name precedence: Claude's generated name, then the slug (only
+    // written by older Claude Code versions), then the bare session id.
+    title: acc.aiTitle ?? acc.slug ?? sessionId,
     firstTimestamp: acc.firstTimestamp ?? '',
     lastTimestamp: acc.lastTimestamp ?? '',
+    turnOpen: acc.turnOpen,
     messageCount: activity.total,
     parentMessageCount: activity.total,
     latestModel: usage.latestParentModel,
@@ -563,7 +625,7 @@ export async function parseSessionMetadata(
   pricingTable: Record<ModelFamily, ModelPricing>
 ): Promise<SessionSummary> {
   const seenUuids = new Set<string>()
-  const acc = createMetadataAccumulator(sessionId)
+  const acc = createMetadataAccumulator()
   // Usage is accounted by the ledger, from this same pass. The accumulator
   // below collects only the non-usage metadata (timings, tool calls,
   // compaction, errors) that the ledger does not describe.
@@ -597,9 +659,11 @@ export async function parseSessionMetadata(
 
     if (shouldSkipRecord(raw, seenUuids)) continue
 
-    if (raw.slug && !acc.slug) {
-      acc.slug = raw.slug
-      acc.title = raw.slug
+    if (raw.slug && !acc.slug) acc.slug = raw.slug
+    if (raw.type === 'ai-title') {
+      const title = raw.aiTitle?.trim()
+      if (title) acc.aiTitle = title
+      continue
     }
 
     if (raw.cwd && !acc.cwd) {
@@ -607,6 +671,7 @@ export async function parseSessionMetadata(
     }
 
     processTimestamps(raw, acc)
+    processTurnState(raw, acc)
 
     const responseId =
       raw.type === 'assistant' && !isSyntheticAssistant(raw) ? assistantResponseId(raw) : undefined

@@ -122,9 +122,22 @@ interface CacheFile {
 // affected; a developer who ran a build mid-branch holds a v9 cache that is
 // never invalidated, and re-parsing is the documented recovery.
 //
+// v10: `SessionSummary` gained the required `turnOpen`. A v9 entry served
+// under the v10 contract would carry it as `undefined` — read as "closed" by
+// `isSessionLive` — so the live indicator would silently keep the pre-v10
+// behaviour for every cached session until its file happened to change.
+// Discard, so the first scan recomputes it.
+//
+// v11: `title` is now read from Claude Code's `ai-title` records. A v10
+// summary froze the slug or the bare session id as the title for every
+// session that has a generated name, and nothing about the file changes when
+// the parser learns a new record type — so a v10 entry would keep serving
+// the id-as-title until the transcript itself was next written to. Discard,
+// so the first scan re-reads every title.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 9
+const CACHE_VERSION = 11
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

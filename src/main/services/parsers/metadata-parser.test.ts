@@ -1230,3 +1230,202 @@ describe('parseSessionMetadata + computeAnalytics — a repaired response lands 
     expect(all.undatedActivity).toEqual({ messages: 0, responses: 0, includedInTotals: true })
   })
 })
+
+describe('parseSessionMetadata — turnOpen reflects whether the last turn is still in progress', () => {
+  function toolResultUser(uuid: string, ts: string): Record<string, unknown> {
+    return {
+      type: 'user',
+      uuid,
+      timestamp: ts,
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'ok' }],
+      },
+    }
+  }
+
+  it('is closed when the transcript ends with an end_turn response', async () => {
+    const file = session('turn-closed', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'end_turn' }),
+    ])
+    const s = await parseSessionMetadata(file, 'turn-closed', 'p', ANTHROPIC_PRICING)
+    expect(s.turnOpen).toBe(false)
+  })
+
+  it('is open while a tool call is still waiting for its result', async () => {
+    const file = session('turn-tool', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'tool_use' }),
+    ])
+    const s = await parseSessionMetadata(file, 'turn-tool', 'p', ANTHROPIC_PRICING)
+    expect(s.turnOpen).toBe(true)
+  })
+
+  it('is open while the assistant has not yet answered the latest user record', async () => {
+    const prompt = session('turn-prompt', [
+      assistant({ uuid: 'a0', id: 'msg_0', stopReason: 'end_turn' }),
+      user('u1', '2026-09-10T10:01:00.000Z'),
+    ])
+    expect(
+      (await parseSessionMetadata(prompt, 'turn-prompt', 'p', ANTHROPIC_PRICING)).turnOpen
+    ).toBe(true)
+
+    const result = session('turn-result', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'tool_use' }),
+      toolResultUser('u2', '2026-09-10T10:01:00.000Z'),
+    ])
+    expect(
+      (await parseSessionMetadata(result, 'turn-result', 'p', ANTHROPIC_PRICING)).turnOpen
+    ).toBe(true)
+  })
+
+  it('ignores non-message records that trail the final response', async () => {
+    const file = session('turn-trailing', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'end_turn' }),
+      { type: 'queue-operation', operation: 'dequeue', timestamp: '2026-09-10T10:02:00.000Z' },
+      { type: 'attachment', uuid: 'att1', timestamp: '2026-09-10T10:02:01.000Z' },
+    ])
+    const s = await parseSessionMetadata(file, 'turn-trailing', 'p', ANTHROPIC_PRICING)
+    expect(s.turnOpen).toBe(false)
+  })
+
+  it('keeps the stop_reason an earlier record of the same response already reported', async () => {
+    // Claude Code can write a response as several records; `processAssistantRecord`
+    // keeps a stop_reason once seen even when a later record of the same
+    // response omits it. The turn state must follow that same merge, or a
+    // finished response reads as still streaming for the whole open-turn cap.
+    const file = session('turn-merged', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'end_turn' }),
+      assistant({ uuid: 'a2', id: 'msg_1' }),
+    ])
+    const s = await parseSessionMetadata(file, 'turn-merged', 'p', ANTHROPIC_PRICING)
+    expect(s.turnOpen).toBe(false)
+  })
+
+  it('is closed by an interrupt marker, which never gets a reply', async () => {
+    const file = session('turn-interrupt', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'tool_use' }),
+      {
+        type: 'user',
+        uuid: 'u2',
+        timestamp: '2026-09-10T10:01:00.000Z',
+        message: {
+          role: 'user',
+          content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }],
+        },
+      },
+    ])
+    const s = await parseSessionMetadata(file, 'turn-interrupt', 'p', ANTHROPIC_PRICING)
+    expect(s.turnOpen).toBe(false)
+  })
+
+  it('is not opened by a local slash command or a meta record, which Claude never answers', async () => {
+    const closedThenCommand = session('turn-command', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'end_turn' }),
+      {
+        type: 'user',
+        uuid: 'u2',
+        timestamp: '2026-09-10T10:01:00.000Z',
+        message: { role: 'user', content: '<command-name>/cost</command-name>' },
+      },
+      {
+        type: 'user',
+        uuid: 'u3',
+        timestamp: '2026-09-10T10:01:01.000Z',
+        message: {
+          role: 'user',
+          content: '<local-command-stdout>Total cost: $1</local-command-stdout>',
+        },
+      },
+      {
+        type: 'user',
+        uuid: 'u4',
+        isMeta: true,
+        timestamp: '2026-09-10T10:01:02.000Z',
+        message: { role: 'user', content: [{ type: 'text', text: 'Caveat: injected context' }] },
+      },
+    ])
+    const s = await parseSessionMetadata(closedThenCommand, 'turn-command', 'p', ANTHROPIC_PRICING)
+    expect(s.turnOpen).toBe(false)
+  })
+
+  it('is closed on an empty transcript', async () => {
+    const file = session('turn-empty', [])
+    const s = await parseSessionMetadata(file, 'turn-empty', 'p', ANTHROPIC_PRICING)
+    expect(s.turnOpen).toBe(false)
+  })
+})
+
+describe('parseSessionMetadata — session title', () => {
+  const aiTitle = (title: string): Record<string, unknown> => ({
+    type: 'ai-title',
+    sessionId: 'titled',
+    aiTitle: title,
+  })
+
+  it('uses the Claude-generated ai-title as the title', async () => {
+    const file = session('titled', [
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1' }),
+      aiTitle('Sentry errors in the dashboard'),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('Sentry errors in the dashboard')
+  })
+
+  it('prefers the ai-title over the slug when both are present', async () => {
+    const file = session('titled', [
+      { ...user('u1'), slug: 'fluffy-wandering-panda' },
+      aiTitle('Sentry errors in the dashboard'),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('Sentry errors in the dashboard')
+    expect(summary.slug).toBe('fluffy-wandering-panda')
+  })
+
+  it('keeps the latest ai-title when the record is re-emitted with new text', async () => {
+    const file = session('titled', [
+      user('u1'),
+      aiTitle('First title'),
+      assistant({ uuid: 'a', id: 'msg_1' }),
+      aiTitle('Second title'),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('Second title')
+  })
+
+  it('falls back to the slug, then the session id, when there is no ai-title', async () => {
+    const slugged = session('titled', [{ ...user('u1'), slug: 'fluffy-wandering-panda' }])
+    const bare = session('untitled', [user('u1')])
+
+    expect((await parseSessionMetadata(slugged, 'titled', 'proj', ANTHROPIC_PRICING)).title).toBe(
+      'fluffy-wandering-panda'
+    )
+    expect((await parseSessionMetadata(bare, 'untitled', 'proj', ANTHROPIC_PRICING)).title).toBe(
+      'untitled'
+    )
+  })
+
+  it('ignores an ai-title record with blank text', async () => {
+    const file = session('titled', [
+      { ...user('u1'), slug: 'fluffy-wandering-panda' },
+      aiTitle('   '),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('fluffy-wandering-panda')
+  })
+})

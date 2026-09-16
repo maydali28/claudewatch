@@ -11,6 +11,7 @@ import type {
   ParallelToolGroup,
   SessionErrorDetail,
   EffortDistribution,
+  ResolvedResponseUsage,
 } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { ERROR_SNIPPET_MAX_CHARS } from '@shared/constants/tuning'
@@ -22,7 +23,10 @@ import {
   parseTokenUsage,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
-import { createResponseAccumulator } from '@main/services/accounting/ledger'
+import {
+  createResponseAccumulator,
+  effectiveCacheWriteTotal,
+} from '@main/services/accounting/ledger'
 import { projectUsage } from '@main/services/accounting/projection'
 import { createActivityAccumulator } from './activity-reducer'
 import {
@@ -419,20 +423,49 @@ export async function parseSessionFull(
   // `childDiagnostics` explicitly, the same way `totalMalformedLines` and
   // `negativeCounters` above already are. Reading `usage.combined.*` alone
   // here would silently report only the parent's share.
-  const usage = projectUsage([...ledger.entries()])
+  const parentEntries = ledger.entries()
+  const usage = projectUsage(parentEntries)
   const totalInputTokens = usage.combined.inputTokens
   const totalOutputTokens = usage.combined.outputTokens
   const totalCacheReadTokens = usage.combined.cacheReadTokens
   const totalCacheCreationTokens = usage.combined.cacheWriteTotal
 
-  // Mirrors `metadata-parser.ts`'s `diagnostics` build — same eight counts,
-  // same rationale — so the export path and the sidebar never disagree about
-  // what this session's parse could not simply absorb.
+  // See `ParsedSession.responseUsage`'s own doc comment. Built from the same
+  // parent-only ledger entries `totalOutputTokens` etc. above are summed
+  // from — not a second, independent re-derivation from raw records — so a
+  // consumer keyed on `responseId` (the CSV export, in particular) reads the
+  // response's MERGED total rather than whichever record's snapshot happened
+  // to be written first.
+  const responseUsage: Record<string, ResolvedResponseUsage> = {}
+  for (const entry of parentEntries) {
+    responseUsage[entry.responseId] = {
+      inputTokens: entry.inputTokens,
+      outputTokens: entry.outputTokens,
+      cacheReadTokens: entry.cacheReadTokens,
+      cacheCreationTokens: effectiveCacheWriteTotal(entry),
+      costUsd: entry.costUsd,
+    }
+  }
+
+  // Mirrors `metadata-parser.ts`'s `diagnostics` build in shape — same eight
+  // counts — but not for free: metadata-parser's `usage` already projects
+  // parent+child entries together, so reading `usage.combined.*`/
+  // `usage.conflictCount` there already IS the combined total. This parser's
+  // `usage` is parent-only (see the comment above `parentEntries`), so every
+  // count that HAS a parent-side figure must be assembled by explicitly adding
+  // the matching `childDiagnostics` one. (`unreadableChildren` is the lone
+  // exception: it describes child files only, so it passes straight through
+  // with nothing to add it to.) `conflictCount` is included in that rule, even
+  // though it lives outside `usage.combined` as `UsageProjection`'s own
+  // top-level counter. That was, in fact, the one count this build used to
+  // get wrong: it read `usage.conflictCount` alone and dropped every
+  // subagent-only conflict, silently, until `SubagentDiagnostics` grew its
+  // own `conflictCount` to add here.
   const diagnostics: ParsedSession['diagnostics'] = {
     malformedLines: totalMalformedLines,
     unreadableChildren: childDiagnostics.unreadableChildren,
     negativeCounters,
-    conflictCount: usage.conflictCount,
+    conflictCount: usage.conflictCount + childDiagnostics.conflictCount,
     unpricedResponses: usage.combined.unpricedResponses + childDiagnostics.unpricedResponses,
     incompleteUsageResponses:
       usage.combined.incompleteUsageResponses + childDiagnostics.incompleteUsageResponses,
@@ -492,5 +525,6 @@ export async function parseSessionFull(
       estimatedCost: subagentEstimatedCost,
     },
     diagnostics,
+    responseUsage,
   }
 }

@@ -1,3 +1,31 @@
+## 1.5.0 (2026-09-16)
+
+> **Sessions now show their generated names, and cached session data is
+> rebuilt on first launch.** Sessions were listed by a slug or a bare id;
+> they now carry the name Claude Code generates for them, in the session
+> list, the tray, analytics and search. Reading those names re-parses every
+> cached session once, so the first start after updating takes longer than
+> usual. Conversations now open on the newest message and load older ones
+> as you scroll up, instead of opening on the first message.
+
+### Features
+
+* **sessions:** open conversations at the newest message and load older ones on scroll up
+
+### Bug Fixes
+
+* **analytics:** format token counts at billion and trillion scale
+* **analytics:** hide projects with no activity in the selected range
+* **analytics:** show every day in the selected range, including idle ones
+* **export:** count subagent usage conflicts in full-session diagnostics
+* **export:** export each response's resolved usage, not its first snapshot
+* **sessions:** keep the live indicator on while a turn is still running
+* **sessions:** show a live session whose project the dashboard has not loaded yet
+* **sessions:** show a live update to the tray while a rescan is running
+* **sessions:** show generated session names instead of slugs or ids
+* **sessions:** show one entry per project instead of one per worktree
+* **sessions:** show the generated session name in the conversation header
+* **tray:** drop finished sessions from the live list without waiting for a poll
 ## 1.4.0 (2026-09-15)
 
 > **Cache savings figures will drop, and cached session data is rebuilt on

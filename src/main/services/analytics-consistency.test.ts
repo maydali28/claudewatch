@@ -94,6 +94,7 @@ function session(
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
+    turnOpen: false,
     serviceTiers: [],
     ...extra,
   }

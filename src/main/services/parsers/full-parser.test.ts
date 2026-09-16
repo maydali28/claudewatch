@@ -149,6 +149,42 @@ function assistantNoId(uuid: string): Record<string, unknown> {
   }
 }
 
+/**
+ * Two snapshots of the same response whose `input_tokens` disagree (10 then
+ * 20) — a genuine `usageConflict`, not the tolerated growing-output case (see
+ * `ledger.test.ts`'s "does not treat a growing output count as a conflict").
+ */
+function assistantConflicting(idPrefix: string, id = 'msg_1'): Record<string, unknown>[] {
+  return [
+    {
+      type: 'assistant',
+      uuid: `${idPrefix}-a`,
+      timestamp: '2026-09-10T10:00:00.000Z',
+      message: {
+        id,
+        role: 'assistant',
+        model: 'claude-opus-5',
+        content: [{ type: 'text', text: 'hi' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0 },
+      },
+    },
+    {
+      type: 'assistant',
+      uuid: `${idPrefix}-b`,
+      timestamp: '2026-09-10T10:00:01.000Z',
+      message: {
+        id,
+        role: 'assistant',
+        model: 'claude-opus-5',
+        content: [{ type: 'text', text: 'hi again' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 20, output_tokens: 5, cache_read_input_tokens: 0 },
+      },
+    },
+  ]
+}
+
 const user = {
   type: 'user',
   uuid: 'u1',
@@ -621,5 +657,72 @@ describe('parseSessionFull — completeness contract', () => {
     )
 
     expect(diagnostics.incompleteUsageResponses).toBe(2)
+  })
+})
+
+/**
+ * Task 2: `full-parser.ts` built `usage` from parent entries alone and then
+ * read `conflictCount` straight off it — unlike the four other
+ * completeness fields just above, `conflictCount` had no `childDiagnostics`
+ * counterpart to add, because `SubagentDiagnostics` didn't carry one. A
+ * subagent-only usage conflict (this session's parent transcript is clean)
+ * therefore vanished from `full.diagnostics.conflictCount` while
+ * `metadata-parser.ts` — which projects parent and child entries together —
+ * correctly reported it. See `subagent-parser.ts`'s `SubagentDiagnostics`.
+ */
+describe('parseSessionFull — child usage conflicts', () => {
+  it('counts a usage conflict inside a subagent transcript, not just the parent', async () => {
+    const file = write('full-child-conflict', [user, assistantClean('a', 'msg_parent')])
+    writeSubagent('full-child-conflict', 'conflict', assistantConflicting('ca', 'cmsg_1'))
+
+    const full = await parseSessionFull(file, 'full-child-conflict', 'proj', ANTHROPIC_PRICING)
+    const meta = await parseSessionMetadata(file, 'full-child-conflict', 'proj', ANTHROPIC_PRICING)
+
+    expect(meta.diagnostics.conflictCount).toBe(1)
+    expect(full.diagnostics.conflictCount).toBe(1)
+  })
+})
+
+/**
+ * The parity invariant Task 2's review asked for: every field of
+ * `full.diagnostics` must equal `metadata.diagnostics` for the same session.
+ * Both are declared as the exact same `SessionDiagnostics` shape (see
+ * `session.ts`), so there is no field that should legitimately differ
+ * between them — unlike `SessionMetadata.total*`, which is deliberately
+ * parent-only scoped in the full parser and is NOT covered by this test.
+ *
+ * Iterating `Object.keys` (rather than asserting field names by hand) means
+ * a diagnostics field added in the future is covered by construction: this
+ * test fails the moment the two builds disagree on it, with no test-file
+ * edit required. It also compares the key sets themselves, so a field
+ * present on one side but not the other is caught too.
+ *
+ * The fixture includes a subagent-only usage conflict specifically because
+ * that is the exact case the original defect (this task) got wrong — a
+ * parity check built only from clean fixtures could never have caught it.
+ */
+describe('parseSessionFull / parseSessionMetadata — diagnostics parity', () => {
+  it('agrees with the metadata parser on every diagnostics field, including a child-only usage conflict', async () => {
+    const file = write('diagnostics-parity', [user, assistantClean('a', 'msg_parent')])
+    writeSubagent('diagnostics-parity', 'conflict', assistantConflicting('ca', 'cmsg_1'))
+
+    const full = await parseSessionFull(file, 'diagnostics-parity', 'proj', ANTHROPIC_PRICING)
+    const meta = await parseSessionMetadata(file, 'diagnostics-parity', 'proj', ANTHROPIC_PRICING)
+
+    const fullDiag = full.diagnostics as unknown as Record<string, number>
+    const metaDiag = meta.diagnostics as unknown as Record<string, number>
+
+    expect(Object.keys(fullDiag).sort()).toEqual(Object.keys(metaDiag).sort())
+    for (const key of Object.keys(metaDiag)) {
+      expect(
+        fullDiag[key],
+        `diagnostics.${key} should match between full and metadata parsers`
+      ).toBe(metaDiag[key])
+    }
+
+    // Sanity: this session actually exercises the field the original defect
+    // broke. Without this, the loop above could pass vacuously on an
+    // all-zero session and never have caught the bug it exists to guard.
+    expect(fullDiag.conflictCount).toBe(1)
   })
 })
