@@ -53,7 +53,8 @@ async function searchSessionFile(
 ): Promise<SessionSearchResult | null> {
   const snippets: string[] = []
   let matchCount = 0
-  let sessionTitle = sessionId
+  let slug: string | undefined
+  let aiTitle: string | undefined
 
   try {
     const rl = readline.createInterface({
@@ -65,8 +66,10 @@ async function searchSessionFile(
       if (!line.trim()) continue
       try {
         const record = JSON.parse(line)
-        if (record.slug && sessionTitle === sessionId) {
-          sessionTitle = record.slug
+        if (record.slug && !slug) slug = record.slug
+        if (record.type === 'ai-title' && typeof record.aiTitle === 'string') {
+          const title = record.aiTitle.trim()
+          if (title) aiTitle = title
         }
         const texts = extractTextsFromContent(record.message?.content)
         for (const text of texts) {
@@ -85,6 +88,8 @@ async function searchSessionFile(
   }
 
   if (matchCount === 0) return null
+  // Same precedence as `parseSessionMetadata`: generated name, slug, id.
+  const sessionTitle = aiTitle ?? slug ?? sessionId
   return { sessionId, projectId, sessionTitle, matchCount, snippets }
 }
 

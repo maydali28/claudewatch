@@ -4,6 +4,7 @@ import { cn } from '@renderer/lib/cn'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
 import { useSessionsStore } from '@renderer/store/sessions.store'
 import { formatCost, formatTokens } from '@shared/utils'
+import { isProjectVisibleInRange } from './project-visibility'
 
 export default function AnalyticsSidebar(): React.JSX.Element {
   const { selectedProjectIds, isLoading, baselineData, setProjectFilter, refresh } =
@@ -30,6 +31,17 @@ export default function AnalyticsSidebar(): React.JSX.Element {
 
   const totalTokens = baselineData?.totalTokens ?? 0
   const totalCost = baselineData?.totalCost ?? 0
+
+  // Projects with no activity at all in the selected day range are hidden —
+  // see isProjectVisibleInRange for the exact rule (activity signal,
+  // selected-project and search overrides).
+  const visibleProjects = React.useMemo(
+    () =>
+      projects.filter((p) =>
+        isProjectVisibleInRange(p, projectCostMap[p.id], selectedProjectId, search)
+      ),
+    [projects, projectCostMap, selectedProjectId, search]
+  )
 
   function handleProjectSelect(projectId: string | null): void {
     setProjectFilter(projectId ? [projectId] : [])
@@ -119,61 +131,66 @@ export default function AnalyticsSidebar(): React.JSX.Element {
         )}
 
         {/* Search no matches */}
-        {search &&
-          projects.filter((p) => p.name.toLowerCase().includes(search.toLowerCase())).length ===
-            0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-center px-3">
-              <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
-            </div>
-          )}
+        {search && projects.length > 0 && visibleProjects.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-3">
+            <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
+          </div>
+        )}
 
-        {projects
-          .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
-          .map((project) => {
-            const stats = projectCostMap[project.id]
-            const pTokens = stats?.totalTokens ?? 0
-            const pCost = stats?.totalCost ?? 0
-            const pct = totalTokens > 0 ? Math.min(100, (pTokens / totalTokens) * 100) : 0
-            const isSelected = selectedProjectId === project.id
+        {/* Projects exist, none had activity in this range (and none is searched-for or selected) */}
+        {!search && projects.length > 0 && visibleProjects.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-3">
+            <BarChart2 className="h-6 w-6 text-muted-foreground/30 mb-2" />
+            <p className="text-xs text-muted-foreground">No activity in this range</p>
+            <p className="text-[10px] text-muted-foreground/60 mt-1">Try a wider date range</p>
+          </div>
+        )}
 
-            return (
-              <button
-                key={project.id}
-                onClick={() => handleProjectSelect(project.id)}
-                className={cn(
-                  'w-full rounded-md px-2.5 py-2 text-left transition-colors',
-                  isSelected ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
-                )}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <span
-                    className={cn(
-                      'truncate text-xs font-medium',
-                      isSelected ? 'text-primary' : 'text-foreground'
-                    )}
-                    title={project.name}
-                  >
-                    {project.name}
-                  </span>
-                  <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
-                    {formatCost(pCost)}
-                  </span>
-                </div>
-                <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-                  <div
-                    className={cn(
-                      'h-full rounded-full transition-all duration-500',
-                      isSelected ? 'bg-primary' : 'bg-primary/40'
-                    )}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                <div className="mt-0.5 text-[10px] text-muted-foreground">
-                  {formatTokens(pTokens)} · {pct.toFixed(0)}% of total
-                </div>
-              </button>
-            )
-          })}
+        {visibleProjects.map((project) => {
+          const stats = projectCostMap[project.id]
+          const pTokens = stats?.totalTokens ?? 0
+          const pCost = stats?.totalCost ?? 0
+          const pct = totalTokens > 0 ? Math.min(100, (pTokens / totalTokens) * 100) : 0
+          const isSelected = selectedProjectId === project.id
+
+          return (
+            <button
+              key={project.id}
+              onClick={() => handleProjectSelect(project.id)}
+              className={cn(
+                'w-full rounded-md px-2.5 py-2 text-left transition-colors',
+                isSelected ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
+              )}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span
+                  className={cn(
+                    'truncate text-xs font-medium',
+                    isSelected ? 'text-primary' : 'text-foreground'
+                  )}
+                  title={project.name}
+                >
+                  {project.name}
+                </span>
+                <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
+                  {formatCost(pCost)}
+                </span>
+              </div>
+              <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  className={cn(
+                    'h-full rounded-full transition-all duration-500',
+                    isSelected ? 'bg-primary' : 'bg-primary/40'
+                  )}
+                  style={{ width: `${pct}%` }}
+                />
+              </div>
+              <div className="mt-0.5 text-[10px] text-muted-foreground">
+                {formatTokens(pTokens)} · {pct.toFixed(0)}% of total
+              </div>
+            </button>
+          )
+        })}
       </div>
     </div>
   )

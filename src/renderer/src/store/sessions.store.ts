@@ -99,13 +99,36 @@ interface SessionsState {
   handleSessionDeleted(payload: { sessionId: string; projectId: string }): void
 }
 
+/**
+ * Resolves a session's PHYSICAL directory id (the real
+ * `~/.claude/projects/<dir>` name — every push event and `session.projectId`
+ * carries this, never the merged survivor id, since it's what locates the
+ * transcript on disk) to the id of the `Project` that currently owns it.
+ *
+ * The main process merges a git worktree and its checkout into one `Project`
+ * (`project-scanner.ts`'s `mergeProjectsByResolvedPath`) whose own `id` is
+ * only ONE of the physical directories that feed it, so a push event for any
+ * OTHER merged-in directory needs this fallback — "does an already-known
+ * project have a session that physically lives there" — to find its home;
+ * `p.id === projectId` alone only matches the survivor's own directory.
+ * Returns undefined for a genuinely unknown project (a directory this
+ * renderer hasn't loaded sessions for at all yet), same as before this
+ * fallback existed.
+ */
+function findOwningProjectId(projects: Project[], projectId: string): string | undefined {
+  return projects.find(
+    (p) => p.id === projectId || p.sessions.some((s) => s.projectId === projectId)
+  )?.id
+}
+
 function updateProjectSessions(
   projects: Project[],
   projectId: string,
   updater: (sessions: SessionSummary[]) => SessionSummary[]
 ): Project[] {
+  const ownerId = findOwningProjectId(projects, projectId) ?? projectId
   return projects.map((p) =>
-    p.id === projectId
+    p.id === ownerId
       ? { ...p, sessions: updater(p.sessions), sessionCount: updater(p.sessions).length }
       : p
   )
@@ -260,6 +283,21 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     const activeAtEventTime = get().activeSessionId
 
     set((state) => {
+      // Same fallback `handleSessionCreated` has. An update can be the first
+      // push this renderer sees for a project (its create landed during a
+      // reload, or before this window subscribed); `updateProjectSessions`
+      // would otherwise silently map over nothing and the session — live,
+      // in the tray — never appears in the dashboard until a manual reload.
+      if (!findOwningProjectId(state.projects, summary.projectId)) {
+        // A streaming session pushes every few hundred ms; while the reload
+        // those pushes asked for is still in flight, each further push must
+        // not queue another full rescan and full-payload IPC round trip.
+        if (!state.isLoadingProjects) get().loadProjects()
+        const liveSessionIds = new Set(state.liveSessionIds)
+        liveSessionIds.add(summary.id)
+        return { liveSessionIds }
+      }
+
       const updatedProjects = updateProjectSessions(
         state.projects,
         summary.projectId,
@@ -314,9 +352,15 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
 
   handleSessionCreated(summary) {
     set((state) => {
-      const isKnownProject = state.projects.some((p) => p.id === summary.projectId)
+      // Resolved through `findOwningProjectId`, not a bare `p.id ===`
+      // check: a new session's FIRST-EVER file in an already-merged
+      // worktree directory would otherwise read as an unknown project (its
+      // physical id never equals the merged survivor's) and force a full
+      // `loadProjects()` reload for every single new session in that
+      // worktree, instead of the cheap in-place update below.
+      const ownerId = findOwningProjectId(state.projects, summary.projectId)
 
-      if (!isKnownProject) {
+      if (!ownerId) {
         get().loadProjects()
         return state
       }

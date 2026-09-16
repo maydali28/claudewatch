@@ -15,46 +15,32 @@ import {
 import { formatCost } from '@shared/utils'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import type { DailyModelCost } from '@shared/types'
+import { buildDailyModelCostSeries } from './daily-model-cost-series'
 
 interface Props {
   data: DailyModelCost[]
+  /**
+   * The full calendar range's dates (pass `AnalyticsData.dailyUsage`'s dates
+   * for a bounded range), so an idle day with zero model cost still gets a
+   * column instead of shrinking the x-axis — see `buildDailyModelCostSeries`.
+   * Omit for `all` (kept sparse, same as `dailyUsage` itself).
+   */
+  dateKeys?: string[]
 }
 
-export function DailyModelCostChart({ data }: Props): React.JSX.Element {
+export function DailyModelCostChart({ data, dateKeys }: Props): React.JSX.Element {
   if (data.length === 0) {
     return <p className="py-8 text-center text-sm text-muted-foreground">No data for this period</p>
   }
 
-  // Collect all unique dates and models
-  const dateSet = new Set<string>()
-  const modelSet = new Set<string>()
-  for (const row of data) {
-    dateSet.add(row.date)
-    modelSet.add(row.model)
-  }
-
-  const dates = Array.from(dateSet).sort()
-  const modelList = Array.from(modelSet)
-
-  // Pivot: date → { [model]: cost } — zero-fill missing model/date combos
-  const pivotMap = new Map<string, Record<string, number>>()
-  for (const date of dates) {
-    const entry: Record<string, number> = { date: date as unknown as number }
-    for (const model of modelList) entry[model] = 0
-    pivotMap.set(date, entry)
-  }
-  for (const row of data) {
-    pivotMap.get(row.date)![row.model] = row.cost
-  }
-
-  const chartData = dates.map((date) => ({ date, ...pivotMap.get(date) }))
+  const { dates, modelList, chartData } = buildDailyModelCostSeries(data, dateKeys)
 
   // Single date: horizontal bar per model (no time axis needed)
   if (dates.length === 1) {
     const bars = modelList
       .map((model) => ({
         model,
-        cost: pivotMap.get(dates[0])![model] ?? 0,
+        cost: Number(chartData[0][model] ?? 0),
         ...getModelMeta(model),
       }))
       .filter((b) => b.cost > 0)

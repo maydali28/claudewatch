@@ -1,4 +1,5 @@
 import type { SessionSummary } from '@shared/types/session'
+import type { Project } from '@shared/types/project'
 import type { ScanProjectsResult } from './accounting/worker-protocol'
 import { Preferences } from '@main/store/preferences'
 import { getActivePricingTable, pricingFingerprint } from './pricing-engine'
@@ -206,7 +207,30 @@ export class ScanCache {
 
     if (this.inFlight || !this.current) {
       this.pendingPatches.set(summary.id, summary)
-      if (!this.current && !this.inFlight) await this.refresh()
+      if (!this.current) {
+        if (!this.inFlight) await this.refresh()
+        return
+      }
+      // Buffering alone made the patch invisible until the scan landed:
+      // `get()` hands out `current` untouched while a scan is running, so
+      // the tray's refetch on this very push (see `use-tray-data.ts`) read
+      // the pre-patch snapshot and showed no live session until its next
+      // poll. Apply to the published snapshot too — the buffer still
+      // replays it onto the fresh result, which is what makes the
+      // eventual swap-in revision-consistent rather than a regression.
+      if (!this.applyPatch(this.current, summary) && this.inFlight) {
+        // A project neither the snapshot nor, most likely, the running scan
+        // knows (it enumerated directories before this one existed). The
+        // replay will park the patch as unresolved, and nothing else would
+        // ever retry it — the tray's poll reads `get()`, which never scans.
+        // Chain one follow-up scan behind the running one; `refresh()`'s
+        // in-flight dedup collapses a burst of such patches onto that one
+        // scan, and the `has` check skips it if the replay placed it after all.
+        const followUp = (): void => {
+          if (this.pendingPatches.has(summary.id)) void this.refresh()
+        }
+        this.inFlight.then(followUp, followUp)
+      }
       return
     }
 
@@ -221,13 +245,40 @@ export class ScanCache {
   }
 
   /**
+   * Finds the `Project` that owns a PHYSICAL directory id — the real
+   * `~/.claude/projects/<dir>` name carried on `SessionSummary.projectId`
+   * and every file-watcher event — as opposed to `Project.id`, which for a
+   * project merged from several worktrees
+   * (`project-scanner.ts`'s `mergeProjectsByResolvedPath`) is only ONE of
+   * the physical directories that feed it (the deterministic survivor). A
+   * watcher event for any OTHER merged-in directory still carries that
+   * directory's own physical id, so `p.id === physicalProjectId` alone
+   * misses it whenever the survivor happens to be a different directory.
+   * Falling back to "does this project already have a session that
+   * physically lives there" finds the right home without
+   * `project-scanner.ts` needing to publish a separate physical→survivor
+   * map — the merged project's own `sessions` already carry that
+   * information via each session's untouched, physical `projectId`.
+   *
+   * Returns undefined for a genuinely unknown directory (never scanned, or
+   * scanned but with no sessions of its own yet) — callers already treat
+   * that as "fall back to a full rescan" / "nothing to remove", which is
+   * correct: only a fresh scan can discover a brand-new project.
+   */
+  private findOwningProject(result: ScanResult, physicalProjectId: string): Project | undefined {
+    return result.projects.find(
+      (p) => p.id === physicalProjectId || p.sessions.some((s) => s.projectId === physicalProjectId)
+    )
+  }
+
+  /**
    * Mutates `result` in place: inserts or replaces `summary` in its
    * project's session list, keeping sort order and `sessionCount`
    * consistent. Returns false when the summary's project isn't in `result`,
    * leaving the caller to decide whether that's worth a refresh.
    */
   private applyPatch(result: ScanResult, summary: SessionSummary): boolean {
-    const project = result.projects.find((p) => p.id === summary.projectId)
+    const project = this.findOwningProject(result, summary.projectId)
     if (!project) return false
 
     const sessionIndex = project.sessions.findIndex((s) => s.id === summary.id)
@@ -252,15 +303,19 @@ export class ScanCache {
   }
 
   /**
-   * Mutates `result` in place: drops `sessionId` from `projectId`'s session
-   * list if present, keeping `sessionCount` consistent — the removal-side
-   * counterpart of `applyPatch`, used both by `removeSession`'s direct
-   * mutation and by `refresh()`'s replay of `pendingRemovals` onto a fresh
-   * scan result. A no-op if the project or session isn't there (e.g. the
-   * fresh scan already reflects the deletion on its own).
+   * Mutates `result` in place: drops `sessionId` from the project owning
+   * `projectId`'s session list if present, keeping `sessionCount`
+   * consistent — the removal-side counterpart of `applyPatch`, used both by
+   * `removeSession`'s direct mutation and by `refresh()`'s replay of
+   * `pendingRemovals` onto a fresh scan result. `projectId` is resolved
+   * through `findOwningProject` for the same reason `applyPatch` is: a
+   * removal for a merged-away worktree directory carries that directory's
+   * own physical id, not the merged survivor's. A no-op if the owning
+   * project or the session isn't there (e.g. the fresh scan already
+   * reflects the deletion on its own).
    */
   private applyRemoval(result: ScanResult, projectId: string, sessionId: string): void {
-    const project = result.projects.find((p) => p.id === projectId)
+    const project = this.findOwningProject(result, projectId)
     if (!project) return
     const index = project.sessions.findIndex((s) => s.id === sessionId)
     if (index === -1) return
@@ -300,13 +355,26 @@ export class ScanCache {
   }
 
   /**
-   * Synchronous peek at a project's currently cached sessions — unlike
-   * `getSessionsForProject`, never triggers a scan. Used when a whole
-   * project directory disappeared: a fresh scan would just re-read the
-   * (now missing) directory and find nothing left to enumerate.
+   * Synchronous peek at a PHYSICAL project directory's currently cached
+   * sessions — unlike `getSessionsForProject`, never triggers a scan. Used
+   * when a whole project directory disappeared: a fresh scan would just
+   * re-read the (now missing) directory and find nothing left to enumerate.
+   *
+   * `handleUnlinkDir` (the only caller) rebuilds each returned session's
+   * file path by joining `physicalProjectId` with the session's own id — so
+   * this must return only the sessions that actually live in THAT physical
+   * directory, not every session in whichever (possibly merged) `Project`
+   * happens to own it. Resolving the owning project via
+   * `findOwningProject` (so a deleted worktree directory is found at all
+   * even though its sessions live inside a merged project keyed by a
+   * different survivor id) and then filtering back down to that one
+   * directory's own sessions keeps both parts correct at once.
    */
-  peekProjectSessions(projectId: string): SessionSummary[] {
-    return this.current?.projects.find((p) => p.id === projectId)?.sessions ?? []
+  peekProjectSessions(physicalProjectId: string): SessionSummary[] {
+    if (!this.current) return []
+    const project = this.findOwningProject(this.current, physicalProjectId)
+    if (!project) return []
+    return project.sessions.filter((s) => s.projectId === physicalProjectId)
   }
 }
 

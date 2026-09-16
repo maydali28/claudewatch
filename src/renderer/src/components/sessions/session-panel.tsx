@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import {
   Search,
   X,
@@ -11,7 +11,7 @@ import {
   Layers,
 } from 'lucide-react'
 import { EmptyState } from '@renderer/components/shared/empty-state'
-import { windowAfterScroll, windowAfterAppend } from './render-window'
+import { windowAfterScroll, windowAfterAppend, scrollTopAfterPrepend } from './render-window'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { format } from 'date-fns'
 import { useSessionsStore } from '@renderer/store/sessions.store'
@@ -30,11 +30,11 @@ import type { LintCheckId, LintSeverity, SessionSummary } from '@shared/types'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80
 
-// Progressive rendering: render the first INITIAL_RENDER_BATCH records on
-// mount, then expand the window in INCREMENT_RENDER_BATCH chunks during idle
-// time (or when the user scrolls within RENDER_AHEAD_PX of the rendered tail)
-// until the full record set is mounted. Keeps first-paint cheap even on
-// sessions with hundreds of turns.
+// Progressive rendering, newest first: mount the last INITIAL_RENDER_BATCH
+// records, open scrolled to the bottom, and mount older records in
+// INCREMENT_RENDER_BATCH chunks as the reader scrolls within RENDER_AHEAD_PX
+// of the oldest mounted one. Keeps first-paint cheap even on sessions with
+// hundreds of turns. Rules live in `render-window.ts`.
 const INITIAL_RENDER_BATCH = 50
 const INCREMENT_RENDER_BATCH = 50
 const RENDER_AHEAD_PX = 1500
@@ -213,13 +213,28 @@ export default function SessionPanel(): React.JSX.Element {
   const detailsPanelRef = useRef<HTMLDivElement>(null)
   const isResizing = useRef(false)
   const isAtBottomRef = useRef(true)
-  // True once the last record has been mounted, which is what distinguishes
-  // "reading the live tail" from "still near the top of a long transcript".
-  const reachedEndRef = useRef(false)
-  const visibleCountRef = useRef(INITIAL_RENDER_BATCH)
   // Upper bound for the render-ahead logic in the scroll handler. Kept in a
   // ref so the handler doesn't need to close over the latest filtered length.
   const totalRecordsRef = useRef(0)
+  // Mirror of `visibleCount` for the scroll handler and the layout effect.
+  // Bumped eagerly when a grow is requested, so two scroll events arriving
+  // before the commit don't both request the same batch; resynced from state
+  // on every commit.
+  const visibleCountRef = useRef(INITIAL_RENDER_BATCH)
+  // Set when the next commit should land the reader on the newest record: a
+  // fresh session, a new search, or a live append while they were already at
+  // the bottom. Consumed by the layout effect below.
+  const scrollToEndRef = useRef(true)
+  // Scroll geometry captured just before older records are mounted above the
+  // viewport, so the layout effect can put the same record back under the
+  // reader's eye. Null when the last window change was not a prepend.
+  const pendingPrependRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null)
+  // Filtered record count from the previous commit, keyed by what it was
+  // counted for, so a live append can be told apart from a session switch or
+  // a search change (both of which reset the window instead).
+  const prevTotalRef = useRef<{ sessionId: string | null; query: string; total: number } | null>(
+    null
+  )
 
   const startResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -254,24 +269,35 @@ export default function SessionPanel(): React.JSX.Element {
     window.addEventListener('mouseup', onUp)
   }, [])
 
-  const checkIsAtBottom = useCallback(() => {
+  // Mount older records when the reader is within RENDER_AHEAD_PX of the
+  // oldest mounted one. Captures the scroll geometry first so the commit can
+  // be anchored; returns whether the window grew.
+  const growTowardTop = useCallback((el: HTMLDivElement): boolean => {
+    const current = visibleCountRef.current
+    const next = windowAfterScroll(
+      current,
+      totalRecordsRef.current,
+      el.scrollTop,
+      INCREMENT_RENDER_BATCH,
+      RENDER_AHEAD_PX
+    )
+    if (next === current) return false
+    visibleCountRef.current = next
+    // Keep the earliest geometry if a second grow is requested before the
+    // first commits: the anchor is measured against the height both add.
+    pendingPrependRef.current ??= { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight }
+    setVisibleCount(next)
+    return true
+  }, [])
+
+  const handleScroll = useCallback(() => {
     const el = scrollRef.current
     if (!el) return
     const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
     isAtBottomRef.current = distanceFromBottom <= SCROLL_BOTTOM_THRESHOLD_PX
     if (isAtBottomRef.current) setShowScrollButton(false)
-    // Grow the render window as the reader approaches the rendered tail.
-    setVisibleCount((c) =>
-      windowAfterScroll(
-        c,
-        totalRecordsRef.current,
-        distanceFromBottom,
-        INCREMENT_RENDER_BATCH,
-        RENDER_AHEAD_PX
-      )
-    )
-    if (visibleCountRef.current >= totalRecordsRef.current) reachedEndRef.current = true
-  }, [])
+    growTowardTop(el)
+  }, [growTowardTop])
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
@@ -295,64 +321,70 @@ export default function SessionPanel(): React.JSX.Element {
     setPrevSearchQuery(searchQuery)
     setVisibleCount(INITIAL_RENDER_BATCH)
   }
-  // Reset the at-bottom tracker after the session-switch render commits, so
-  // the next scroll handler treats the fresh session as starting at bottom.
-  useEffect(() => {
-    isAtBottomRef.current = true
-  }, [activeSessionId])
-
-  // Keep up with a live session for a reader who has already read to the end.
-  // The window is not expanded otherwise: mounting a whole transcript nobody
-  // scrolled through is what made long sessions expensive to open.
-  useEffect(() => {
-    if (!parsedSession) return
-    const total = parsedSession.records.length
-    if (visibleCount >= total) reachedEndRef.current = true
-    setVisibleCount((c) =>
-      windowAfterAppend(c, total, reachedEndRef.current, isAtBottomRef.current)
-    )
-  }, [parsedSession, visibleCount])
-
-  useEffect(() => {
-    visibleCountRef.current = visibleCount
-  }, [visibleCount])
-
-  // A different session, or a different search, means the reader is no longer
-  // at the end of anything they had read.
-  useEffect(() => {
-    reachedEndRef.current = false
-  }, [activeSessionId, searchQuery])
-
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus()
-  }, [searchOpen])
-
-  // Keep the render-ahead ceiling in sync with the current filtered set.
-  // Computed here (rather than at the bottom of render) so the ref write
-  // happens in an effect, not during render.
-  useEffect(() => {
-    if (!parsedSession) {
-      totalRecordsRef.current = 0
-      return
-    }
+  // Records the panel shows: the role filter, then the search filter.
+  // Memoised so the effects below can key on it.
+  const filteredRecords = React.useMemo(() => {
+    if (!parsedSession) return []
     const display = parsedSession.records.filter(
       (r) =>
         r.isCompactionBoundary || r.role === 'user' || r.role === 'assistant' || r.role === 'system'
     )
-    if (!searchQuery) {
-      totalRecordsRef.current = display.length
-      return
-    }
+    if (!searchQuery) return display
     const q = searchQuery.toLowerCase()
-    totalRecordsRef.current = display.filter((r) => {
+    return display.filter((r) => {
       if (r.isCompactionBoundary) return false
       return r.contentBlocks.some((b) => {
         if (b.type === 'text') return b.text.toLowerCase().includes(q)
         if (b.type === 'thinking') return b.thinking.toLowerCase().includes(q)
         return false
       })
-    }).length
+    })
   }, [parsedSession, searchQuery])
+  // Render-ahead ceiling for the scroll handler and the anchoring layout
+  // effect. A layout effect, declared before that one, so the first commit
+  // of a session sees its own length rather than the previous session's.
+  useLayoutEffect(() => {
+    totalRecordsRef.current = filteredRecords.length
+  }, [filteredRecords])
+  // A fresh session or a new search opens on its newest record. Keyed on the
+  // parsed session's id as well: the store can show the previous session
+  // under the new selection for a frame. Declared before the anchoring
+  // layout effect below so it runs first in the same commit (layout effects
+  // fire in declaration order).
+  useLayoutEffect(() => {
+    scrollToEndRef.current = true
+    pendingPrependRef.current = null
+  }, [parsedSession?.id, activeSessionId, searchQuery])
+  // Also a layout effect, and also declared before the anchoring one: it
+  // must see the committed count, not the previous session's.
+  useLayoutEffect(() => {
+    visibleCountRef.current = visibleCount
+  }, [visibleCount])
+  // Reset the at-bottom tracker after the session-switch render commits, so
+  // the next scroll handler treats the fresh session as starting at bottom.
+  useEffect(() => {
+    isAtBottomRef.current = true
+  }, [activeSessionId])
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus()
+  }, [searchOpen])
+
+  // Absorb live appends into the window. A refresh of the same parsed session
+  // (same id, new object) with more records is an append: grow the window by
+  // the new records so the oldest mounted one stays put, and keep a reader
+  // who was at the bottom there. A session arriving after the loading state,
+  // or a different session, is a fresh view and is reset by the layout
+  // effects above.
+  useEffect(() => {
+    const total = filteredRecords.length
+    const prev = prevTotalRef.current
+    prevTotalRef.current = { sessionId: parsedSession?.id ?? null, query: searchQuery, total }
+    if (!parsedSession || !prev) return
+    if (prev.sessionId !== parsedSession.id || prev.query !== searchQuery) return
+    setVisibleCount((c) => windowAfterAppend(c, prev.total, total))
+    if (total > prev.total && isAtBottomRef.current) scrollToEndRef.current = true
+  }, [parsedSession, filteredRecords, searchQuery])
 
   // When a watcher refresh completes, show the scroll button if the user is scrolled up
   const prevRefreshing = useRef(false)
@@ -368,6 +400,31 @@ export default function SessionPanel(): React.JSX.Element {
     scrollToBottom()
     setShowScrollButton(false)
   }, [scrollToBottom])
+
+  // Runs after every commit that can move content above the viewport. Lands a
+  // fresh view on the newest record, or puts the anchored record back after a
+  // prepend, then keeps mounting older records while the top is still within
+  // reach — a first batch shorter than the viewport can never be scrolled up
+  // to, so the fill has to be driven from here. Bounded: each pass either
+  // grows the window or stops.
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    if (!el) return
+    if (scrollToEndRef.current) {
+      scrollToEndRef.current = false
+      pendingPrependRef.current = null
+      el.scrollTop = el.scrollHeight
+      isAtBottomRef.current = true
+    } else if (pendingPrependRef.current) {
+      const { scrollTop, scrollHeight } = pendingPrependRef.current
+      pendingPrependRef.current = null
+      el.scrollTop = scrollTopAfterPrepend(scrollTop, scrollHeight, el.scrollHeight)
+    }
+    // Content shorter than the viewport has nowhere to scroll: keep it pinned
+    // to the bottom while more of the history is mounted behind it.
+    if (el.scrollHeight <= el.clientHeight) scrollToEndRef.current = true
+    if (!growTowardTop(el)) scrollToEndRef.current = false
+  })
 
   if (!activeSessionId) {
     return (
@@ -403,30 +460,13 @@ export default function SessionPanel(): React.JSX.Element {
     )
   }
 
-  const { records, toolResultMap, metadata } = parsedSession
+  const { toolResultMap, metadata } = parsedSession
 
   const turnDurationByTimestamp = new Map(
     metadata.turnDurations
       .filter((t) => t.assistantTimestamp)
       .map((t) => [t.assistantTimestamp!, t])
   )
-
-  const displayRecords = records.filter(
-    (r) =>
-      r.isCompactionBoundary || r.role === 'user' || r.role === 'assistant' || r.role === 'system'
-  )
-
-  const filteredRecords = searchQuery
-    ? displayRecords.filter((r) => {
-        if (r.isCompactionBoundary) return false
-        return r.contentBlocks.some((b) => {
-          if (b.type === 'text') return b.text.toLowerCase().includes(searchQuery.toLowerCase())
-          if (b.type === 'thinking')
-            return b.thinking.toLowerCase().includes(searchQuery.toLowerCase())
-          return false
-        })
-      })
-    : displayRecords
 
   const totalTokens = metadata.totalInputTokens + metadata.totalOutputTokens
 
@@ -439,7 +479,7 @@ export default function SessionPanel(): React.JSX.Element {
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="text-sm font-semibold truncate text-foreground">
-                {parsedSession.slug ?? parsedSession.id.slice(0, 12)}
+                {activeSessionSummary?.title ?? parsedSession.slug ?? parsedSession.id.slice(0, 12)}
               </h2>
               <div className="flex items-center gap-3 mt-0.5 text-[10px] text-muted-foreground flex-wrap">
                 {metadata.firstTimestamp && (
@@ -554,29 +594,38 @@ export default function SessionPanel(): React.JSX.Element {
 
         {/* Conversation scroll area */}
         <div className="relative flex-1 min-h-0">
-          <div ref={scrollRef} onScroll={checkIsAtBottom} className="h-full overflow-y-auto py-2">
+          {/* overflow-anchor is off: the layout effect above does its own
+              anchoring after a prepend, and Chromium's would double-correct. */}
+          <div
+            ref={scrollRef}
+            onScroll={handleScroll}
+            className="h-full overflow-y-auto py-2"
+            style={{ overflowAnchor: 'none' }}
+          >
             {filteredRecords.length === 0 && searchQuery && (
               <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
                 No messages match &quot;{searchQuery}&quot;
               </div>
             )}
-            {filteredRecords.slice(0, visibleCount).map((record) => (
-              <MessageBubble
-                key={record.uuid}
-                record={record}
-                toolResultMap={toolResultMap}
-                searchQuery={searchQuery}
-                turnDuration={
-                  record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
-                }
-                subagents={activeSessionSummary?.subagents}
-              />
-            ))}
             {visibleCount < filteredRecords.length && (
               <div className="flex items-center justify-center py-4 text-[11px] text-muted-foreground/60">
                 Loading older messages…
               </div>
             )}
+            {filteredRecords
+              .slice(Math.max(0, filteredRecords.length - visibleCount))
+              .map((record) => (
+                <MessageBubble
+                  key={record.uuid}
+                  record={record}
+                  toolResultMap={toolResultMap}
+                  searchQuery={searchQuery}
+                  turnDuration={
+                    record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
+                  }
+                  subagents={activeSessionSummary?.subagents}
+                />
+              ))}
           </div>
 
           {/* Scroll-to-bottom button — shown when watcher pushes new messages and user scrolled up */}

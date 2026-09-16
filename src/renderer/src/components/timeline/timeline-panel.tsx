@@ -12,8 +12,30 @@ import { useUIStore } from '@renderer/store/ui.store'
 import { formatCost } from '@shared/utils'
 import { cn } from '@renderer/lib/cn'
 import { EmptyState } from '@renderer/components/shared/empty-state'
-import type { SessionSummary } from '@shared/types'
+import type { Project, SessionSummary } from '@shared/types'
 import TimelineSidebar from './timeline-sidebar'
+
+/**
+ * Maps a session's own id to the id of the `Project` that currently owns it —
+ * the renderer-side twin of `analytics-engine.ts`'s `buildSessionOwnerMap`
+ * (main process; not importable here across the main/renderer boundary) and
+ * `sessions.store.ts`'s `findOwningProjectId` (a single-lookup version of the
+ * same idea; this file needs a full map since it resolves one per session
+ * block on every render, not one id at a time). See either for why this
+ * exists: a project merged from several worktree directories
+ * (`project-scanner.ts`'s `mergeProjectsByResolvedPath`) has a survivor `id`
+ * that is only ONE of the physical directories feeding it, while every
+ * session still carries its own PHYSICAL directory as `projectId`.
+ */
+export function buildSessionOwnerMap(projects: Project[]): Map<string, string> {
+  const owner = new Map<string, string>()
+  for (const project of projects) {
+    for (const session of project.sessions) {
+      owner.set(session.id, project.id)
+    }
+  }
+  return owner
+}
 
 // ── Consistent project colour by hashing project id ──────────────────────────
 
@@ -28,7 +50,7 @@ const PROJECT_COLOURS = [
   'bg-orange-500/70 border-orange-600',
 ]
 
-function projectColor(projectId: string): string {
+export function projectColor(projectId: string): string {
   let hash = 0
   for (let i = 0; i < projectId.length; i++) hash = (hash * 31 + projectId.charCodeAt(i)) | 0
   return PROJECT_COLOURS[Math.abs(hash) % PROJECT_COLOURS.length]
@@ -40,6 +62,9 @@ const HOUR_HEIGHT_PX = 64
 
 interface SessionBlock {
   session: SessionSummary
+  /** The OWNING project's id (see `buildSessionOwnerMap`) — not necessarily
+   * `session.projectId`, which is the session's physical directory. */
+  projectId: string
   projectName: string
   startMinutes: number
   durationMinutes: number
@@ -52,9 +77,10 @@ function toMinutes(isoStr: string, baseDate: string): number {
   return (d.getTime() - base.getTime()) / 60_000
 }
 
-function buildBlocks(
+export function buildBlocks(
   sessions: SessionSummary[],
   projectNameMap: Record<string, string>,
+  sessionOwnerMap: Map<string, string>,
   date: string
 ): SessionBlock[] {
   return sessions
@@ -66,12 +92,19 @@ function buildBlocks(
     .map((s) => {
       const startMin = Math.max(0, toMinutes(s.firstTimestamp, date))
       const endMin = Math.min(24 * 60, toMinutes(s.lastTimestamp, date))
+      // Resolved once and reused for both the label and the colour, so a
+      // merged project's sessions from different physical worktree
+      // directories render with ONE consistent name and colour instead of a
+      // colour-per-directory swimlane and, for a non-survivor directory, its
+      // raw encoded directory string as the displayed "project" name.
+      const projectId = sessionOwnerMap.get(s.id) ?? s.projectId
       return {
         session: s,
-        projectName: projectNameMap[s.projectId] ?? s.projectId,
+        projectId,
+        projectName: projectNameMap[projectId] ?? projectId,
         startMinutes: startMin,
         durationMinutes: Math.max(endMin - startMin, 5),
-        colour: projectColor(s.projectId),
+        colour: projectColor(projectId),
       }
     })
 }
@@ -133,13 +166,15 @@ export default function TimelinePanel(): React.JSX.Element {
     [projects]
   )
 
+  const sessionOwnerMap = useMemo(() => buildSessionOwnerMap(projects), [projects])
+
   const blocks = useMemo(
-    () => buildBlocks(allSessions, projectNameMap, selectedDate),
-    [allSessions, projectNameMap, selectedDate]
+    () => buildBlocks(allSessions, projectNameMap, sessionOwnerMap, selectedDate),
+    [allSessions, projectNameMap, sessionOwnerMap, selectedDate]
   )
 
   function handleSessionClick(block: SessionBlock) {
-    setActiveProject(block.session.projectId)
+    setActiveProject(block.projectId)
     setActiveSession(block.session.id)
     setView('sessions')
   }

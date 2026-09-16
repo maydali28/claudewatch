@@ -90,6 +90,7 @@ function session(id: string, projectId: string, dailyUsage: SessionDayUsage[]): 
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
+    turnOpen: false,
     serviceTiers: [],
   }
 }
@@ -224,6 +225,43 @@ describe('buildTraySnapshot', () => {
     expect(snapshot.today.projectCount).toBe(1)
   })
 
+  /**
+   * Fix-round-2 finding A: a project merged from several worktree directories
+   * (`project-scanner.ts`'s `mergeProjectsByResolvedPath`) has sessions whose
+   * own `projectId` is each session's PHYSICAL directory, never the merged
+   * survivor id. Counting those directly, as before, reported one merged
+   * project as three ("today.projectCount: 3") even though its token/cost
+   * totals — summed, not counted — were already correct.
+   */
+  it('counts a project merged from three worktree directories as one, not one per physical directory', () => {
+    const mainSession = session('s-main', 'main-dir', [
+      day({ day: TODAY_KEY, inputTokens: 1000, outputTokens: 100, estimatedCost: 1 }),
+    ])
+    const worktreeASession = session('s-worktree-a', 'alpha-worktree-dir', [
+      day({ day: TODAY_KEY, inputTokens: 1000, outputTokens: 100, estimatedCost: 1 }),
+    ])
+    const worktreeBSession = session('s-worktree-b', 'beta-worktree-dir', [
+      day({ day: TODAY_KEY, inputTokens: 1000, outputTokens: 100, estimatedCost: 1 }),
+    ])
+    const mergedProject: Project = {
+      id: 'main-dir',
+      name: 'merged',
+      path: '/merged',
+      sessions: [mainSession, worktreeASession, worktreeBSession],
+      sessionCount: 3,
+      localSkills: [],
+      localClaudeMd: null,
+    }
+
+    const snapshot = buildTraySnapshot([mergedProject], ANTHROPIC_PRICING)
+
+    expect(snapshot.today.projectCount).toBe(1)
+    // Tokens were already correct before this fix — summing, unlike
+    // counting distinct ids, is naturally immune to which id a session
+    // carries.
+    expect(snapshot.today.tokenCount).toBe(3300)
+  })
+
   it('reports zeroes, not undefined or NaN, on a quiet day with no activity today', () => {
     const quietSession = session('quiet-1', 'quiet', [
       day({ day: THREE_DAYS_AGO_KEY, inputTokens: 10, outputTokens: 5, estimatedCost: 1 }),
@@ -280,5 +318,32 @@ describe('buildTraySnapshot — recentSessions ordering is NaN-safe', () => {
     // Descending by time; the unparsable one is never evidence of recency
     // and must sort last, deterministically.
     expect(snapshot.recentSessions.map((s) => s.id)).toEqual(['newest', 'oldest', 'garbage'])
+  })
+})
+
+describe('buildTraySnapshot — liveness considers an open turn, not only the last write', () => {
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60_000).toISOString()
+
+  it('keeps a session whose turn is still open in activeSessions through a long silent tool run', () => {
+    const open: SessionSummary = {
+      ...session('open-1', 'alpha', [day({ day: TODAY_KEY, messageCount: 1 })]),
+      lastTimestamp: fiveMinutesAgo,
+      turnOpen: true,
+    }
+    const snapshot = buildTraySnapshot([project('alpha', [open])], ANTHROPIC_PRICING)
+    expect(snapshot.activeSessions.map((s) => s.id)).toEqual(['open-1'])
+    expect(snapshot.activeSessions[0].turnOpen).toBe(true)
+    expect(snapshot.recentSessions).toEqual([])
+  })
+
+  it('moves a session whose turn has closed to recentSessions once the short window passes', () => {
+    const closed: SessionSummary = {
+      ...session('closed-1', 'alpha', [day({ day: TODAY_KEY, messageCount: 1 })]),
+      lastTimestamp: fiveMinutesAgo,
+      turnOpen: false,
+    }
+    const snapshot = buildTraySnapshot([project('alpha', [closed])], ANTHROPIC_PRICING)
+    expect(snapshot.activeSessions).toEqual([])
+    expect(snapshot.recentSessions.map((s) => s.id)).toEqual(['closed-1'])
   })
 })

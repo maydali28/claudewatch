@@ -261,6 +261,45 @@ describe('ingestFile — usage is never dropped', () => {
   })
 })
 
+/**
+ * `ledgerResponseId`'s own derivation of the shared identity rule
+ * (`id ? id : ...`), pinned the same way `response-observability.ts`'s
+ * `assistantResponseId` (`||`) is pinned — see finding 1 in
+ * `final-branch-review.md`. Every existing "no message.id" fixture in this
+ * file uses `id: null`, which the `assistant()` helper renders as an ABSENT
+ * `message.id` key (`undefined`) — a case `??` and `? :` already agree on.
+ * None of them used an empty STRING id, which is exactly the case the two
+ * operators disagree on: `??` only checks null/undefined, so it would treat
+ * `''` as a real, present id and key every empty-id response on the literal
+ * string `''`, merging unrelated responses together.
+ */
+describe('ingestFile — empty-string message.id falls through to the uuid key', () => {
+  it("keys a response carrying an EMPTY-STRING message.id by its uuid, not by ''", async () => {
+    const file = fixture('empty-id-single', [
+      assistant({ uuid: 'the-uuid', id: '', usage: { input: 42, output: 7 } }),
+    ])
+
+    const { entries } = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0].responseId).toBe('uuid:the-uuid')
+    expect(entries[0].responseId).not.toBe('')
+  })
+
+  it('keeps two empty-id responses distinct when their uuids differ, instead of merging them', async () => {
+    const file = fixture('empty-id-two', [
+      assistant({ uuid: 'a', id: '', usage: { input: 10, output: 1 } }),
+      assistant({ uuid: 'b', id: '', usage: { input: 20, output: 2 } }),
+    ])
+
+    const { entries } = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
+
+    expect(entries).toHaveLength(2)
+    expect(entries.map((e) => e.responseId).sort()).toEqual(['uuid:a', 'uuid:b'])
+    expect(totals(entries)).toEqual({ input: 30, output: 3 })
+  })
+})
+
 describe('ingestFile — cache write tiers', () => {
   it('keeps the flat total when no TTL split is present', async () => {
     const file = fixture('flat-cache', [

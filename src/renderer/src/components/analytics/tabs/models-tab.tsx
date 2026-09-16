@@ -160,8 +160,19 @@ export function ModelsTab({ data }: Props): React.JSX.Element {
             day, so the `(undated)` sentinel (see `AnalyticsData.undatedActivity`)
             would render as a stray, out-of-order tick rather than a real day.
             Totals elsewhere still include it — only this per-day series drops
-            it, the same choice `overview-tab.tsx`'s `DailyUsageChart` makes. */}
-        <DailyModelCostChart data={data.dailyModelCost.filter((d) => d.date !== UNDATED_DAY)} />
+            it, the same choice `overview-tab.tsx`'s `DailyUsageChart` makes.
+
+            `dateKeys` comes from `dailyUsage`, not `dailyModelCost` itself:
+            `dailyUsage` is zero-filled to the full selected range (bounded
+            presets only — see `analytics-engine.ts`), so this chart's date
+            axis agrees with the token-usage chart above it on how many days
+            the range has, even on a day with zero model cost. `dailyUsage`
+            is sparse for `all` too, so this is a no-op there, same as it
+            always was. */}
+        <DailyModelCostChart
+          data={data.dailyModelCost.filter((d) => d.date !== UNDATED_DAY)}
+          dateKeys={data.dailyUsage.map((d) => d.date).filter((d) => d !== UNDATED_DAY)}
+        />
       </ChartCard>
 
       {/* Efficiency table */}

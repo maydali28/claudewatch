@@ -406,6 +406,8 @@ export interface TraySnapshotSession {
   totalInputTokens: number
   totalOutputTokens: number
   lastTimestamp: string
+  /** See `SessionSummary.turnOpen`; the popover re-judges liveness with it. */
+  turnOpen: boolean
   hasError: boolean
 }
 
