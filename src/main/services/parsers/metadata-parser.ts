@@ -43,7 +43,7 @@ const log = createLogger('MetadataParser')
 interface MetadataAccumulator {
   // Identity
   slug: string | undefined
-  title: string
+  aiTitle: string | undefined
   cwd: string | undefined
 
   // Timestamps
@@ -100,10 +100,10 @@ interface MetadataAccumulator {
   pendingResponse?: PendingResponse & { toolNames: string[] }
 }
 
-function createMetadataAccumulator(sessionId: string): MetadataAccumulator {
+function createMetadataAccumulator(): MetadataAccumulator {
   return {
     slug: undefined,
-    title: sessionId,
+    aiTitle: undefined,
     cwd: undefined,
     firstTimestamp: undefined,
     lastTimestamp: undefined,
@@ -491,7 +491,9 @@ function buildSessionSummary(
     projectId,
     projectPath: acc.cwd ?? decodeProjectId(projectId),
     slug: acc.slug,
-    title: acc.title,
+    // Display name precedence: Claude's generated name, then the slug (only
+    // written by older Claude Code versions), then the bare session id.
+    title: acc.aiTitle ?? acc.slug ?? sessionId,
     firstTimestamp: acc.firstTimestamp ?? '',
     lastTimestamp: acc.lastTimestamp ?? '',
     turnOpen: acc.turnOpen,
@@ -623,7 +625,7 @@ export async function parseSessionMetadata(
   pricingTable: Record<ModelFamily, ModelPricing>
 ): Promise<SessionSummary> {
   const seenUuids = new Set<string>()
-  const acc = createMetadataAccumulator(sessionId)
+  const acc = createMetadataAccumulator()
   // Usage is accounted by the ledger, from this same pass. The accumulator
   // below collects only the non-usage metadata (timings, tool calls,
   // compaction, errors) that the ledger does not describe.
@@ -657,9 +659,11 @@ export async function parseSessionMetadata(
 
     if (shouldSkipRecord(raw, seenUuids)) continue
 
-    if (raw.slug && !acc.slug) {
-      acc.slug = raw.slug
-      acc.title = raw.slug
+    if (raw.slug && !acc.slug) acc.slug = raw.slug
+    if (raw.type === 'ai-title') {
+      const title = raw.aiTitle?.trim()
+      if (title) acc.aiTitle = title
+      continue
     }
 
     if (raw.cwd && !acc.cwd) {

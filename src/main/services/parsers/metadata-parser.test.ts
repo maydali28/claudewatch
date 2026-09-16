@@ -1361,3 +1361,71 @@ describe('parseSessionMetadata — turnOpen reflects whether the last turn is st
     expect(s.turnOpen).toBe(false)
   })
 })
+
+describe('parseSessionMetadata — session title', () => {
+  const aiTitle = (title: string): Record<string, unknown> => ({
+    type: 'ai-title',
+    sessionId: 'titled',
+    aiTitle: title,
+  })
+
+  it('uses the Claude-generated ai-title as the title', async () => {
+    const file = session('titled', [
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1' }),
+      aiTitle('Sentry errors in the dashboard'),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('Sentry errors in the dashboard')
+  })
+
+  it('prefers the ai-title over the slug when both are present', async () => {
+    const file = session('titled', [
+      { ...user('u1'), slug: 'fluffy-wandering-panda' },
+      aiTitle('Sentry errors in the dashboard'),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('Sentry errors in the dashboard')
+    expect(summary.slug).toBe('fluffy-wandering-panda')
+  })
+
+  it('keeps the latest ai-title when the record is re-emitted with new text', async () => {
+    const file = session('titled', [
+      user('u1'),
+      aiTitle('First title'),
+      assistant({ uuid: 'a', id: 'msg_1' }),
+      aiTitle('Second title'),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('Second title')
+  })
+
+  it('falls back to the slug, then the session id, when there is no ai-title', async () => {
+    const slugged = session('titled', [{ ...user('u1'), slug: 'fluffy-wandering-panda' }])
+    const bare = session('untitled', [user('u1')])
+
+    expect((await parseSessionMetadata(slugged, 'titled', 'proj', ANTHROPIC_PRICING)).title).toBe(
+      'fluffy-wandering-panda'
+    )
+    expect((await parseSessionMetadata(bare, 'untitled', 'proj', ANTHROPIC_PRICING)).title).toBe(
+      'untitled'
+    )
+  })
+
+  it('ignores an ai-title record with blank text', async () => {
+    const file = session('titled', [
+      { ...user('u1'), slug: 'fluffy-wandering-panda' },
+      aiTitle('   '),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'titled', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.title).toBe('fluffy-wandering-panda')
+  })
+})

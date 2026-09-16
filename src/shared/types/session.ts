@@ -11,6 +11,7 @@ export type RecordType =
   | 'result'
   | 'file-history-snapshot'
   | 'progress'
+  | 'ai-title'
 
 // ─── Token Usage ──────────────────────────────────────────────────────────────
 
@@ -98,6 +99,12 @@ export interface RawRecord {
   sessionId?: string
   cwd?: string
   slug?: string
+  /**
+   * The session name Claude Code generates from the first exchange, carried
+   * on `type: 'ai-title'` records (no `uuid`, no `timestamp`). Re-emitted on
+   * later writes with the same text; the last one seen wins.
+   */
+  aiTitle?: string
   message?: RawMessage
   subtype?: string
   content?: string

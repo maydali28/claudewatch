@@ -128,9 +128,16 @@ interface CacheFile {
 // behaviour for every cached session until its file happened to change.
 // Discard, so the first scan recomputes it.
 //
+// v11: `title` is now read from Claude Code's `ai-title` records. A v10
+// summary froze the slug or the bare session id as the title for every
+// session that has a generated name, and nothing about the file changes when
+// the parser learns a new record type — so a v10 entry would keep serving
+// the id-as-title until the transcript itself was next written to. Discard,
+// so the first scan re-reads every title.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 10
+const CACHE_VERSION = 11
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

@@ -80,31 +80,30 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(10, tz)
+    writeCacheFile(11, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 10, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 9, or a
-    // bump to 11 without a matching migration, would do.
+    // If the constant is not 11, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 10, or a
+    // bump to 12 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
   })
 
-  it('discards a v9 cache file rather than serving it under the v10 contract', () => {
+  it('discards a v10 cache file rather than serving it under the v11 contract', () => {
     const tz = `${TZ}-stale`
-    writeCacheFile(9, tz)
+    writeCacheFile(10, tz)
 
-    // A v8 summary carries only the original four diagnostics, `NaN-NaN-NaN`
-    // day keys for unparsable timestamps, and costs priced before the
-    // cache-write reconciliation. Serving it back would report every one of
-    // those as a current measurement. See `CACHE_VERSION`'s own comment for
-    // the full list of what a v8 entry predates.
+    // A v10 summary was parsed before `ai-title` records were read, so its
+    // `title` is the slug or the bare session id for every session that has
+    // a Claude-generated name. Serving it back would keep showing ids until
+    // each transcript happened to change. See `CACHE_VERSION`'s v11 note.
     expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards every version below the current one, not just the immediately previous', () => {
-    for (const stale of [1, 5, 6, 7, 8, 9]) {
+    for (const stale of [1, 5, 6, 7, 8, 9, 10]) {
       const tz = `${TZ}-stale-${stale}`
       writeCacheFile(stale, tz)
       expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
