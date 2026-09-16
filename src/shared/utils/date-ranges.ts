@@ -64,6 +64,63 @@ export function dateKeysInRange(from: Date, to: Date): string[] {
   return keys
 }
 
+/**
+ * Supplements a day-keyed series with a zero row for every calendar day in
+ * `[from, to]` that has no existing entry — the one place this codebase
+ * turns "absent" into "present with zeros" for a day-keyed series. A series
+ * built by only ever pushing an entry when a day HAS activity looks correct
+ * until the first idle day: a "7d" selection with nothing logged yet today
+ * renders as six days, not seven, because today's bar is missing rather than
+ * zero. Feeding the result through this function once, in the one place a
+ * series is assembled, is what lets every consumer — a chart's x-axis, an
+ * average, a "how many days" count — agree on how many days the range has.
+ *
+ * ADDS, never DROPS: every entry already in `items` survives into the
+ * result, including one dated outside `[from, to]`. `[from, to]` is only
+ * where this function is willing to manufacture a zero row — it is not a
+ * filter over `items`. This matters when `to` is a fill-only clamp narrower
+ * than the range the caller actually resolved: `computeAnalytics` clamps its
+ * fill's upper bound to today so it never fabricates a future-dated zero
+ * row, but a genuinely future-dated response (clock skew, a timezone edge)
+ * is real observed data, not a row this function invented — dropping it
+ * silently would make `dailyUsage`'s sum disagree with the headline total
+ * computed over the same, unclamped range. A caller that instead wants a
+ * strict window — "only these days, whatever `items` contains" — must
+ * filter `items` to that window itself before calling this function (see
+ * `buildWeeklyUsage`, which does exactly that for its rolling 7-day view).
+ *
+ * Never call this for an unbounded range: `resolveDateRange('all')` returns
+ * `from = new Date(0)`, and filling from 1970 would synthesise on the order
+ * of twenty thousand empty days. Callers that support an `all`-equivalent
+ * preset must gate this call themselves — this function has no opinion on
+ * which range it was given and will happily fill any span it is handed.
+ *
+ * Never MANUFACTURES `UNDATED_DAY`: the fill keys come solely from
+ * `dateKeysInRange`, which only ever emits real `YYYY-MM-DD` keys. An
+ * `UNDATED_DAY` entry already present in `items`, though, now survives into
+ * the result same as any other out-of-range entry (see "ADDS, never DROPS"
+ * above) — a caller for whom that bucket must never appear (every bounded
+ * preset) relies on `items` never containing it in the first place, not on
+ * this function filtering it out.
+ *
+ * Generic over the item shape so both the main-process analytics engine
+ * (`DailyUsage`, `DailyEffort`) and the renderer's tray popover
+ * (`DailyUsagePoint`/`WeeklyUsagePoint`) can share this one implementation
+ * instead of each hand-rolling the same map-and-fill.
+ */
+export function zeroFillDailySeries<T extends { date: string }>(
+  items: T[],
+  from: Date,
+  to: Date,
+  makeZero: (date: string) => T
+): T[] {
+  const byDate = new Map(items.map((item) => [item.date, item]))
+  for (const date of dateKeysInRange(from, to)) {
+    if (!byDate.has(date)) byDate.set(date, makeZero(date))
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+}
+
 /** True if the given ISO timestamp falls within the date range. */
 export function isWithinRange(timestamp: string, from: Date, to: Date): boolean {
   const t = new Date(timestamp).getTime()
@@ -88,9 +145,11 @@ export function parseInstant(ts: string): number | null {
  * `Array.prototype.sort`. Compares parsed instants rather than the raw text:
  * an offset-carrying timestamp (e.g. `+02:00`) can sort later than a `Z` one
  * as a string while naming an earlier instant, which is the exact defect
- * this replaces at every timestamp-ordering call site in the app (the "latest
- * model" badge, the sessions table, and the project list all used to compare
- * text).
+ * this replaces at the timestamp-ordering call sites that adopt it (the
+ * "latest model" badge, the sessions table, the project list, and the CSV
+ * export all used to compare text) — new call sites must opt in explicitly;
+ * nothing enforces that every ordering comparison in the app goes through
+ * this function.
  *
  * An unparseable timestamp is never evidence that a record is more recent
  * than a parseable one, so it sorts as though it happened at the dawn of

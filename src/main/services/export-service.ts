@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as os from 'os'
 import type { ParsedSession, SessionDiagnostics } from '@shared/types/session'
 import type { ExportFormat } from '@shared/types/session'
+import { compareTimestampsAscending } from '@shared/utils/date-ranges'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -116,7 +117,7 @@ export function exportAsJson(session: ParsedSession): string {
  * before reading the header.
  */
 export function exportAsCsv(session: ParsedSession): string {
-  const rows: string[] = []
+  const headRows: string[] = []
   const note = diagnosticsNote(session.diagnostics)
   // A leading `#` comment row, not a data column: adding diagnostics as real
   // columns would repeat the same session-wide note on every record row, and
@@ -124,8 +125,8 @@ export function exportAsCsv(session: ParsedSession): string {
   // The `#` itself must sit outside any quoting or a tool checking for a
   // literal leading `#` won't see one — only the note's body (which always
   // contains commas) goes through `csvEscape`, not the marker.
-  if (note) rows.push(`#${csvEscape(note)}`)
-  rows.push(
+  if (note) headRows.push(`#${csvEscape(note)}`)
+  headRows.push(
     [
       'timestamp',
       'role',
@@ -139,22 +140,41 @@ export function exportAsCsv(session: ParsedSession): string {
     ].join(',')
   )
 
+  // Body rows are collected with the timestamp they should sort by rather
+  // than pushed straight into the final line list — see the sort below the
+  // two loops for why: a synthetic usage-only row (built after the main
+  // per-record loop has already run) still needs to land at its response's
+  // chronological position, not at the end of the file.
+  const bodyRows: { timestamp: string; line: string }[] = []
+
   // A row here is one TRANSCRIPT BLOCK (thinking segment, text segment, or
   // tool_use call) — rows exist for rendering and search, and one
   // content-rich response legitimately spans several of them. Usage,
   // however, is RESPONSE-level: Claude Code writes every block of one API
-  // response as its own record and repeats that response's full
-  // `message.usage` on each one verbatim, so stamping every block's row with
-  // that same usage would make summing a token column overcount by however
-  // many blocks (and block-carrying records) the response happened to have.
-  // Usage is therefore written once — on the first row of each response,
-  // tracked below by `record.responseId` (`message.id`, or a `uuid:`
-  // fallback — see `assistantResponseId`) — and left EMPTY on every row
+  // response as its own record, and for a STREAMED response those records
+  // don't even repeat identical usage — an early record carries a
+  // provisional snapshot (`output_tokens: 1`, no `stop_reason` yet) and the
+  // final one carries the real count. Usage (tokens AND cost) is therefore
+  // read once per response from `session.responseUsage` — the ledger's
+  // MERGED total for that response (see that field's own doc comment), never
+  // a single record's raw `usage` — and written on the first row of the
+  // response, tracked below by `record.responseId` (`message.id`, or a
+  // `uuid:` fallback — see `assistantResponseId`), left EMPTY on every row
   // after it. `response_id` itself stays populated on every row so a
   // consumer can still recover which rows belong together: sum a token
   // column directly for the response-level total, or group by `response_id`
   // first if a per-response breakdown is needed.
+  // Doubles as "this response got at least one CONTENT row
+  // (text/thinking/tool_use)": compared against `session.responseUsage`'s
+  // keys after the loop so a response with usage but no exportable block
+  // still contributes it — see the synthetic-row loop below.
   const seenResponseIds = new Set<string>()
+  // First record seen for each response id, kept only to source a synthetic
+  // row's timestamp/role/model when that response never emits a content row.
+  const firstRecordByResponseId = new Map<
+    string,
+    { timestamp: string; role: string; model: string }
+  >()
 
   for (const record of session.records) {
     if (record.type !== 'user' && record.type !== 'assistant') continue
@@ -167,8 +187,22 @@ export function exportAsCsv(session: ParsedSession): string {
     // record — never gets treated as a repeat, leaving their behavior
     // unchanged (their usage is already always 0).
     const responseId = record.responseId ?? record.uuid
-    const totalInputTokens = record.usage?.inputTokens ?? 0
-    const totalOutputTokens = record.usage?.outputTokens ?? 0
+    if (!firstRecordByResponseId.has(responseId)) {
+      firstRecordByResponseId.set(responseId, {
+        timestamp: record.timestamp ?? '',
+        role,
+        model,
+      })
+    }
+    // Resolved (ledger-merged) usage for this response when it is a real API
+    // response; a user/system row falls back to its own (always-zero) raw
+    // usage, unchanged from before this fix. There is no raw-record fallback
+    // for cost — it was never read from records before this field existed —
+    // so an unresolved response's cost cell is simply left unpriced (`null`).
+    const resolved = session.responseUsage[responseId]
+    const totalInputTokens = resolved?.inputTokens ?? record.usage?.inputTokens ?? 0
+    const totalOutputTokens = resolved?.outputTokens ?? record.usage?.outputTokens ?? 0
+    const totalCost = resolved?.costUsd ?? null
 
     for (const block of record.contentBlocks) {
       let blockType: string
@@ -194,9 +228,17 @@ export function exportAsCsv(session: ParsedSession): string {
       seenResponseIds.add(responseId)
       const inputTokens = isFirstRowOfResponse ? totalInputTokens : ''
       const outputTokens = isFirstRowOfResponse ? totalOutputTokens : ''
+      // `totalCost === null` covers both an unpriced response (unrecognised
+      // model — see `ResponseEntry.costUsd`) and a non-response row (no
+      // `resolved` entry at all): either way the cell stays EMPTY rather than
+      // `0`, which would misrepresent "not priced" as "priced at zero" — the
+      // same distinction `SessionDayModelUsage.estimatedCost`'s own doc
+      // comment protects.
+      const cost = isFirstRowOfResponse && totalCost !== null ? totalCost : ''
 
-      rows.push(
-        [
+      bodyRows.push({
+        timestamp: record.timestamp ?? '',
+        line: [
           csvEscape(record.timestamp ?? ''),
           csvEscape(role),
           blockType,
@@ -205,13 +247,51 @@ export function exportAsCsv(session: ParsedSession): string {
           csvEscape(responseId),
           inputTokens,
           outputTokens,
-          '',
-        ].join(',')
-      )
+          cost,
+        ].join(','),
+      })
     }
   }
 
-  return rows.join('\n')
+  // A response the ledger priced but whose records carried no
+  // text/thinking/tool_use block would otherwise vanish from this export
+  // with no trace of its usage — an accounting CSV silently losing a
+  // response that genuinely cost money. Emitted as a `usage`-typed row with
+  // empty text so it reads clearly as a bookkeeping entry, not a transcript
+  // line; sourced from the first (only, in practice) record seen for that
+  // response id for its timestamp/role/model context.
+  for (const [responseId, usage] of Object.entries(session.responseUsage)) {
+    if (seenResponseIds.has(responseId)) continue
+    const meta = firstRecordByResponseId.get(responseId)
+    bodyRows.push({
+      timestamp: meta?.timestamp ?? '',
+      line: [
+        csvEscape(meta?.timestamp ?? ''),
+        csvEscape(meta?.role ?? ''),
+        'usage',
+        '',
+        csvEscape(meta?.model ?? ''),
+        csvEscape(responseId),
+        usage.inputTokens,
+        usage.outputTokens,
+        usage.costUsd !== null ? usage.costUsd : '',
+      ].join(','),
+    })
+  }
+
+  // Every other row in this export is chronological — a synthetic row built
+  // AFTER the main loop above would otherwise land at the end of the file
+  // regardless of its response's actual timestamp, breaking that order for
+  // anyone reading the CSV as a transcript. Compares parsed instants, not
+  // raw text: an offset-carrying timestamp (e.g. `+02:00`) can sort later
+  // than a `Z` one as a string while naming an earlier instant.
+  // `Array.prototype.sort` is stable (guaranteed since ES2019 in Node), so
+  // rows sharing an identical timestamp — every block of one response
+  // typically does — keep their original relative order rather than being
+  // shuffled by this sort.
+  bodyRows.sort((a, b) => compareTimestampsAscending(a.timestamp, b.timestamp))
+
+  return [...headRows, ...bodyRows.map((r) => r.line)].join('\n')
 }
 
 // ─── exportAsMarkdown ─────────────────────────────────────────────────────────
