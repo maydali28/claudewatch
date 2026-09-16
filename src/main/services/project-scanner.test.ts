@@ -102,6 +102,7 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
+    turnOpen: false,
     serviceTiers: [],
     ...overrides,
   }

@@ -80,20 +80,20 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(9, tz)
+    writeCacheFile(10, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 9, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 8, or a
-    // bump to 10 without a matching migration, would do.
+    // If the constant is not 10, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 9, or a
+    // bump to 11 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
   })
 
-  it('discards a v8 cache file rather than serving it under the v9 contract', () => {
+  it('discards a v9 cache file rather than serving it under the v10 contract', () => {
     const tz = `${TZ}-stale`
-    writeCacheFile(8, tz)
+    writeCacheFile(9, tz)
 
     // A v8 summary carries only the original four diagnostics, `NaN-NaN-NaN`
     // day keys for unparsable timestamps, and costs priced before the
@@ -104,7 +104,7 @@ describe('CACHE_VERSION', () => {
   })
 
   it('discards every version below the current one, not just the immediately previous', () => {
-    for (const stale of [1, 5, 6, 7, 8]) {
+    for (const stale of [1, 5, 6, 7, 8, 9]) {
       const tz = `${TZ}-stale-${stale}`
       writeCacheFile(stale, tz)
       expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()

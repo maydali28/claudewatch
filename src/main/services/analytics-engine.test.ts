@@ -97,6 +97,7 @@ function session(id: string, dailyUsage: SessionDayUsage[]): SessionSummary {
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
+    turnOpen: false,
     serviceTiers: [],
   }
 }

@@ -122,9 +122,15 @@ interface CacheFile {
 // affected; a developer who ran a build mid-branch holds a v9 cache that is
 // never invalidated, and re-parsing is the documented recovery.
 //
+// v10: `SessionSummary` gained the required `turnOpen`. A v9 entry served
+// under the v10 contract would carry it as `undefined` — read as "closed" by
+// `isSessionLive` — so the live indicator would silently keep the pre-v10
+// behaviour for every cached session until its file happened to change.
+// Discard, so the first scan recomputes it.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 9
+const CACHE_VERSION = 10
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

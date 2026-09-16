@@ -3,7 +3,7 @@ import type { Project } from '@shared/types/project'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import type { TraySnapshot, TraySnapshotSession } from '@shared/types/analytics'
 import { computeAnalytics, buildSessionOwnerMap } from './analytics-engine'
-import { ACTIVE_SESSION_MS, TRAY_RECENT_SESSION_COUNT } from '@shared/constants/tuning'
+import { partitionLiveSessions } from '@shared/utils/live-session'
 import { toDateKey, compareTimestampsAscending } from '@shared/utils/date-ranges'
 
 /**
@@ -45,8 +45,10 @@ export function buildTraySnapshot(
   const sorted = [...sessions].sort((a, b) =>
     compareTimestampsAscending(b.lastTimestamp, a.lastTimestamp)
   )
-  const isActive = (s: SessionSummary): boolean =>
-    now - new Date(s.lastTimestamp).getTime() < ACTIVE_SESSION_MS
+  // The same rule the popover and the dashboard row apply — see
+  // `isSessionLive` for why an open turn extends the window, and
+  // `partitionLiveSessions` for the recent list's cap.
+  const { active, recent } = partitionLiveSessions(sorted, now)
 
   return {
     today: {
@@ -72,11 +74,8 @@ export function buildTraySnapshot(
       tokens: d.inputTokens + d.outputTokens,
       cost: d.estimatedCost,
     })),
-    activeSessions: sorted.filter(isActive).map(toTraySession),
-    recentSessions: sorted
-      .filter((s) => !isActive(s))
-      .slice(0, TRAY_RECENT_SESSION_COUNT)
-      .map(toTraySession),
+    activeSessions: active.map(toTraySession),
+    recentSessions: recent.map(toTraySession),
   }
 }
 
@@ -127,6 +126,7 @@ function toTraySession(s: SessionSummary): TraySnapshotSession {
     totalInputTokens: s.totalInputTokens,
     totalOutputTokens: s.totalOutputTokens,
     lastTimestamp: s.lastTimestamp,
+    turnOpen: s.turnOpen,
     hasError: s.hasError,
   }
 }

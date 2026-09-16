@@ -102,6 +102,8 @@ export interface RawRecord {
   subtype?: string
   content?: string
   isCompactSummary?: boolean
+  /** Injected context (a skill body, an image caption, a command caveat) that rides alongside a real prompt; never answered on its own. */
+  isMeta?: boolean
   isVisibleInTranscriptOnly?: boolean
   toolUseResult?: {
     type?: string
@@ -389,6 +391,15 @@ export interface SessionSummary {
   title: string
   firstTimestamp: string
   lastTimestamp: string
+  /**
+   * True while the last turn is still in progress at the end of the
+   * transcript: a tool call waiting for its result, or a user record the
+   * assistant has not answered yet. Feeds `isSessionLive` so a session stays
+   * live through a long silent tool run. Required: `metadata-parser.ts` is
+   * the only producer, and the metadata cache's version bump (v10) discards
+   * every entry written before the field existed.
+   */
+  turnOpen: boolean
   messageCount: number // parent + subagent messages combined
   parentMessageCount: number // parent session messages only (matches session details panel)
   /**

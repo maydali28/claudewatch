@@ -50,6 +50,7 @@ function makeSummary(id: string, projectId: string, timestamp: string): SessionS
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
+    turnOpen: false,
     serviceTiers: [],
   }
 }
