@@ -283,6 +283,21 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     const activeAtEventTime = get().activeSessionId
 
     set((state) => {
+      // Same fallback `handleSessionCreated` has. An update can be the first
+      // push this renderer sees for a project (its create landed during a
+      // reload, or before this window subscribed); `updateProjectSessions`
+      // would otherwise silently map over nothing and the session — live,
+      // in the tray — never appears in the dashboard until a manual reload.
+      if (!findOwningProjectId(state.projects, summary.projectId)) {
+        // A streaming session pushes every few hundred ms; while the reload
+        // those pushes asked for is still in flight, each further push must
+        // not queue another full rescan and full-payload IPC round trip.
+        if (!state.isLoadingProjects) get().loadProjects()
+        const liveSessionIds = new Set(state.liveSessionIds)
+        liveSessionIds.add(summary.id)
+        return { liveSessionIds }
+      }
+
       const updatedProjects = updateProjectSessions(
         state.projects,
         summary.projectId,

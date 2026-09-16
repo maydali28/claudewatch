@@ -6,10 +6,12 @@ import type { Result } from '@shared/ipc/contracts'
 // the boundary the store actually calls through (the IPC bridge) rather than
 // electron itself.
 const mockGetParsed = vi.fn<(...args: unknown[]) => Promise<Result<ParsedSession>>>()
+const mockListProjects = vi.fn<() => Promise<Result<{ projects: Project[] }>>>()
 vi.mock('@renderer/lib/ipc-client', () => ({
   ipc: {
     sessions: {
       getParsed: (...args: unknown[]) => mockGetParsed(...args),
+      listProjects: () => mockListProjects(),
     },
   },
 }))
@@ -114,6 +116,7 @@ function makeSummary(id: string, projectId: string, lastTimestamp: string): Sess
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
+    turnOpen: false,
     serviceTiers: [],
   }
 }
@@ -457,5 +460,54 @@ describe('useSessionsStore — live updates find a merged project by its physica
     const project = useSessionsStore.getState().projects.find((p) => p.id === 'main-dir')
     expect(project?.sessions.map((s) => s.id)).toEqual(['s-worktree-new', 's-main', 's-worktree'])
     expect(project?.sessionCount).toBe(3)
+  })
+})
+
+describe('useSessionsStore — an update push for a project this renderer has not loaded', () => {
+  it('reloads the project list instead of silently dropping the session', async () => {
+    const known = makeSummary('s-known', 'known', '2026-09-16T09:00:00.000Z')
+    useSessionsStore.setState({ projects: [makeProject('known', known)] })
+    mockListProjects.mockResolvedValue({ ok: true, data: { projects: [] } })
+
+    // Same shape `handleSessionCreated` already handles; an update can arrive
+    // first when the create push was missed (e.g. it landed during a reload).
+    useSessionsStore
+      .getState()
+      .handleSessionUpdated(makeSummary('s-new', 'brand-new-project', '2026-09-16T09:05:00.000Z'))
+    await flushAsync()
+
+    expect(mockListProjects).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not start a second reload while the first is still in flight', async () => {
+    const known = makeSummary('s-known', 'known', '2026-09-16T09:00:00.000Z')
+    useSessionsStore.setState({ projects: [makeProject('known', known)] })
+    const load = deferred<Result<{ projects: Project[] }>>()
+    mockListProjects.mockReturnValue(load.promise)
+
+    // A streaming session in a brand-new project pushes every few hundred ms;
+    // each push before the first reload resolves must not queue another
+    // full rescan and full-payload IPC round trip.
+    const store = useSessionsStore.getState()
+    store.handleSessionUpdated(makeSummary('s-new', 'new-project', '2026-09-16T09:05:00.000Z'))
+    store.handleSessionUpdated(makeSummary('s-new', 'new-project', '2026-09-16T09:05:01.000Z'))
+    store.handleSessionUpdated(makeSummary('s-new', 'new-project', '2026-09-16T09:05:02.000Z'))
+    await flushAsync()
+
+    expect(mockListProjects).toHaveBeenCalledTimes(1)
+    load.resolve({ ok: true, data: { projects: [] } })
+  })
+
+  it('does not reload when the project is already known', async () => {
+    const known = makeSummary('s-known', 'known', '2026-09-16T09:00:00.000Z')
+    useSessionsStore.setState({ projects: [makeProject('known', known)] })
+    mockListProjects.mockResolvedValue({ ok: true, data: { projects: [] } })
+
+    useSessionsStore
+      .getState()
+      .handleSessionUpdated(makeSummary('s-known', 'known', '2026-09-16T09:05:00.000Z'))
+    await flushAsync()
+
+    expect(mockListProjects).not.toHaveBeenCalled()
   })
 })
