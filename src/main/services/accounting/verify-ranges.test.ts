@@ -174,8 +174,17 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
       expect(actual.totalTokens).toBe(expected.tokens)
       expect(actual.totalCost).toBeCloseTo(expected.cost, 6)
       expect(actual.modelUsage.map((m) => m.model).sort()).toEqual([...expected.models].sort())
-      // One point per day that had activity — no day invented, none dropped.
-      expect(actual.dailyUsage.length).toBe(activeDays)
+      // One point per calendar day in the window, active or idle — a bounded
+      // range is now zero-filled (see `analytics-engine.ts`'s `dailyUsage`
+      // construction), which is what makes `windowStart(days)` to today
+      // exactly `days` long regardless of how many of those days had
+      // activity. `activeDays` (logged above) is strictly <= this.
+      expect(actual.dailyUsage.length).toBe(days)
+      // No point is invented outside the window, and idle days add nothing:
+      // summing the series must still equal the independently-computed total.
+      expect(actual.dailyUsage.reduce((sum, d) => sum + d.inputTokens + d.outputTokens, 0)).toBe(
+        expected.tokens
+      )
       // Every point must fall inside the window.
       for (const point of actual.dailyUsage) expect(point.date >= start).toBe(true)
     }

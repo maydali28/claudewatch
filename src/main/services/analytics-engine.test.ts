@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import type { SessionSummary, SessionDayUsage } from '@shared/types/session'
 import type { Project } from '@shared/types/project'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
-import { UNDATED_DAY } from '@shared/utils/date-ranges'
+import {
+  UNDATED_DAY,
+  resolveDateRange,
+  dateKeysInRange,
+  toDateKey,
+} from '@shared/utils/date-ranges'
 import { computeAnalytics } from './analytics-engine'
 
 /**
@@ -679,6 +684,76 @@ describe('computeAnalytics — project costs are a breakdown of the period', () 
 })
 
 /**
+ * A merged project (see project-scanner.ts's `mergeProjectsByResolvedPath` —
+ * a git worktree and its main checkout collapsed into one `Project` because
+ * they share a resolved cwd) carries sessions from SEVERAL physical
+ * directories under one survivor `id`. `buildProjectCosts` used to key its
+ * rows by each session's own physical `projectId` instead of the owning
+ * (merged) project, which is wrong twice over: a range spanning every
+ * session's days undercounts the merged project (only the session that
+ * happens to physically live in the survivor directory counts toward it),
+ * and a range spanning ONLY the non-survivor sessions' days produces no row
+ * under the survivor id at all — the merged project vanishes from the
+ * sidebar/Overview despite having real, in-range activity.
+ */
+describe('computeAnalytics — project costs key by the owning (merged) project, not the physical directory', () => {
+  const mainSession: SessionSummary = {
+    ...session('s-main', [day({ day: '2026-09-01', inputTokens: 100, estimatedCost: 1 })]),
+    projectId: 'main-dir',
+  }
+  const worktreeASession: SessionSummary = {
+    ...session('s-worktree-a', [day({ day: '2026-09-05', inputTokens: 200, estimatedCost: 2 })]),
+    projectId: 'alpha-worktree-dir',
+  }
+  const worktreeBSession: SessionSummary = {
+    ...session('s-worktree-b', [day({ day: '2026-09-06', inputTokens: 300, estimatedCost: 3 })]),
+    projectId: 'beta-worktree-dir',
+  }
+  const mergedProject: Project = {
+    id: 'main-dir',
+    name: 'merged',
+    path: '/merged',
+    sessions: [mainSession, worktreeASession, worktreeBSession],
+    sessionCount: 3,
+    localSkills: [],
+    localClaudeMd: null,
+  }
+  const allSessions = [mainSession, worktreeASession, worktreeBSession]
+
+  it('sums every physical directory into the merged project row over a range covering all of them', () => {
+    const a = computeAnalytics(
+      allSessions,
+      [mergedProject],
+      { preset: 'custom' as const, from: '2026-09-01', to: '2026-09-06' },
+      ANTHROPIC_PRICING
+    )
+
+    expect(a.projectCosts).toHaveLength(1)
+    expect(a.projectCosts[0].projectId).toBe('main-dir')
+    expect(a.projectCosts[0].projectName).toBe('merged')
+    expect(a.projectCosts[0].totalTokens).toBe(600)
+    expect(a.projectCosts[0].totalCost).toBeCloseTo(6, 10)
+    expect(a.projectCosts[0].sessionCount).toBe(3)
+  })
+
+  it('does not vanish over a range covering only the worktree sessions’ days', () => {
+    const a = computeAnalytics(
+      allSessions,
+      [mergedProject],
+      { preset: 'custom' as const, from: '2026-09-05', to: '2026-09-06' },
+      ANTHROPIC_PRICING
+    )
+
+    expect(a.projectCosts).toHaveLength(1)
+    expect(a.projectCosts[0].projectId).toBe('main-dir')
+    expect(a.projectCosts[0].projectName).toBe('merged')
+    expect(a.projectCosts[0].totalTokens).toBe(500)
+    expect(a.projectCosts[0].totalCost).toBeCloseTo(5, 10)
+    expect(a.projectCosts[0].sessionCount).toBe(2)
+  })
+})
+
+/**
  * Cache savings were priced with Sonnet 4.6 as a stand-in for every model, and
  * per-session savings with whichever model the session used most. Both are
  * wrong for a mixed-model session even when the token counts are right.
@@ -1040,7 +1115,7 @@ describe('computeAnalytics — cost is scoped to the period', () => {
     expect(a.totalCost).toBeCloseTo(1, 10)
   })
 
-  it('excludes a session that was not active in the range at all', () => {
+  it('excludes a session that was not active in the range at all, but still zero-fills the bounded range', () => {
     const a = computeAnalytics(
       [SPLIT_SESSION],
       PROJECTS,
@@ -1050,7 +1125,10 @@ describe('computeAnalytics — cost is scoped to the period', () => {
 
     expect(a.totalSessions).toBe(0)
     expect(a.totalTokens).toBe(0)
-    expect(a.dailyUsage).toEqual([])
+    // A bounded range still renders one row per calendar day even when no
+    // session was active on any of them — see the zero-fill tests below.
+    expect(a.dailyUsage.map((d) => d.date)).toEqual(['2026-09-01', '2026-09-02'])
+    expect(a.dailyUsage.every((d) => d.inputTokens === 0 && d.sessionCount === 0)).toBe(true)
   })
 })
 
@@ -1152,14 +1230,17 @@ describe('computeAnalytics — session health trend keys off active days, not la
     ])
   })
 
-  it('gives a legacy session with no dailyUsage a lifetime verdict but no trend day', () => {
+  it('gives a legacy session with no dailyUsage a lifetime verdict but no trend day of its own', () => {
     // Same fixture shape as the tray-snapshot legacy-session test: `dailyUsage`
     // is empty but `lastTimestamp` falls inside the queried range, so the
     // outer `filterByDateRange` admits it via its `isWithinRange` fallback.
     // The lifetime verdict (clean/warning/error) is a judgement about the
     // session as a whole and must still count it; the per-day trend reads
     // only `dailyUsage`, so it must count the session on zero days rather
-    // than falling back to `lastTimestamp` like the pre-fix code did.
+    // than falling back to `lastTimestamp` like the pre-fix code did. The
+    // range is still bounded (a 1-day custom range), so it is zero-filled to
+    // its one calendar day regardless of whether any session contributed to
+    // it — that zero row is the range's, not the legacy session's.
     const legacySession: SessionSummary = {
       ...session('legacy-1', []),
       lastTimestamp: '2026-09-09T12:00:00.000Z',
@@ -1173,7 +1254,9 @@ describe('computeAnalytics — session health trend keys off active days, not la
     )
 
     expect(a.sessionHealthSummary.cleanCount).toBe(1)
-    expect(a.sessionHealthSummary.dailyHealthTrend).toEqual([])
+    expect(a.sessionHealthSummary.dailyHealthTrend).toEqual([
+      { date: '2026-09-09', clean: 0, flagged: 0 },
+    ])
   })
 })
 
@@ -1216,6 +1299,45 @@ describe('computeAnalytics — latency ignores a turn duration with an unparsabl
     const totalBucketed = a.latencyAnalytics.histogram.reduce((s, b) => s + b.count, 0)
     expect(totalBucketed).toBe(1)
     expect(a.latencyAnalytics.slowestTurns.map((t) => t.turnIndex)).toEqual([0])
+  })
+})
+
+/**
+ * Fix-round-2 finding B: `SlowTurnEntry.projectId` must identify the OWNING
+ * (possibly merged) project, the same fix as `buildProjectCosts` — the
+ * renderer's `latency-tab.tsx` filters `slowestTurns` by `selectedProjectIds`
+ * (always survivor ids), so a turn tagged with its session's raw physical
+ * directory would silently drop out of a merged project's latency tab.
+ */
+describe('computeAnalytics — slow turns key by the owning (merged) project, not the physical directory', () => {
+  it('tags a slow turn with the merged survivor id even when its session physically lives in a non-survivor directory', () => {
+    const worktreeSession: SessionSummary = {
+      ...session('s-worktree', [day({ day: '2026-09-10', responseCount: 1, messageCount: 1 })]),
+      projectId: 'worktree-dir',
+      turnDurations: [
+        {
+          turnIndex: 0,
+          durationMs: 9000,
+          isPostCompaction: false,
+          inputTokens: 0,
+          assistantTimestamp: '2026-09-10T10:00:00.000Z',
+        },
+      ],
+    }
+    const mergedProject: Project = {
+      id: 'main-dir',
+      name: 'merged',
+      path: '/merged',
+      sessions: [worktreeSession],
+      sessionCount: 1,
+      localSkills: [],
+      localClaudeMd: null,
+    }
+
+    const a = computeAnalytics([worktreeSession], [mergedProject], '30d', ANTHROPIC_PRICING)
+
+    expect(a.latencyAnalytics.slowestTurns).toHaveLength(1)
+    expect(a.latencyAnalytics.slowestTurns[0].projectId).toBe('main-dir')
   })
 })
 
@@ -1301,5 +1423,286 @@ describe('computeAnalytics — the undated bucket in all-time totals', () => {
     expect(thirtyDays.effortAnalytics.distribution.high).toBe(0)
     expect(thirtyDays.parallelToolAnalytics.totalParallelGroups).toBe(0)
     expect(thirtyDays.cacheAnalytics.compactionAnalytics.totalCompactions).toBe(0)
+  })
+})
+
+/**
+ * The reported defect: a "7d" chart showed only 6 days. `resolveDateRange`
+ * was never wrong — it already resolves '7d' to exactly 7 keys — but
+ * `buildDailyUsage` only ever emitted a row for a day that HAD activity, so
+ * an idle day (most visibly today, early in it) was silently absent rather
+ * than present with zeros. These tests pin the fix: every bounded preset
+ * renders one row per calendar day, `all` is deliberately excluded (its
+ * lower bound is 1970), `UNDATED_DAY` never becomes a zero row, and no
+ * figure changes — zeros add nothing to any sum.
+ */
+describe('computeAnalytics — bounded ranges zero-fill idle days', () => {
+  /** `n` calendar days before the real "now" the test happens to run at. */
+  function daysAgo(n: number): string {
+    const d = new Date()
+    d.setDate(d.getDate() - n)
+    return toDateKey(d)
+  }
+
+  it('a bounded range renders one entry per calendar day even when idle', () => {
+    // Active on only 2 of the last 7 days: 6 days ago, and today.
+    const s = session('active-2-of-7', [
+      day({ day: daysAgo(6), inputTokens: 10 }),
+      day({ day: daysAgo(0), inputTokens: 20 }),
+    ])
+
+    const a = computeAnalytics([s], PROJECTS, '7d', ANTHROPIC_PRICING)
+
+    expect(a.dailyUsage).toHaveLength(7)
+    expect(a.dailyUsage.filter((d) => d.inputTokens === 0)).toHaveLength(5)
+  })
+
+  it.each(['today', '7d', '30d'] as const)('%s yields exactly its key count', (preset) => {
+    const s = session('active-today-only', [day({ day: daysAgo(0), inputTokens: 5 })])
+    const { from, to } = resolveDateRange(preset)
+
+    const a = computeAnalytics([s], PROJECTS, preset, ANTHROPIC_PRICING)
+
+    expect(a.dailyUsage).toHaveLength(dateKeysInRange(from, to).length)
+  })
+
+  it('all-time is not zero-filled back to 1970', () => {
+    const s = session('active-today-only', [day({ day: daysAgo(0), inputTokens: 5 })])
+
+    const a = computeAnalytics([s], PROJECTS, 'all', ANTHROPIC_PRICING)
+
+    expect(a.dailyUsage.length).toBeLessThan(1000)
+  })
+
+  // No `it.each` guarding "no dailyUsage entry is the undated sentinel under
+  // a bounded preset" here on purpose: `daysInRange` already excludes
+  // `UNDATED_DAY` from every bounded preset via `includeUndated` (see its own
+  // doc comment) BEFORE the zero-fill ever runs, and `computeAnalytics` never
+  // sets `includeUndated` except for `all` — a bounded preset's
+  // `observedDailyUsage` structurally cannot contain `UNDATED_DAY` in the
+  // first place, with or without this task's fill. A version of that
+  // assertion was here and looked like coverage, but no mutation of the fill
+  // itself could ever fail it: `zeroFillDailySeries` now preserves any
+  // out-of-fill-range entry it's given (see "keeps a real day beyond the
+  // fill clamp" above), so even routing `UNDATED_DAY` through it would no
+  // longer strip it out — the guarantee lives entirely in `daysInRange`,
+  // which already has its own coverage (`excludes undated activity from a
+  // calendar range but still reports it`, above). Removed rather than kept
+  // as a check that cannot fail.
+
+  it('all does not zero-fill: a genuine undated day keeps its real values, whatever the corpus size', () => {
+    // Unlike a bounded preset, `all` legitimately admits `UNDATED_DAY` into
+    // `dailyUsage` (`includeUndated` is true only for `all`) — this pins
+    // that the actual field values survive intact. It does NOT prove
+    // `shouldZeroFill` is false for `all`: `zeroFillDailySeries` now
+    // preserves an out-of-range entry either way (see its own doc comment),
+    // so if `all` were ever misrouted through the fill, this specific
+    // assertion would still pass — what would catch that misrouting is
+    // `dailyUsage.length` exploding to tens of thousands, already pinned by
+    // "all-time is not zero-filled back to 1970" above.
+    const s = session('has-real-undated-activity', [
+      day({ day: UNDATED_DAY, inputTokens: 42, messageCount: 3 }),
+    ])
+
+    const a = computeAnalytics([s], PROJECTS, 'all', ANTHROPIC_PRICING)
+
+    const undatedRow = a.dailyUsage.find((d) => d.date === UNDATED_DAY)
+    expect(undatedRow?.inputTokens).toBe(42)
+    expect(undatedRow?.messageCount).toBe(3)
+  })
+
+  it('zero-filling a bounded range leaves every summed figure unchanged', () => {
+    const s = session('active-2-of-7', [
+      day({ day: daysAgo(6), inputTokens: 100, outputTokens: 10, estimatedCost: 1 }),
+      day({ day: daysAgo(0), inputTokens: 50, outputTokens: 5, estimatedCost: 0.5 }),
+    ])
+
+    const a = computeAnalytics([s], PROJECTS, '7d', ANTHROPIC_PRICING)
+
+    expect(a.dailyUsage.reduce((sum, d) => sum + d.inputTokens, 0)).toBe(150)
+    expect(a.dailyUsage.reduce((sum, d) => sum + d.outputTokens, 0)).toBe(15)
+    expect(a.dailyUsage.reduce((sum, d) => sum + d.estimatedCost, 0)).toBeCloseTo(1.5, 10)
+    expect(a.dailyUsage.reduce((sum, d) => sum + d.sessionCount, 0)).toBe(2)
+  })
+
+  it('zero-fills effortOverTime the same way, for the same bounded range', () => {
+    const s = session('effort-2-of-7', [
+      day({
+        day: daysAgo(6),
+        effortDistribution: { low: 1, medium: 0, high: 0, ultrathink: 0 },
+      }),
+      day({
+        day: daysAgo(0),
+        effortDistribution: { low: 0, medium: 1, high: 0, ultrathink: 0 },
+      }),
+    ])
+
+    const a = computeAnalytics([s], PROJECTS, '7d', ANTHROPIC_PRICING)
+
+    expect(a.effortAnalytics.effortOverTime).toHaveLength(7)
+    const idleDays = a.effortAnalytics.effortOverTime.filter(
+      (e) =>
+        e.distribution.low +
+          e.distribution.medium +
+          e.distribution.high +
+          e.distribution.ultrathink ===
+        0
+    )
+    expect(idleDays).toHaveLength(5)
+  })
+
+  it('does not zero-fill dailyModelCost: it stays one row per (day, model) actually observed', () => {
+    const s = session('active-today-only', [
+      day({
+        day: daysAgo(0),
+        models: [
+          {
+            model: 'claude-sonnet-5',
+            family: 'sonnet-5',
+            inputTokens: 10,
+            outputTokens: 5,
+            cacheReadTokens: 0,
+            cacheCreation5mTokens: 0,
+            cacheCreation1hTokens: 0,
+            cacheCreationUnknownTtlTokens: 0,
+            estimatedCost: 1,
+            turnCount: 1,
+          },
+        ],
+      }),
+    ])
+
+    const a = computeAnalytics([s], PROJECTS, '7d', ANTHROPIC_PRICING)
+
+    // 7 calendar days in range, only 1 has model activity — no zero-filled
+    // placeholder rows for the other 6, unlike `dailyUsage` above.
+    expect(a.dailyModelCost).toHaveLength(1)
+  })
+
+  it('zero-fills sessionHealthSummary.dailyHealthTrend the same way, without moving the lifetime verdict counts', () => {
+    // `HealthTrendChart` draws this as `<Line type="monotone">`, which
+    // interpolates BETWEEN points — a missing idle day used to draw a smooth,
+    // plausible-looking slope straight across days nothing happened on,
+    // which is worse than a gap: it looks like data.
+    const clean = session('clean-1-of-7', [day({ day: daysAgo(6) })])
+    const flagged = session('flagged-today', [day({ day: daysAgo(0), estimatedCost: 999 })])
+
+    const a = computeAnalytics([clean, flagged], PROJECTS, '7d', ANTHROPIC_PRICING)
+
+    expect(a.sessionHealthSummary.dailyHealthTrend).toHaveLength(7)
+    const idleDays = a.sessionHealthSummary.dailyHealthTrend.filter(
+      (d) => d.clean === 0 && d.flagged === 0
+    )
+    expect(idleDays).toHaveLength(5)
+    // The lifetime verdict is a judgement about each session as a whole and
+    // must not move just because idle days were added to the daily trend.
+    expect(a.sessionHealthSummary.cleanCount).toBe(1)
+    expect(a.sessionHealthSummary.warningCount).toBe(1)
+    expect(a.sessionHealthSummary.errorCount).toBe(0)
+  })
+
+  it('clamps the zero-fill upper bound to today: a custom range ending in the future never fabricates future days', () => {
+    const s = session('active-today-only', [day({ day: daysAgo(0), inputTokens: 5 })])
+    const future = new Date()
+    future.setDate(future.getDate() + 30)
+
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      { preset: 'custom' as const, from: daysAgo(3), to: toDateKey(future) },
+      ANTHROPIC_PRICING
+    )
+
+    const todayKey = daysAgo(0)
+    expect(a.dailyUsage.every((d) => d.date <= todayKey)).toBe(true)
+    // Today minus 3 through today, inclusive: 4 real days — not 34.
+    expect(a.dailyUsage).toHaveLength(4)
+  })
+
+  it('keeps a real day beyond the fill clamp: the series sum still matches the headline total for a range extending into the future', () => {
+    // The clamp exists to stop FABRICATING future zero rows, not to drop
+    // OBSERVED ones — a future-dated response (clock skew, a timezone edge)
+    // is real data, and it was visible before this fix landed. today+2 is
+    // past `zeroFillTo` (today) but still inside the selected range
+    // (today-3 .. today+5), so it must survive into `dailyUsage` even though
+    // the fill itself never reaches out that far to manufacture a row there.
+    const s = session('spans-into-the-future', [
+      day({ day: daysAgo(1), inputTokens: 100, estimatedCost: 1 }),
+      day({ day: daysAgo(-2), inputTokens: 777, estimatedCost: 7 }),
+    ])
+
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      { preset: 'custom' as const, from: daysAgo(3), to: daysAgo(-5) },
+      ANTHROPIC_PRICING
+    )
+
+    expect(a.totalTokens).toBe(877)
+    expect(a.totalCost).toBeCloseTo(8, 10)
+    const seriesTokens = a.dailyUsage.reduce((sum, d) => sum + d.inputTokens, 0)
+    const seriesCost = a.dailyUsage.reduce((sum, d) => sum + d.estimatedCost, 0)
+    // The series must reconcile with the headline above it, not undercount it.
+    expect(seriesTokens).toBe(a.totalTokens)
+    expect(seriesCost).toBeCloseTo(a.totalCost, 10)
+    // The real future day is present...
+    expect(a.dailyUsage.some((d) => d.date === daysAgo(-2))).toBe(true)
+    // ...but nothing further out than it was fabricated as a zero row.
+    expect(a.dailyUsage.some((d) => d.date === daysAgo(-5))).toBe(false)
+    expect(a.dailyUsage.some((d) => d.date === daysAgo(-3))).toBe(false)
+  })
+
+  it('does not zero-fill a pathologically wide custom range (span cap)', () => {
+    const s = session('active-today-only', [day({ day: daysAgo(0), inputTokens: 5 })])
+
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      // 401 calendar days — over MAX_ZERO_FILL_DAYS (366) — so this falls
+      // back to `all`'s sparse, observed-days-only behaviour rather than
+      // synthesising 400 empty rows.
+      { preset: 'custom' as const, from: daysAgo(400), to: daysAgo(0) },
+      ANTHROPIC_PRICING
+    )
+
+    expect(a.dailyUsage).toHaveLength(1)
+  })
+
+  it.each(['today', '7d', '30d'] as const)(
+    // `DailyUsageChart`/`EffortOverTimeChart`'s "No data for this period"
+    // branch (`data.length === 0`) is only reachable when `dailyUsage` can
+    // legitimately be empty. This pins that it no longer can be, for any
+    // bounded preset, even with zero sessions at all — the branch is dead
+    // for these three, and only `all` (below) still reaches it.
+    '%s zero-fills even a completely empty corpus, so dailyUsage is never empty',
+    (preset) => {
+      const a = computeAnalytics([], PROJECTS, preset, ANTHROPIC_PRICING)
+      expect(a.dailyUsage.length).toBeGreaterThan(0)
+    }
+  )
+
+  it('all stays empty for a completely empty corpus — the one case the "No data" branch still guards', () => {
+    const a = computeAnalytics([], PROJECTS, 'all', ANTHROPIC_PRICING)
+    expect(a.dailyUsage).toEqual([])
+  })
+
+  it.each(['7d', '30d'] as const)(
+    // `HealthTrendChart`'s "Not enough data for a trend" branch
+    // (`trend.length < 2`) is now reachable only for `today` (always exactly
+    // 1 point) and for `all`/the span-cap fallback (below) — this pins that
+    // it is unreachable for any other bounded preset, even with zero
+    // sessions at all.
+    '%s zero-fills dailyHealthTrend to at least 2 points, even with zero sessions',
+    (preset) => {
+      const a = computeAnalytics([], PROJECTS, preset, ANTHROPIC_PRICING)
+      expect(a.sessionHealthSummary.dailyHealthTrend.length).toBeGreaterThanOrEqual(2)
+    }
+  )
+
+  it('today zero-fills dailyHealthTrend to exactly 1 point, even with zero sessions', () => {
+    // 1 point is correctly "not enough for a trend" — `today` is the one
+    // bounded preset where the chart's branch stays legitimately reachable.
+    const a = computeAnalytics([], PROJECTS, 'today', ANTHROPIC_PRICING)
+    expect(a.sessionHealthSummary.dailyHealthTrend).toHaveLength(1)
   })
 })
