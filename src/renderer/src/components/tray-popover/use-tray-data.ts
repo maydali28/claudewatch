@@ -1,10 +1,12 @@
-import { useEffect, useCallback } from 'react'
+import { useEffect, useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TraySnapshot, TraySnapshotSession } from '@shared/types/analytics'
 import type { UpdateInfo } from '@shared/types/project'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
 import { buildWeeklyUsage } from './weekly-usage'
+import { partitionTraySessions } from './live-sessions'
+import { LIVE_REFRESH_INTERVAL_MS } from '@shared/constants/tuning'
 
 const REFRESH_INTERVAL_MS = 30_000
 
@@ -69,6 +71,14 @@ export function useTrayData(): TrayData {
     queryKey: TRAY_ANALYTICS_KEY,
     queryFn: fetchTraySnapshot,
     refetchInterval: REFRESH_INTERVAL_MS,
+    // The popover is a persistent hidden panel. React Query skips the interval
+    // while the page is hidden, and the shared client turns focus refetches
+    // off — so opening the tray used to render whatever snapshot the last
+    // push or poll left, for up to 30s. Refetch on every show instead
+    // (`visibilitychange` is what drives focusManager), and treat the cached
+    // snapshot as stale so that refetch actually happens.
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
   const updateInfoQuery = useQuery({
     queryKey: TRAY_UPDATE_INFO_KEY,
@@ -148,18 +158,47 @@ export function useTrayData(): TrayData {
   }
 
   // Main sends only the days that had activity; the week is filled here so
-  // "today" and "yesterday" are real calendar days.
-  const weeklyUsage = buildWeeklyUsage(
-    (snapshot?.weekly ?? []).map((d) => ({
-      date: d.date,
-      inputTokens: d.tokens,
-      outputTokens: 0,
-      estimatedCost: d.cost,
-    }))
+  // "today" and "yesterday" are real calendar days. Memoised on the snapshot's
+  // own series so the liveness clock below does not rebuild it every tick.
+  const weekly = snapshot?.weekly
+  const weeklyUsage = useMemo(
+    () =>
+      buildWeeklyUsage(
+        (weekly ?? []).map((d) => ({
+          date: d.date,
+          inputTokens: d.tokens,
+          outputTokens: 0,
+          estimatedCost: d.cost,
+        }))
+      ),
+    [weekly]
   )
 
-  const activeSessions = snapshot?.activeSessions ?? []
-  const recentSessions = snapshot?.recentSessions ?? []
+  // Age main's active list against the popover's own clock (see
+  // `partitionTraySessions`). The clock ticks only while there is something
+  // to age out and the panel is actually visible — the popover is hidden
+  // nearly all the time, and re-rendering a never-shown tree every 15s would
+  // be waste; the refetch on show (above) supplies a fresh snapshot the
+  // moment it matters. The clock never lags behind the snapshot it judges.
+  const [now, setNow] = useState(() => Date.now())
+  const clock = Math.max(now, analyticsQuery.dataUpdatedAt)
+
+  const { activeSessions, recentSessions } = partitionTraySessions(
+    snapshot?.activeSessions ?? [],
+    snapshot?.recentSessions ?? [],
+    clock
+  )
+
+  // Gated on the list AFTER partitioning, so the timer stops once everything
+  // has aged out rather than running until the next snapshot happens along.
+  const activeCount = activeSessions.length
+  useEffect(() => {
+    if (activeCount === 0) return
+    const id = setInterval(() => {
+      if (!document.hidden) setNow(Date.now())
+    }, LIVE_REFRESH_INTERVAL_MS)
+    return () => clearInterval(id)
+  }, [activeCount])
 
   const error = analyticsQuery.error
     ? String(analyticsQuery.error.message ?? analyticsQuery.error)
