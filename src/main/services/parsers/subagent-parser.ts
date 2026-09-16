@@ -16,17 +16,22 @@ import { createActivityAccumulator, type DayActivity } from './activity-reducer'
 /**
  * See `SessionSummary.diagnostics` — this is that shape, scoped to subagents.
  *
- * The four usage-completeness fields are read from each child's own
- * `projectUsage(entries)` (see `parseSingleSubagent` below) and summed across
- * every subagent file, the same way `malformedLines` etc. are — the parent
- * parsers that combine per-agent diagnostics into a session total need this
- * aggregate, or child-session completeness silently reads as zero while
- * looking measured.
+ * The four usage-completeness fields and `conflictCount` are read from each
+ * child's own `projectUsage(entries)` (see `parseSingleSubagent` below) and
+ * summed across every subagent file, the same way `malformedLines` etc. are
+ * — the parent parsers that combine per-agent diagnostics into a session
+ * total need this aggregate, or child-session completeness (and child usage
+ * conflicts) silently reads as zero while looking measured. `conflictCount`
+ * was the one field missing here until it caused exactly that: it lives
+ * outside `UsageProjection.combined` as that projection's own top-level
+ * counter, so `full-parser.ts` reading `usage.conflictCount` from its
+ * parent-only projection had no per-child figure to add it to.
  */
 export interface SubagentDiagnostics {
   malformedLines: number
   unreadableChildren: number
   negativeCounters: number
+  conflictCount: number
   unpricedResponses: number
   incompleteUsageResponses: number
   responsesWithoutCompletionSignal: number
@@ -77,6 +82,7 @@ export async function parseSubagents(
         malformedLines: 0,
         unreadableChildren: 0,
         negativeCounters: 0,
+        conflictCount: 0,
         unpricedResponses: 0,
         incompleteUsageResponses: 0,
         responsesWithoutCompletionSignal: 0,
@@ -105,6 +111,7 @@ export async function parseSubagents(
     malformedLines: 0,
     unreadableChildren: 0,
     negativeCounters: 0,
+    conflictCount: 0,
     unpricedResponses: 0,
     incompleteUsageResponses: 0,
     responsesWithoutCompletionSignal: 0,
@@ -114,6 +121,7 @@ export async function parseSubagents(
     diagnostics.malformedLines += result.diagnostics.malformedLines
     diagnostics.unreadableChildren += result.diagnostics.unreadableChildren
     diagnostics.negativeCounters += result.diagnostics.negativeCounters
+    diagnostics.conflictCount += result.diagnostics.conflictCount
     diagnostics.unpricedResponses += result.diagnostics.unpricedResponses
     diagnostics.incompleteUsageResponses += result.diagnostics.incompleteUsageResponses
     diagnostics.responsesWithoutCompletionSignal +=
@@ -196,6 +204,7 @@ async function parseSingleSubagent(
         malformedLines,
         unreadableChildren: 1,
         negativeCounters: 0,
+        conflictCount: 0,
         unpricedResponses: 0,
         incompleteUsageResponses: 0,
         responsesWithoutCompletionSignal: 0,
@@ -215,6 +224,7 @@ async function parseSingleSubagent(
     malformedLines,
     unreadableChildren: 0,
     negativeCounters: accumulator.negativeCounters(),
+    conflictCount: usage.conflictCount,
     unpricedResponses: usage.combined.unpricedResponses,
     incompleteUsageResponses: usage.combined.incompleteUsageResponses,
     responsesWithoutCompletionSignal: usage.combined.responsesWithoutCompletionSignal,
