@@ -447,7 +447,7 @@ export async function parseSessionFull(
     }
   }
 
-  // Mirrors `metadata-parser.ts`'s `diagnostics` build in shape — same eight
+  // Mirrors `metadata-parser.ts`'s `diagnostics` build in shape — same ten
   // counts — but not for free: metadata-parser's `usage` already projects
   // parent+child entries together, so reading `usage.combined.*`/
   // `usage.conflictCount` there already IS the combined total. This parser's
@@ -474,6 +474,9 @@ export async function parseSessionFull(
       childDiagnostics.responsesWithoutCompletionSignal,
     reducedConfidenceResponses:
       usage.combined.reducedConfidenceResponses + childDiagnostics.reducedConfidenceResponses,
+    pricingModifierResponses:
+      usage.combined.pricingModifierResponses + childDiagnostics.pricingModifierResponses,
+    serverToolRequests: usage.combined.serverToolRequests + childDiagnostics.serverToolRequests,
   }
 
   let subagentInputTokens = 0

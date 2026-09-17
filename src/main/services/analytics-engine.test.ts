@@ -27,6 +27,8 @@ function day(over: Partial<SessionDayUsage> & { day: string }): SessionDayUsage 
     incompleteUsageResponses: 0,
     responsesWithoutCompletionSignal: 0,
     reducedConfidenceResponses: 0,
+    pricingModifierResponses: 0,
+    serverToolRequests: 0,
     responseCount: 1,
     parentMessageCount: 1,
     childMessageCount: 0,
@@ -94,6 +96,8 @@ function session(id: string, dailyUsage: SessionDayUsage[]): SessionSummary {
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
@@ -629,6 +633,32 @@ describe('computeAnalytics — completeness contract carries into cache analytic
     expect(a.incompleteUsageResponses).toBe(2)
     expect(a.responsesWithoutCompletionSignal).toBe(3)
     expect(a.reducedConfidenceResponses).toBe(4)
+  })
+
+  // Task 17: estimate gaps travel the same way as the completeness counts —
+  // range-scoped, into both the overview totals and the cache tab — and a
+  // day row persisted before the fields existed reads as zero, not NaN.
+  it('carries pricing-modifier and server-tool counts for the selected range only, treating a missing field as zero', () => {
+    const legacyDay = day({ day: '2026-09-14' }) as unknown as Record<string, unknown>
+    delete legacyDay.pricingModifierResponses
+    delete legacyDay.serverToolRequests
+    const s = session('estimate-gaps', [
+      day({ day: '2026-09-01', pricingModifierResponses: 50, serverToolRequests: 60 }),
+      day({ day: '2026-09-13', pricingModifierResponses: 2, serverToolRequests: 7 }),
+      legacyDay as unknown as SessionDayUsage,
+    ])
+
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-13', to: '2026-09-14' },
+      ANTHROPIC_PRICING
+    )
+
+    expect(a.pricingModifierResponses).toBe(2)
+    expect(a.serverToolRequests).toBe(7)
+    expect(a.cacheAnalytics.pricingModifierResponses).toBe(2)
+    expect(a.cacheAnalytics.serverToolRequests).toBe(7)
   })
 
   it('excludes a day outside the selected range from the completeness counts', () => {

@@ -246,6 +246,11 @@ describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
     // data, unlike the raw-shape check above, and is a tripwire in the same
     // style as the tier/iteration checks.
     let thinkingExceedsOutput = 0
+    // Task 17: estimate gaps — counted, never priced. Reported, not asserted
+    // on: the probe found none in real history, but a user who turns on fast
+    // mode or web search is not a defect.
+    let pricingModifierResponses = 0
+    let serverToolRequests = 0
     const models = new Map<string, number>()
     const unknownModels = new Map<string, number>()
 
@@ -293,7 +298,10 @@ describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
       // file rather than collecting every entry across the whole corpus into
       // one array, to keep this test's memory use in line with the streaming
       // per-file loop it already runs.
-      projectionUnknownTtlTokens += projectUsage(entries).combined.cacheWriteUnknownTtl
+      const projected = projectUsage(entries).combined
+      projectionUnknownTtlTokens += projected.cacheWriteUnknownTtl
+      pricingModifierResponses += projected.pricingModifierResponses
+      serverToolRequests += projected.serverToolRequests
     }
     const elapsedMs = Date.now() - started
 
@@ -310,6 +318,8 @@ describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
     console.log(`  undated responses    ${undatedResponses.toLocaleString()}`)
     console.log(`  raw thinking bad     ${rawThinkingBadShape}`)
     console.log(`  thinking > output    ${thinkingExceedsOutput}`)
+    console.log(`  pricing modifiers   ${pricingModifierResponses.toLocaleString()}`)
+    console.log(`  server tool requests ${serverToolRequests.toLocaleString()}`)
     console.log(`  total cost           $${cost.toFixed(2)}`)
     console.log(`  full rebuild         ${(elapsedMs / 1000).toFixed(1)}s`)
     console.log(

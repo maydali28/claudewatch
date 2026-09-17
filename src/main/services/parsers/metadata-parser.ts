@@ -582,6 +582,8 @@ function buildDailyUsage(
       incompleteUsageResponses: d?.incompleteUsageResponses ?? 0,
       responsesWithoutCompletionSignal: d?.responsesWithoutCompletionSignal ?? 0,
       reducedConfidenceResponses: d?.reducedConfidenceResponses ?? 0,
+      pricingModifierResponses: d?.pricingModifierResponses ?? 0,
+      serverToolRequests: d?.serverToolRequests ?? 0,
       responseCount: d?.responseCount ?? 0,
       parentMessageCount: parentMessages,
       childMessageCount: childMessages,
@@ -753,7 +755,7 @@ export async function parseSessionMetadata(
 
   // Unlike `full-parser.ts`, `usage` above is already built from
   // `[...ledger.entries(), ...childEntries]`, so `usage.combined.*` is
-  // already the parent+child total for every one of these four fields — not
+  // already the parent+child total for every one of these fields — not
   // "copied from the parent alone". Reading it directly here is the correct
   // combination, not a shortcut past one.
   const diagnostics: SessionSummary['diagnostics'] = {
@@ -765,6 +767,8 @@ export async function parseSessionMetadata(
     incompleteUsageResponses: usage.combined.incompleteUsageResponses,
     responsesWithoutCompletionSignal: usage.combined.responsesWithoutCompletionSignal,
     reducedConfidenceResponses: usage.combined.reducedConfidenceResponses,
+    pricingModifierResponses: usage.combined.pricingModifierResponses,
+    serverToolRequests: usage.combined.serverToolRequests,
   }
   // Same rationale as the incompleteUsageResponses warning above: once per
   // parse, through the shared logger, so bad input shows up in the persisted

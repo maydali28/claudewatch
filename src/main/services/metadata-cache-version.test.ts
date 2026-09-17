@@ -80,18 +80,29 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(11, tz)
+    writeCacheFile(12, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 11, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 10, or a
-    // bump to 12 without a matching migration, would do.
+    // If the constant is not 12, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 11, or a
+    // bump to 13 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
   })
 
-  it('discards a v10 cache file rather than serving it under the v11 contract', () => {
+  it('discards a v11 cache file rather than serving it under the v12 contract', () => {
+    const tz = `${TZ}-stale-v11`
+    writeCacheFile(11, tz)
+
+    // A v11 summary has no `pricingModifierResponses` / `serverToolRequests`
+    // in `diagnostics` or `dailyUsage`. Serving it back would show "no fast
+    // mode, no web search" as a measured zero for every cached session. See
+    // `CACHE_VERSION`'s v12 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
+  })
+
+  it('discards a v10 cache file rather than serving it under a later contract', () => {
     const tz = `${TZ}-stale`
     writeCacheFile(10, tz)
 
@@ -103,7 +114,7 @@ describe('CACHE_VERSION', () => {
   })
 
   it('discards every version below the current one, not just the immediately previous', () => {
-    for (const stale of [1, 5, 6, 7, 8, 9, 10]) {
+    for (const stale of [1, 5, 6, 7, 8, 9, 10, 11]) {
       const tz = `${TZ}-stale-${stale}`
       writeCacheFile(stale, tz)
       expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()

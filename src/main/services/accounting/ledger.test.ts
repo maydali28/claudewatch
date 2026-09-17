@@ -4,7 +4,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING, estimateCost } from '@shared/constants/pricing'
 import { UNDATED_DAY } from '@shared/utils/date-ranges'
-import { ingestFile, type SourceIdentity } from './ledger'
+import { hasUnsupportedPricingModifier, ingestFile, type SourceIdentity } from './ledger'
 
 let dir: string
 
@@ -1793,5 +1793,119 @@ describe('ingestFile — reduced-confidence response ids', () => {
     const { entries } = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
 
     expect(entries[0].reducedConfidenceId).toBe(false)
+  })
+})
+
+/**
+ * Task 17: the estimate prices every response at the list rate. Fast mode,
+ * regional inference and a non-standard service tier all change what a
+ * response really costs, and web search / web fetch requests are billed per
+ * request on top of tokens. None of that is priced here, so the ledger only
+ * COUNTS it — the totals must not move.
+ *
+ * The comparison set comes from real history (see the Task 17 report): every
+ * response there reports `inference_geo: "not_available"`, and a handful
+ * report `null` for all three fields. Neither means a modifier was applied.
+ */
+describe('hasUnsupportedPricingModifier', () => {
+  it.each([
+    [{ speed: 'fast' }, true],
+    [{ speed: 'standard' }, false],
+    [{ inferenceGeo: 'global' }, false],
+    [{ inferenceGeo: 'us' }, true],
+    [{ inferenceGeo: 'not_available' }, false],
+    [{ serviceTier: 'standard' }, false],
+    [{ serviceTier: 'priority' }, true],
+    [{ speed: null, inferenceGeo: null, serviceTier: null }, false],
+    [{ speed: 'standard', inferenceGeo: 'not_available', serviceTier: 'standard' }, false],
+    [{}, false],
+  ])('hasUnsupportedPricingModifier(%o) = %s', (e, expected) => {
+    expect(
+      hasUnsupportedPricingModifier(e as Parameters<typeof hasUnsupportedPricingModifier>[0])
+    ).toBe(expected)
+  })
+})
+
+describe('ingestFile — server tool requests', () => {
+  const base = {
+    input_tokens: 5,
+    output_tokens: 20,
+    cache_read_input_tokens: 3,
+    cache_creation_input_tokens: 0,
+  }
+
+  it('captures server_tool_use request counts from the last fragment and never adds them to tokens or cost', async () => {
+    const plain = fixture('server-tool-plain', [customAssistant({ uuid: 'p', usage: base })])
+    const file = fixture('server-tool-last-fragment', [
+      customAssistant({
+        uuid: 'a',
+        usage: {
+          ...base,
+          output_tokens: 1,
+          server_tool_use: { web_search_requests: 1, web_fetch_requests: 0 },
+        },
+      }),
+      customAssistant({
+        uuid: 'b',
+        usage: { ...base, server_tool_use: { web_search_requests: 3, web_fetch_requests: 2 } },
+      }),
+      // A later fragment with nothing usable keeps the last valid report.
+      customAssistant({
+        uuid: 'c',
+        usage: { ...base, server_tool_use: { web_search_requests: -1 } },
+      }),
+    ])
+
+    const { entries } = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
+    const { entries: plainEntries } = await ingestFile(plain, PARENT, ANTHROPIC_PRICING)
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0].serverToolRequests).toBe(5)
+    expect(entries[0].inputTokens).toBe(plainEntries[0].inputTokens)
+    expect(entries[0].outputTokens).toBe(plainEntries[0].outputTokens)
+    expect(entries[0].cacheReadTokens).toBe(plainEntries[0].cacheReadTokens)
+    expect(entries[0].costUsd).toBe(plainEntries[0].costUsd)
+    expect(entries[0].usageIncomplete).toBe(false)
+    expect(entries[0].usageConflict).toBe(false)
+  })
+
+  it('ignores request counts that are not finite non-negative integers', async () => {
+    const file = fixture('server-tool-invalid', [
+      customAssistant({
+        uuid: 'a',
+        usage: {
+          ...base,
+          server_tool_use: { web_search_requests: 1.5, web_fetch_requests: 'two' },
+        },
+      }),
+      customAssistant({
+        uuid: 'b',
+        id: 'm2',
+        usage: {
+          ...base,
+          server_tool_use: { web_search_requests: Infinity, web_fetch_requests: 4 },
+        },
+      }),
+    ])
+
+    const { entries } = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
+    const byId = new Map(entries.map((e) => [e.responseId, e]))
+
+    expect(byId.get('m1')!.serverToolRequests).toBeUndefined()
+    // JSON has no Infinity (it serialises to null), so only the valid fetch count survives.
+    expect(byId.get('m2')!.serverToolRequests).toBe(4)
+  })
+
+  it('reads zero-valued request counts as zero, the shape real history carries', async () => {
+    const file = fixture('server-tool-zero', [
+      customAssistant({
+        uuid: 'a',
+        usage: { ...base, server_tool_use: { web_search_requests: 0, web_fetch_requests: 0 } },
+      }),
+    ])
+
+    const { entries } = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
+
+    expect(entries[0].serverToolRequests).toBe(0)
   })
 })

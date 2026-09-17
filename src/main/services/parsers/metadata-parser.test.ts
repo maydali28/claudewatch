@@ -191,6 +191,8 @@ describe('parseSessionMetadata — diagnostics', () => {
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     })
   })
 })

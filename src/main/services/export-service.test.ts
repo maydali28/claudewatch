@@ -32,6 +32,8 @@ function diagnostics(over: Partial<SessionDiagnostics> = {}): SessionDiagnostics
     incompleteUsageResponses: 0,
     responsesWithoutCompletionSignal: 0,
     reducedConfidenceResponses: 0,
+    pricingModifierResponses: 0,
+    serverToolRequests: 0,
     ...over,
   }
 }

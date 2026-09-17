@@ -185,6 +185,25 @@ function assistantConflicting(idPrefix: string, id = 'msg_1'): Record<string, un
   ]
 }
 
+/**
+ * A clean assistant record that ran in fast mode and made web search/fetch
+ * requests — Task 17's estimate gaps. Priced at the list rate like any other.
+ */
+function assistantWithEstimateGaps(
+  uuid: string,
+  id: string,
+  requests: number
+): Record<string, unknown> {
+  const record = assistantClean(uuid, id)
+  const message = record.message as Record<string, unknown>
+  message.usage = {
+    ...(message.usage as Record<string, unknown>),
+    speed: 'fast',
+    server_tool_use: { web_search_requests: requests, web_fetch_requests: 0 },
+  }
+  return record
+}
+
 const user = {
   type: 'user',
   uuid: 'u1',
@@ -703,8 +722,15 @@ describe('parseSessionFull — child usage conflicts', () => {
  */
 describe('parseSessionFull / parseSessionMetadata — diagnostics parity', () => {
   it('agrees with the metadata parser on every diagnostics field, including a child-only usage conflict', async () => {
-    const file = write('diagnostics-parity', [user, assistantClean('a', 'msg_parent')])
-    writeSubagent('diagnostics-parity', 'conflict', assistantConflicting('ca', 'cmsg_1'))
+    const file = write('diagnostics-parity', [
+      user,
+      assistantClean('a', 'msg_parent'),
+      assistantWithEstimateGaps('b', 'msg_parent_fast', 2),
+    ])
+    writeSubagent('diagnostics-parity', 'conflict', [
+      ...assistantConflicting('ca', 'cmsg_1'),
+      assistantWithEstimateGaps('cb', 'cmsg_fast', 3),
+    ])
 
     const full = await parseSessionFull(file, 'diagnostics-parity', 'proj', ANTHROPIC_PRICING)
     const meta = await parseSessionMetadata(file, 'diagnostics-parity', 'proj', ANTHROPIC_PRICING)
@@ -724,5 +750,14 @@ describe('parseSessionFull / parseSessionMetadata — diagnostics parity', () =>
     // broke. Without this, the loop above could pass vacuously on an
     // all-zero session and never have caught the bug it exists to guard.
     expect(fullDiag.conflictCount).toBe(1)
+    // Task 17: parent and child each contribute, so a build that drops the
+    // child side (full-parser's parent-only projection) cannot pass.
+    expect(fullDiag.pricingModifierResponses).toBe(2)
+    expect(fullDiag.serverToolRequests).toBe(5)
+    // The per-day rows analytics sums must carry the same totals.
+    const daySum = (key: 'pricingModifierResponses' | 'serverToolRequests'): number =>
+      meta.dailyUsage.reduce((sum, d) => sum + d[key], 0)
+    expect(daySum('pricingModifierResponses')).toBe(2)
+    expect(daySum('serverToolRequests')).toBe(5)
   })
 })

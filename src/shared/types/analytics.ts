@@ -163,6 +163,17 @@ export interface CacheAnalytics {
    * scoped to this tab's range.
    */
   reducedConfidenceResponses: number
+  /**
+   * Responses in the period that used fast mode, regional inference or a
+   * non-standard service tier — same concept as
+   * `SessionDiagnostics.pricingModifierResponses`, scoped to this tab's range.
+   */
+  pricingModifierResponses: number
+  /**
+   * Web search / web fetch requests in the period — same concept as
+   * `SessionDiagnostics.serverToolRequests`, scoped to this tab's range.
+   */
+  serverToolRequests: number
 }
 
 // ─── Model Efficiency ─────────────────────────────────────────────────────────
@@ -323,6 +334,17 @@ export interface AnalyticsData {
    * instead — see `SessionDiagnostics.reducedConfidenceResponses`.
    */
   reducedConfidenceResponses: number
+  /**
+   * Responses in the period that used fast mode, regional inference or a
+   * non-standard service tier — see `SessionDiagnostics.pricingModifierResponses`.
+   * Priced at the list rate in `totalCost`; the modifier is not included.
+   */
+  pricingModifierResponses: number
+  /**
+   * Web search / web fetch requests in the period — see
+   * `SessionDiagnostics.serverToolRequests`. Billed per request; not in `totalCost`.
+   */
+  serverToolRequests: number
   dailyUsage: DailyUsage[]
   projectCosts: ProjectCost[]
   modelUsage: ModelUsage[]
