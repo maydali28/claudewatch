@@ -61,15 +61,14 @@ class FakeWindow {
     return this.destroyed
   }
   setVisibleOnAllWorkspaces(): void {}
-  loadURL(): Promise<void> {
-    return Promise.resolve()
-  }
-  loadFile(): Promise<void> {
-    return Promise.resolve()
-  }
+  loadURL = vi.fn((_url: string): Promise<void> => Promise.resolve())
+  loadFile = vi.fn((_file: string, _options?: { query: Record<string, string> }): Promise<void> =>
+    Promise.resolve()
+  )
   getBounds(): { x: number; y: number; width: number; height: number } {
     return { x: 0, y: 0, width: 380, height: 560 }
   }
+  focus = vi.fn()
   setPosition = vi.fn()
   setContentSize = vi.fn()
   center = vi.fn()
@@ -257,6 +256,62 @@ describe('createOrShowUpdateWindow — window options', () => {
       minHeight: 300,
       maxHeight: 760,
       width: 520,
+    })
+  })
+})
+
+// ─── createOrShowUpdateWindow — carrying an install error ─────────────────────
+//
+// A cancelled or failed install reopens this window with a structured
+// `UpdateServiceError`. The new-window path hands the renderer its state as
+// query params (read synchronously on mount, before any IPC listener exists),
+// and the reuse path pushes the same payload over `push:show-update`. If
+// either drops `updateError`, the surface that was showing "Installing…"
+// never learns the install failed.
+
+describe('createOrShowUpdateWindow — update error', () => {
+  const updateError = {
+    phase: 'install' as const,
+    message: 'The update could not be installed: user cancelled',
+    hint: 'macOS asks for a password because …',
+  }
+  const info = { version: '9.9.9' }
+
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  function queryOf(win: FakeWindow): Record<string, string> {
+    // Production loads a file with a `query` option; the dev server gets the
+    // same pairs as a query string. Read whichever this run took.
+    if (win.loadFile.mock.calls.length > 0) {
+      const [, options] = win.loadFile.mock.calls[0]
+      return options?.query ?? {}
+    }
+    const [url] = win.loadURL.mock.calls[0]
+    return Object.fromEntries(new URL(url).searchParams)
+  }
+
+  it('puts the update error in the new window’s query', async () => {
+    const mod = await import('./window-manager')
+    const win = mod.createOrShowUpdateWindow(info, undefined, updateError) as unknown as FakeWindow
+
+    const query = queryOf(win)
+    expect(query['updateError']).toBeDefined()
+    expect(JSON.parse(query['updateError'])).toEqual(updateError)
+    expect(JSON.parse(query['updateInfo'])).toEqual(info)
+  })
+
+  it('puts the update error in the push:show-update payload when the window is reused', async () => {
+    const mod = await import('./window-manager')
+    const win = mod.createOrShowUpdateWindow(null) as unknown as FakeWindow
+
+    mod.createOrShowUpdateWindow(info, undefined, updateError)
+
+    expect(win.webContents.send).toHaveBeenCalledWith('push:show-update', {
+      updateInfo: info,
+      errorMessage: undefined,
+      updateError,
     })
   })
 })

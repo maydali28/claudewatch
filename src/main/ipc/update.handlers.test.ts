@@ -123,11 +123,19 @@ describe('updates:resize-window', () => {
     expect(result).toEqual({ ok: true, data: undefined })
   })
 
-  it('rejects an invalid payload', async () => {
+  it('rejects an invalid payload without reporting it to Sentry', async () => {
     const result = await callResize({ height: 'tall' })
 
     expect(result).toMatchObject({ ok: false, code: 'UPDATE_RESIZE_FAILED' })
-    expect(mockCaptureHandlerException).toHaveBeenCalled()
+    // A renderer that measures itself wrong is not a crash worth a Sentry
+    // event. Failures go through `captureHandlerException`, which returns
+    // without capturing when the message starts with this exact prefix (see
+    // sentry.ts). Pin the prefix on this side too: rename it on either side
+    // and every malformed resize starts filling the issue stream again.
+    expect(mockCaptureHandlerException).toHaveBeenCalledTimes(1)
+    const [captured] = mockCaptureHandlerException.mock.calls[0] as [unknown]
+    expect(captured).toBeInstanceOf(Error)
+    expect((captured as Error).message).toMatch(/^IPC validation failed/)
   })
 
   it('rejects a negative height', async () => {
