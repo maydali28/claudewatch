@@ -14,6 +14,7 @@ import { FileWatcher } from './services/file-watcher'
 import { accountingWorker } from './services/accounting/worker-client'
 import { getClaudeDir } from '@main/lib/claude-paths'
 import { initUpdateService } from './services/update-service'
+import { isAppQuitting, registerUpdateQuitHandlers, onUpdateQuitDisarmed } from './lib/update-quit'
 import { rootLogger as log } from './lib/logger'
 import { CHANNELS } from '@shared/ipc/channels'
 import { initSentryEarly, initSentry, captureException } from './services/sentry'
@@ -44,16 +45,56 @@ let mainWindow: BrowserWindow | null = null
 // will-quit handler can call stop() regardless of where it was created.
 let fileWatcher: FileWatcher | null = null
 
-// True once the user has confirmed quit (via tray menu or Cmd+Q). Prevents the
-// macOS close-button handler from intercepting the actual quit sequence.
-let isQuitting = false
+/**
+ * Create the dashboard window and wire its close/closed handlers.
+ *
+ * Used both at startup and to recover the dashboard after an install that
+ * failed once the handoff was already under way. With
+ * `autoInstallOnAppQuit = false`, `quitAndInstall()` asks the native updater
+ * to prepare the install; the authorization panel is raised there, *before*
+ * `before-quit-for-update` and before any window is closed, so a cancelled
+ * password prompt leaves every window standing. A failure after that point
+ * does not: Squirrel has emitted `before-quit-for-update`, the quit is armed
+ * and the windows are on their way out when the error arrives, and the app
+ * never actually quits — see `disarmUpdateQuit` in `./lib/update-quit`.
+ * Without recreating the dashboard here, `mainWindow` stays null afterwards,
+ * so `tray:open-dashboard` and the tray menu's "Open Dashboard" have nothing
+ * to show and silently do nothing.
+ */
+function createAndWireDashboardWindow(): BrowserWindow {
+  const win = createDashboardWindow()
 
-// How long to let Squirrel hand the install request to ShipIt before we quit,
-// and how long to wait after that before exiting the hard way. The handoff is
-// near-instant in practice (measured well under a second), so these are safety
-// margins, not expected waits.
-const UPDATE_QUIT_HANDOFF_MS = 2_000
-const UPDATE_QUIT_HARD_EXIT_MS = 5_000
+  // ── Window close behaviour ───────────────────────────────────────────────
+  // macOS: the red close button hides the window AND removes it from the Dock
+  // so it feels truly closed, while the tray remains active.
+  // Windows/Linux: closing the last window quits the app.
+  win.on('close', (event) => {
+    if (!isAppQuitting()) {
+      if (process.platform === 'darwin') {
+        event.preventDefault()
+        win.hide()
+        // Remove from Dock and Cmd+Tab switcher — tray stays alive
+        app.dock?.hide()
+      } else {
+        // Windows/Linux: hide to tray instead of closing
+        event.preventDefault()
+        win.setSkipTaskbar(true)
+        win.hide()
+      }
+    }
+  })
+
+  // Null the reference once the window is actually destroyed so we never call
+  // methods on a dead BrowserWindow object. Guarded by identity in case a
+  // newer window has already replaced this one by the time it closes.
+  win.on('closed', () => {
+    if (mainWindow === win) {
+      mainWindow = null
+    }
+  })
+
+  return win
+}
 
 function bootstrap(): void {
   // Must run before app.whenReady() — @sentry/electron requires it.
@@ -148,36 +189,13 @@ function bootstrap(): void {
     registerTrayHandlers(() => mainWindow)
 
     // Create the main dashboard window — starts hidden (tray is the entry point).
-    mainWindow = createDashboardWindow()
+    mainWindow = createAndWireDashboardWindow()
 
-    // ── Window close behaviour ───────────────────────────────────────────────
-    // macOS: the red close button hides the window AND removes it from the Dock
-    // so it feels truly closed, while the tray remains active.
-    // Windows/Linux: closing the last window quits the app.
-    mainWindow.on('close', (event) => {
-      if (!isQuitting) {
-        if (process.platform === 'darwin') {
-          event.preventDefault()
-          mainWindow?.hide()
-          // Remove from Dock and Cmd+Tab switcher — tray stays alive
-          app.dock?.hide()
-        } else {
-          // Windows/Linux: hide to tray instead of closing
-          event.preventDefault()
-          mainWindow?.setSkipTaskbar(true)
-          mainWindow?.hide()
-        }
-      }
-    })
-
-    // Null the reference once the window is actually destroyed so we never call
-    // methods on a dead BrowserWindow object.
-    mainWindow.on('closed', () => {
-      mainWindow = null
-    })
-
-    // Setup system tray (passes mainWindow so tray can show/hide it)
-    setupTray(mainWindow)
+    // Setup system tray. Passed as a getter, not the window itself: the
+    // dashboard can be destroyed and re-created at runtime (see
+    // createAndWireDashboardWindow and the onUpdateQuitDisarmed listener
+    // below), and a captured reference would go stale.
+    setupTray(() => mainWindow)
 
     // Register the dashboard-window getter centrally so window-manager's
     // `broadcastToRenderers` can fan out push events to both the dashboard
@@ -206,7 +224,7 @@ function bootstrap(): void {
         mainWindow.focus()
       } else {
         // Window was destroyed — re-create it (edge case after force-close).
-        mainWindow = createDashboardWindow()
+        mainWindow = createAndWireDashboardWindow()
       }
     })
   })
@@ -214,10 +232,7 @@ function bootstrap(): void {
   // ─── Quit coordination ──────────────────────────────────────────────────────
   // Signal that a real quit is in progress so the 'close' handler doesn't
   // intercept it. app.quit() triggers before-quit → will-quit → closed.
-  app.on('before-quit', () => {
-    isQuitting = true
-  })
-
+  //
   // An update quit does NOT emit 'before-quit'. From Electron's own docs for
   // autoUpdater.quitAndInstall():
   //
@@ -226,7 +241,7 @@ function bootstrap(): void {
   //    wish to perform actions before the windows are closed while a process is
   //    quitting, as well as listening to before-quit."
   //
-  // Without this, isQuitting stayed false, the 'close' handler below hid the
+  // Without this, the quit flag stayed false, the 'close' handler above hid the
   // window instead of letting it close, the process stayed alive, and Squirrel's
   // ShipIt aborted the install:
   //
@@ -245,20 +260,31 @@ function bootstrap(): void {
   // `before-quit-for-update` is emitted by Electron's built-in autoUpdater
   // (Squirrel), never by `app` — so listening on `app` registered a handler
   // that could not fire. electron-updater's quitAndInstall delegates to this
-  // same object on macOS, which is what actually starts the handoff.
-  squirrelUpdater.on('before-quit-for-update', () => {
-    isQuitting = true
-    setTimeout(() => {
-      log.info('Quitting so ShipIt can install the update')
-      app.quit()
-      // app.quit() is cooperative — anything that prevents the quit would leave
-      // ShipIt waiting again. Exiting is strictly better than a silent no-op:
-      // the update is already staged and ShipIt relaunches us afterwards.
-      setTimeout(() => {
-        log.warn('Quit did not complete — exiting so the update can proceed')
-        app.exit(0)
-      }, UPDATE_QUIT_HARD_EXIT_MS)
-    }, UPDATE_QUIT_HANDOFF_MS)
+  // same object on macOS, which is what actually starts the handoff. Both
+  // listeners are wired by registerUpdateQuitHandlers (registering the second
+  // one on `app` instead of the updater is the exact bug that shipped in
+  // 1.2.6–1.2.9 and never fired).
+  //
+  // A cancelled install must disarm this — see `disarmUpdateQuit`, called
+  // from the updater's `error` handler.
+  registerUpdateQuitHandlers({ app, squirrelUpdater, log })
+
+  // Recovery for an install that failed *after* the handoff started. The
+  // authorization panel is raised by the native updater inside
+  // `quitAndInstall`, before `before-quit-for-update` and before any window
+  // closes, so a cancelled password prompt on its own leaves the dashboard
+  // alone. Once Squirrel has emitted `before-quit-for-update`, though, the
+  // quit is armed and the windows are being torn down — and a failure from
+  // there on never actually quits the app (see disarmUpdateQuit). Without
+  // this, mainWindow stays null afterwards and both `tray:open-dashboard` and
+  // the tray menu's "Open Dashboard" silently do nothing. Recreate it hidden —
+  // the update window (reopened by update-service.ts alongside the error) is
+  // what the user actually sees, so this does not force the dashboard
+  // visible.
+  onUpdateQuitDisarmed(() => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      mainWindow = createAndWireDashboardWindow()
+    }
   })
 
   // ─── Keep process alive on all windows closed (tray app) ───────────────────

@@ -139,6 +139,10 @@ export interface IPCContracts {
     request: void
     response: Result<void>
   }
+  'updates:resize-window': {
+    request: { height: number }
+    response: Result<void>
+  }
   'tray:get-snapshot': {
     request: void
     response: Result<TraySnapshot>

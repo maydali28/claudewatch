@@ -28,8 +28,11 @@ class FakeWindow {
   private listeners = new Map<string, Listener[]>()
   private visible = false
   private destroyed = false
+  options: Record<string, unknown> | undefined
 
-  constructor(_opts?: unknown) {}
+  constructor(opts?: Record<string, unknown>) {
+    this.options = opts
+  }
 
   on(event: string, cb: Listener): this {
     const arr = this.listeners.get(event) ?? []
@@ -58,73 +61,31 @@ class FakeWindow {
     return this.destroyed
   }
   setVisibleOnAllWorkspaces(): void {}
-  loadURL(): Promise<void> {
-    return Promise.resolve()
-  }
-  loadFile(): Promise<void> {
-    return Promise.resolve()
-  }
+  loadURL = vi.fn((_url: string): Promise<void> => Promise.resolve())
+  loadFile = vi.fn((_file: string, _options?: { query: Record<string, string> }): Promise<void> =>
+    Promise.resolve()
+  )
   getBounds(): { x: number; y: number; width: number; height: number } {
     return { x: 0, y: 0, width: 380, height: 560 }
   }
+  focus = vi.fn()
   setPosition = vi.fn()
+  setContentSize = vi.fn()
+  center = vi.fn()
 }
 
-const appListeners = new Map<string, Listener[]>()
+// `app` here is only ever read for `app.isPackaged` (see IS_DEV) — window-manager.ts
+// no longer imports Electron's `autoUpdater` or registers any listener on `app`;
+// that responsibility moved to `./lib/update-quit`, which is electron-free and
+// carries its own regression guard for the 1.2.6-1.2.9 "listener on the wrong
+// emitter" bug (see update-quit.test.ts).
 const fakeApp = {
   isPackaged: true,
   getPath: () => '/tmp',
-  once(event: string, cb: Listener) {
-    const arr = appListeners.get(event) ?? []
-    arr.push(cb)
-    appListeners.set(event, arr)
-  },
-  on(event: string, cb: Listener) {
-    this.once(event, cb)
-  },
-  removeListener(event: string, cb: Listener) {
-    const arr = appListeners.get(event) ?? []
-    appListeners.set(
-      event,
-      arr.filter((l) => l !== cb)
-    )
-  },
-  emit(event: string) {
-    for (const cb of appListeners.get(event) ?? []) cb()
-  },
-}
-
-/**
- * Electron's built-in autoUpdater is a different emitter from `app`, and the
- * only one that emits `before-quit-for-update`. Kept separate here so a
- * listener registered on the wrong object fails a test rather than becoming an
- * update that silently never installs.
- */
-const updaterListeners = new Map<string, Listener[]>()
-const fakeSquirrelUpdater = {
-  once(event: string, cb: Listener) {
-    const arr = updaterListeners.get(event) ?? []
-    arr.push(cb)
-    updaterListeners.set(event, arr)
-  },
-  on(event: string, cb: Listener) {
-    this.once(event, cb)
-  },
-  removeListener(event: string, cb: Listener) {
-    const arr = updaterListeners.get(event) ?? []
-    updaterListeners.set(
-      event,
-      arr.filter((l) => l !== cb)
-    )
-  },
-  emit(event: string) {
-    for (const cb of updaterListeners.get(event) ?? []) cb()
-  },
 }
 
 vi.mock('electron', () => ({
   app: fakeApp,
-  autoUpdater: fakeSquirrelUpdater,
   BrowserWindow: FakeWindow,
   shell: { openExternal: vi.fn() },
   screen: {
@@ -143,8 +104,6 @@ describe('positionPopoverUnderTray', () => {
   beforeEach(() => {
     vi.resetModules()
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
-    appListeners.clear()
-    updaterListeners.clear()
   })
 
   it('centers the popover under the tray icon on the clicked display', async () => {
@@ -196,8 +155,6 @@ describe('createTrayPopoverWindow', () => {
   beforeEach(() => {
     vi.resetModules()
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
-    appListeners.clear()
-    updaterListeners.clear()
   })
 
   it('hides instead of closing (Cmd+W via the default app menu must not destroy it)', async () => {
@@ -214,38 +171,63 @@ describe('createTrayPopoverWindow', () => {
 
   it('allows the close during app quit', async () => {
     const { createTrayPopoverWindow } = await import('./window-manager')
+    const q = await import('./lib/update-quit')
     const win = createTrayPopoverWindow() as unknown as FakeWindow
 
-    fakeApp.emit('before-quit')
+    q.markAppQuitting()
     const closeEvent = { preventDefault: vi.fn() }
     win.emit('close', closeEvent)
 
     expect(closeEvent.preventDefault).not.toHaveBeenCalled()
+    q.disarmUpdateQuit()
   })
 
-  /**
-   * An update quit emits `before-quit-for-update` on Electron's built-in
-   * autoUpdater — not on `app`. Listening on the wrong emitter left the popover
-   * refusing to close, which kept the process alive and made ShipIt abort the
-   * install. That shipped in 1.2.6–1.2.9 and never fired.
-   */
-  it('allows the close during an update quit', async () => {
-    const { createTrayPopoverWindow } = await import('./window-manager')
-    const win = createTrayPopoverWindow() as unknown as FakeWindow
+  it('allows the close while an update quit is armed', async () => {
+    // Unlike the plain app-quit test above, this exercises the real update
+    // path (armUpdateQuit, not a bare markAppQuitting) — the popover must
+    // let the close through as soon as the quit is armed, without waiting
+    // for the handoff timer to fire.
+    vi.useFakeTimers()
+    const wm = await import('./window-manager')
+    const q = await import('./lib/update-quit')
+    const win = wm.createTrayPopoverWindow() as unknown as FakeWindow
 
-    fakeSquirrelUpdater.emit('before-quit-for-update')
-    const closeEvent = { preventDefault: vi.fn() }
-    win.emit('close', closeEvent)
+    q.armUpdateQuit({ quit: vi.fn(), exit: vi.fn(), log: { info: vi.fn(), warn: vi.fn() } })
+    const event = { preventDefault: vi.fn() }
+    win.emit('close', event)
 
-    expect(closeEvent.preventDefault).not.toHaveBeenCalled()
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    q.disarmUpdateQuit()
+    vi.useRealTimers()
   })
 
-  it('does not listen for the update quit on app, which never emits it', async () => {
-    const { createTrayPopoverWindow } = await import('./window-manager')
-    createTrayPopoverWindow()
+  it('hides instead of closing again once a cancelled install disarmed the quit', async () => {
+    const wm = await import('./window-manager')
+    const q = await import('./lib/update-quit')
+    const win = wm.createTrayPopoverWindow() as unknown as FakeWindow
 
-    expect(appListeners.get('before-quit-for-update') ?? []).toHaveLength(0)
-    expect(updaterListeners.get('before-quit-for-update') ?? []).not.toHaveLength(0)
+    q.markAppQuitting() // first attempt
+    q.disarmUpdateQuit() // user cancelled the password prompt → updater error → disarm
+    const event = { preventDefault: vi.fn() }
+    win.emit('close', event)
+
+    expect(event.preventDefault).toHaveBeenCalled()
+    expect(win.isVisible()).toBe(false)
+  })
+
+  it('allows the close on a SECOND update quit after the first was cancelled', async () => {
+    const wm = await import('./window-manager')
+    const q = await import('./lib/update-quit')
+    const win = wm.createTrayPopoverWindow() as unknown as FakeWindow
+
+    q.markAppQuitting()
+    q.disarmUpdateQuit() // attempt 1, cancelled
+    q.markAppQuitting() // attempt 2
+    const event = { preventDefault: vi.fn() }
+    win.emit('close', event)
+
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    q.disarmUpdateQuit()
   })
 
   it('clears the module-level reference once the window is destroyed', async () => {
@@ -258,13 +240,87 @@ describe('createTrayPopoverWindow', () => {
   })
 })
 
+// ─── createOrShowUpdateWindow sizing ───────────────────────────────────────────
+
+describe('createOrShowUpdateWindow — window options', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('creates a fixed-width, content-clamped, non-resizable window', async () => {
+    const mod = await import('./window-manager')
+    const win = mod.createOrShowUpdateWindow(null) as unknown as FakeWindow
+
+    expect(win.options).toMatchObject({
+      resizable: false,
+      minHeight: 300,
+      maxHeight: 760,
+      width: 520,
+    })
+  })
+})
+
+// ─── createOrShowUpdateWindow — carrying an install error ─────────────────────
+//
+// A cancelled or failed install reopens this window with a structured
+// `UpdateServiceError`. The new-window path hands the renderer its state as
+// query params (read synchronously on mount, before any IPC listener exists),
+// and the reuse path pushes the same payload over `push:show-update`. If
+// either drops `updateError`, the surface that was showing "Installing…"
+// never learns the install failed.
+
+describe('createOrShowUpdateWindow — update error', () => {
+  const updateError = {
+    phase: 'install' as const,
+    message: 'The update could not be installed: user cancelled',
+    hint: 'macOS asks for a password because …',
+  }
+  const info = { version: '9.9.9' }
+
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  function queryOf(win: FakeWindow): Record<string, string> {
+    // Production loads a file with a `query` option; the dev server gets the
+    // same pairs as a query string. Read whichever this run took.
+    if (win.loadFile.mock.calls.length > 0) {
+      const [, options] = win.loadFile.mock.calls[0]
+      return options?.query ?? {}
+    }
+    const [url] = win.loadURL.mock.calls[0]
+    return Object.fromEntries(new URL(url).searchParams)
+  }
+
+  it('puts the update error in the new window’s query', async () => {
+    const mod = await import('./window-manager')
+    const win = mod.createOrShowUpdateWindow(info, undefined, updateError) as unknown as FakeWindow
+
+    const query = queryOf(win)
+    expect(query['updateError']).toBeDefined()
+    expect(JSON.parse(query['updateError'])).toEqual(updateError)
+    expect(JSON.parse(query['updateInfo'])).toEqual(info)
+  })
+
+  it('puts the update error in the push:show-update payload when the window is reused', async () => {
+    const mod = await import('./window-manager')
+    const win = mod.createOrShowUpdateWindow(null) as unknown as FakeWindow
+
+    mod.createOrShowUpdateWindow(info, undefined, updateError)
+
+    expect(win.webContents.send).toHaveBeenCalledWith('push:show-update', {
+      updateInfo: info,
+      errorMessage: undefined,
+      updateError,
+    })
+  })
+})
+
 // ─── broadcastToRenderers ─────────────────────────────────────────────────────
 
 describe('broadcastToRenderers', () => {
   beforeEach(() => {
     vi.resetModules()
-    appListeners.clear()
-    updaterListeners.clear()
   })
 
   it('reaches the update window, so its download progress bar actually moves', async () => {

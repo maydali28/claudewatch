@@ -41,6 +41,7 @@ export const CHANNELS = {
   UPDATES_CHECK: 'updates:check',
   UPDATES_DOWNLOAD: 'updates:download',
   UPDATES_INSTALL: 'updates:install',
+  UPDATES_RESIZE_WINDOW: 'updates:resize-window',
 
   // Tray
   TRAY_GET_SNAPSHOT: 'tray:get-snapshot',

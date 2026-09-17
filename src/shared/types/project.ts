@@ -35,3 +35,13 @@ export interface UpdateInfo {
   releaseNotes?: string
   releaseDate?: string
 }
+
+export type UpdatePhase = 'idle' | 'checking' | 'downloading' | 'downloaded' | 'installing'
+
+export interface UpdateServiceError {
+  /** Which operation failed. 'install' includes a cancelled macOS password prompt. */
+  phase: 'check' | 'download' | 'install'
+  message: string
+  /** Set on macOS when the app bundle is not writable by the current user. */
+  hint?: string
+}
