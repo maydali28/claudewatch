@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
 import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import type { EffortDistribution } from '@shared/types/session'
+import { getProjectsDirPath } from '@main/lib/claude-paths'
 import { ingestFile, type SourceIdentity } from './ledger'
 import { projectUsage } from './projection'
 
@@ -152,7 +153,12 @@ function rawBillableResponseIds(filePath: string): Set<string> {
 }
 
 describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
-  const root = path.join(os.homedir(), '.claude', 'projects')
+  const root = getProjectsDirPath()
+
+  // Say which history is being verified: CLAUDE_CONFIG_DIR relocates it.
+  beforeAll(() => {
+    console.log(`\n  Verifying history in ${root}`)
+  })
 
   it('ingests the whole history and reports its shape', async () => {
     const files = transcripts(root)

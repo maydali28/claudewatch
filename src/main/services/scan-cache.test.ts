@@ -104,6 +104,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     id: 'proj',
     name: 'proj',
     path: '/proj',
+    pathResolved: true,
     sessions: [makeSummary()],
     sessionCount: 1,
     localSkills: [],

@@ -2,6 +2,7 @@ import * as path from 'path'
 import { Worker } from 'worker_threads'
 import { app } from 'electron'
 import { createLogger } from '@main/lib/logger'
+import { getClaudeDir, getClaudeDirSource } from '@main/lib/claude-paths'
 import type {
   PricingTable,
   ResultFor,
@@ -133,8 +134,19 @@ function defaultSpawn(): WorkerLike {
   // rollup input, so this resolves in both development and a packaged app.
   // Electron's `app` does not exist inside a worker thread, so the paths it
   // owns are resolved here and handed over at spawn.
+  //
+  // `worker_threads` do not share module state with this thread, so
+  // `@main/lib/claude-paths` inside the worker would otherwise resolve the
+  // Claude directory independently of what this thread (and `FileWatcher`)
+  // are watching — see `seedClaudeDir()`'s doc comment. Computed fresh on
+  // every call, so a respawn after a crash carries this thread's *current*
+  // resolution, not whatever the very first spawn saw.
   return new Worker(path.join(__dirname, 'accounting-worker.js'), {
-    workerData: { userDataPath: app.getPath('userData') },
+    workerData: {
+      userDataPath: app.getPath('userData'),
+      claudeDir: getClaudeDir(),
+      claudeDirSource: getClaudeDirSource(),
+    },
   }) as unknown as WorkerLike
 }
 

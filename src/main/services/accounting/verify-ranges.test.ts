@@ -4,6 +4,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
 import { toDateKey } from '@shared/utils/date-ranges'
+import { getProjectsDirPath } from '@main/lib/claude-paths'
 import { ingestFile } from './ledger'
 
 // See metadata-parser.test.ts for why this mock exists (vitest's `forks` pool
@@ -93,7 +94,10 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
   // one. Hooks of a skipped suite never run.
   let root: string
   beforeAll(() => {
-    root = freezeHistory(path.join(os.homedir(), '.claude', 'projects'))
+    const source = getProjectsDirPath()
+    // Say which history is being verified: CLAUDE_CONFIG_DIR relocates it.
+    console.log(`\n  Verifying history in ${source}`)
+    root = freezeHistory(source)
   })
 
   it('30d and 90d totals match the responses that fall in those windows', async () => {
@@ -136,6 +140,7 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
       id,
       name: id,
       path: id,
+      pathResolved: true,
       sessions: [],
       sessionCount: 0,
       localSkills: [],

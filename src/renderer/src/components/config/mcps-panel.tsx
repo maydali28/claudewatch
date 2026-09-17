@@ -3,7 +3,16 @@ import { AlertCircle, Check, CheckCircle2, Circle, Copy, Server } from 'lucide-r
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
+import { useClaudePaths, type ClaudePaths } from '@renderer/hooks/use-claude-paths'
 import type { McpServerEntry } from '@shared/types'
+
+// Mirrors getClaudeJsonPath()'s own default-vs-override branch (see
+// @main/lib/claude-paths): the app:get-paths IPC result only carries
+// `claudeDir`/`display`/`source`, not a separate .claude.json path, so the
+// display string for it is derived the same way here.
+function claudeJsonDisplay(paths: ClaudePaths): string {
+  return paths.source === 'default' ? '~/.claude.json' : `${paths.display}/.claude.json`
+}
 
 const LEVEL_COLORS: Record<string, string> = {
   global: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
@@ -151,6 +160,7 @@ function CapabilityChip({ label, active }: { label: string; active: boolean }): 
 // ─── MCP detail view ──────────────────────────────────────────────────────────
 
 function McpDetail({ mcp }: { mcp: McpServerEntry }): React.JSX.Element {
+  const paths = useClaudePaths()
   const envKeys = Object.keys(mcp.env)
   const fullCommand = mcp.command ? [mcp.command, ...mcp.args].join(' ') : null
   const transport = mcp.type ?? (mcp.url ? 'sse' : 'stdio')
@@ -296,7 +306,7 @@ function McpDetail({ mcp }: { mcp: McpServerEntry }): React.JSX.Element {
               </span>
               <span className="text-[10px] text-muted-foreground">
                 {mcp.level === 'global'
-                  ? '~/.claude.json or ~/.claude/settings.json'
+                  ? `${claudeJsonDisplay(paths)} or ${paths.display}/settings.json`
                   : mcp.level === 'project'
                     ? 'Project settings.json'
                     : 'Local settings'}

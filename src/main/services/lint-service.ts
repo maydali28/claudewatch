@@ -4,6 +4,7 @@ import type { LintResult, LintSummary, LintContext } from '@shared/types/lint'
 import type { SessionSummary } from '@shared/types/session'
 import { getClaudeDir } from '@main/lib/claude-paths'
 import { readRawSettings } from './config-service'
+import { resolvedProjectRoots } from './project-roots'
 import { cmdRules } from './lint-rules/cmd.rules'
 import { rulRules } from './lint-rules/rul.rules'
 import { sklRules } from './lint-rules/skl.rules'
@@ -28,9 +29,16 @@ async function buildContext(projectEncodedId?: string): Promise<LintContext> {
     // No CLAUDE.md
   }
 
-  // If project is specified, prefer project CLAUDE.md
-  if (projectEncodedId) {
-    const projectClaudeMd = path.join(claudeDir, 'projects', projectEncodedId, 'CLAUDE.md')
+  // Resolve the project's real root; a project known only by its encoded
+  // directory name has no trustworthy root, so project files are skipped.
+  const projectRef = projectEncodedId
+    ? (await resolvedProjectRoots()).find((r) => r.id === projectEncodedId)
+    : undefined
+  const projectRoot = projectRef?.path
+
+  // If project is specified, prefer the project's own CLAUDE.md
+  if (projectRoot) {
+    const projectClaudeMd = path.join(projectRoot, 'CLAUDE.md')
     try {
       claudeMdContent = await fs.promises.readFile(projectClaudeMd, 'utf-8')
       claudeMdPath = projectClaudeMd
@@ -39,20 +47,9 @@ async function buildContext(projectEncodedId?: string): Promise<LintContext> {
     }
   }
 
-  const settings = await readRawSettings(projectEncodedId)
+  const settings = await readRawSettings(projectRef)
   const rulesDir = path.join(claudeDir, 'rules')
   const skillsDir = path.join(claudeDir, 'skills')
-
-  // Resolve project root from projectEncodedId if available
-  let projectRoot: string | undefined
-  if (projectEncodedId) {
-    // URL-decode the project dir name to get original path
-    try {
-      projectRoot = decodeURIComponent(projectEncodedId.replace(/-/g, '/'))
-    } catch {
-      // leave undefined
-    }
-  }
 
   return {
     claudeDir,

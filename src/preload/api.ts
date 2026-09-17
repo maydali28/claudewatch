@@ -86,7 +86,7 @@ export const api = {
   plans: {
     list: () => invoke(CHANNELS.PLANS_LIST),
 
-    get: (filename: string) => invoke(CHANNELS.PLANS_GET, { filename }),
+    get: (id: string) => invoke(CHANNELS.PLANS_GET, { id }),
 
     getProjects: (slug: string) => invoke(CHANNELS.PLANS_GET_PROJECTS, { slug }),
   },
@@ -130,6 +130,7 @@ export const api = {
     quit: () => invoke(CHANNELS.APP_QUIT),
     relaunch: () => invoke(CHANNELS.APP_RELAUNCH),
     getVersion: () => invoke(CHANNELS.APP_GET_VERSION),
+    getPaths: () => invoke(CHANNELS.APP_GET_PATHS),
   },
 
   // ─── Push event subscriptions ─────────────────────────────────────────────

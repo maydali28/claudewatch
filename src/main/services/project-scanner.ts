@@ -6,7 +6,8 @@ import type { SkillEntry } from '@shared/types/config'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { decodeProjectId, projectDisplayName } from '@shared/utils/decode-project-id'
 import { currentTimezone, compareTimestampsAscending } from '@shared/utils/date-ranges'
-import { getClaudeDir, getProjectsDirPath } from '@main/lib/claude-paths'
+import { getClaudeDir, getProjectsDirPath, getUserSkillsDirPath } from '@main/lib/claude-paths'
+import { samePath } from '@main/lib/same-path'
 import { parseSessionMetadata } from './session-parser'
 import { childFingerprint } from './parsers/child-fingerprint'
 import { readSkillsFromDir } from './config-service'
@@ -201,6 +202,8 @@ function mergeProjectGroup(projects: Project[]): Project {
     id: survivorId,
     name: projects[0].name,
     path: projects[0].path,
+    // A group is only ever formed from resolved members.
+    pathResolved: true,
     sessions,
     sessionCount: sessions.length,
     localSkills: [...skillsById.values()],
@@ -284,6 +287,16 @@ async function readProjectCwd(projectDirName: string): Promise<string | null> {
   return null
 }
 
+/**
+ * A project's own skills from `<root>/.claude/skills`. A project rooted at the
+ * home directory (`claude` run in `~`, possibly through a symlink) has the
+ * user skills folder there; those are user skills, not listed again here.
+ */
+function readProjectSkills(root: string): Promise<SkillEntry[]> {
+  const dir = path.join(root, '.claude', 'skills')
+  return samePath(dir, getUserSkillsDirPath()) ? Promise.resolve([]) : readSkillsFromDir(dir)
+}
+
 async function getProjectDetails(
   projectDirName: string,
   pricingTable: Record<ModelFamily, ModelPricing>,
@@ -319,7 +332,7 @@ async function getProjectDetails(
 
   const [localSkills, localClaudeMd] = resolvedCwd
     ? await Promise.all([
-        readSkillsFromDir(path.join(resolvedCwd, '.claude', 'skills')),
+        readProjectSkills(resolvedCwd),
         fs.promises.readFile(path.join(resolvedCwd, 'CLAUDE.md'), 'utf-8').catch(() => null),
       ])
     : [[], null]
@@ -329,6 +342,7 @@ async function getProjectDetails(
       id: projectDirName,
       name: displayName,
       path: projectPath,
+      pathResolved: resolvedCwd !== null,
       sessions,
       sessionCount: sessions.length,
       localSkills,

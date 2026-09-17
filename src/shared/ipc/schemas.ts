@@ -118,14 +118,6 @@ export const SettingsSetSchema = z
 
 // ─── Plans ────────────────────────────────────────────────────────────────────
 
-// `path.basename` is applied inside the handler; we still bound the input length
-// and ensure no path separators slip through here as defence in depth.
-const planFilename = z
-  .string()
-  .min(1)
-  .max(300)
-  .regex(/^[^/\\]+\.md$/, 'plan filename must be a .md file with no path separators')
-
 const planSlug = z
   .string()
   .min(1)
@@ -135,8 +127,10 @@ const planSlug = z
 /** plans:list — no payload */
 export const PlansListSchema = z.void()
 
-/** plans:get */
-export const PlansGetSchema = z.object({ filename: planFilename })
+/** plans:get — `id` is a `PlanSummary.id`, an absolute path; `plans-service.ts`'s
+ * `readPlan` re-derives and validates it against the resolved plan directories,
+ * this bound is defence in depth against an oversized payload. */
+export const PlansGetSchema = z.object({ id: z.string().min(1).max(4096) })
 
 /** plans:get-projects */
 export const PlansGetProjectsSchema = z.object({ slug: planSlug })

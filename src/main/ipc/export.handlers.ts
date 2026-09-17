@@ -1,11 +1,10 @@
-import * as path from 'path'
 import { ipcMain } from 'electron'
 import { assertSafePath } from '@main/lib/safe-path'
 import { CHANNELS } from '@shared/ipc/channels'
 import { ok, err, toSafeError } from '@shared/ipc/contracts'
 import { captureHandlerException } from '@main/services/sentry'
 import { validate, ExportSchema } from '@shared/ipc/schemas'
-import { getClaudeDir } from '@main/lib/claude-paths'
+import { getProjectsDirPath } from '@main/lib/claude-paths'
 import { parseSessionFull } from '@main/services/session-parser'
 import { getActivePricingTable } from '@main/services/pricing-engine'
 import { Preferences } from '@main/store/preferences'
@@ -19,8 +18,7 @@ export function registerExportHandlers(): void {
       const { sessionId, projectId, format, outputPath } = validate(ExportSchema, payload)
       let parsedSession = sessionCache.get(projectId, sessionId)
       if (!parsedSession) {
-        const claudeDir = getClaudeDir()
-        const projectsDir = path.join(claudeDir, 'projects')
+        const projectsDir = getProjectsDirPath()
         const sessionFilePath = assertSafePath(projectsDir, projectId, `${sessionId}.jsonl`)
         parsedSession = await parseSessionFull(
           sessionFilePath,

@@ -74,6 +74,7 @@ describe('buildBlocks — merged project blocks use the owning project, not the 
     id: 'main-dir',
     name: 'merged',
     path: '/merged',
+    pathResolved: true,
     sessions: [mainSession, worktreeSession],
     sessionCount: 2,
     localSkills: [],

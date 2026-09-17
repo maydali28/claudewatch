@@ -77,12 +77,15 @@ export class FileWatcher {
    */
   private newFiles: Set<string> = new Set()
   private claudeDir: string
+  /** Derived once from `claudeDir` at construction — the one place this join happens. */
+  private projectsDir: string
   private deps: FileWatcherDeps
   // Tracks the byte offset up to which each session file has already been scanned
   // for secrets, so we only ever process genuinely new content.
   private secretScanOffsets: Map<string, number> = new Map()
   constructor(claudeDir: string, deps: FileWatcherDeps) {
     this.claudeDir = claudeDir
+    this.projectsDir = path.join(claudeDir, 'projects')
     this.deps = deps
     this.scheduler = new ReparseScheduler(
       (parentKey, contributingFiles) => this.processFileChange(parentKey, contributingFiles),
@@ -94,7 +97,7 @@ export class FileWatcher {
   start(): void {
     if (this.watcher) return
 
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const settingsFilePath = path.join(this.claudeDir, 'settings.json')
 
     // Watch the projects directory itself (not just a glob) so chokidar
@@ -178,7 +181,7 @@ export class FileWatcher {
    */
   private resolveParentKey(filePath: string): string {
     if (!filePath.endsWith('.jsonl')) return filePath
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const location = resolveSessionFileLocation(filePath, projectsDir)
     if (!location || !location.isSubagent) return filePath
     return path.join(projectsDir, location.projectId, `${location.sessionId}.jsonl`)
@@ -196,7 +199,7 @@ export class FileWatcher {
 
     if (!filePath.endsWith('.jsonl')) return
 
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const location = resolveSessionFileLocation(filePath, projectsDir)
     if (!location) return
 
@@ -295,7 +298,7 @@ export class FileWatcher {
    *     every session known for it must be torn down here.
    */
   private handleUnlinkDir(dirPath: string): void {
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const relative = path.relative(projectsDir, dirPath)
     if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return
 
