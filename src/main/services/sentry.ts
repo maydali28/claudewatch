@@ -117,6 +117,8 @@ const _transportOptions = {
   },
 }
 
+const EXCLUDED_INTEGRATIONS = new Set(['SentryMinidump', 'MainProcessSession'])
+
 function _doInit(): void {
   if (_initialised || !DSN) return
 
@@ -126,8 +128,13 @@ function _doInit(): void {
     dsn: DSN,
     // Crash reports + user feedback only — no perf traces, no session replay.
     tracesSampleRate: 0,
-    // No native minidumps (memory dumps) — JavaScript exceptions only.
-    integrations: (defaults) => defaults.filter((i) => i.name !== 'SentryMinidump'),
+    // No native minidumps (memory dumps) — JavaScript exceptions only. No
+    // release-health sessions either: MainProcessSession sends a session
+    // envelope (id, start, duration, status) at quit, which is usage
+    // telemetry rather than a crash report. The only code that reports a
+    // previous run's stored session (`sentry/session.json`) lives in the
+    // minidump integrations, and SentryMinidump is dropped here too.
+    integrations: (defaults) => defaults.filter((i) => !EXCLUDED_INTEGRATIONS.has(i.name)),
     beforeSend(event) {
       if (!_enabled) return null // gate: drop event when user has opted out
       // Strip home-directory paths (macOS, Linux and Windows) so filenames

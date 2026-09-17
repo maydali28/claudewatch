@@ -51,9 +51,11 @@ export default function PrivacySettings(): React.JSX.Element {
               Crash reports
             </Label>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Send crash reports to help fix bugs. Reports contain the error message and stack trace
-              with your home folder replaced by [user]. They never include session content, prompts,
-              or API keys.
+              Send crash reports to help fix bugs. A report contains the error message and stack
+              trace plus standard context (app and OS versions, device and GPU details, recent app
+              events and log lines), with your username replaced by [user] in paths. Reports never
+              include session content, prompts or API keys. Turning this off stops sending at once,
+              including reports queued while offline.
             </p>
           </div>
         </div>

@@ -147,15 +147,18 @@ describe('sentry service', () => {
       expect(mockInit).not.toHaveBeenCalled()
     })
 
-    it('calls Sentry.init once when enabled, with an integrations function that removes SentryMinidump', async () => {
+    it('calls Sentry.init once when enabled, with an integrations function that removes SentryMinidump and MainProcessSession', async () => {
       const { initSentry } = await import('./sentry')
       initSentry(true)
 
       const options = capturedOptions()
       expect(typeof options.integrations).toBe('function')
+      // MainProcessSession sends a release-health session (id, start,
+      // duration, status) at quit: usage telemetry, not a crash report.
       const defaults: Integration[] = [
         { name: 'SentryMinidump' },
         { name: 'EventFilters' },
+        { name: 'MainProcessSession' },
         { name: 'NormalizePaths' },
       ]
       expect(options.integrations(defaults)).toEqual([
