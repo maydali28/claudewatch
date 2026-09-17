@@ -229,38 +229,33 @@ describe('FileWatcher — deletions', () => {
 })
 
 /**
- * Coalescing the re-parse onto the parent must not coalesce the secret scan
- * onto the parent too — a subagent write is what actually changed on disk,
- * and scanning only the parent's own delta would leave every subagent
- * transcript permanently unscanned even with the feature turned on. Regression
- * coverage for that: this file previously had no test with
- * `secretScanEnabled: true` at all, which is exactly how it went unnoticed.
+ * Live secret scanning was removed for 1.5.x (it returns with a visible
+ * alert and a toggle in roadmap #4) — this replaces the old coalescing-scan
+ * coverage with a single guard that the scanner is never invoked at all,
+ * regardless of what the (now-inert) `secretScanEnabled` preference says.
  */
-describe('FileWatcher — secret scanning after coalescing', () => {
+describe('FileWatcher — secret scanning', () => {
   let claudeDir: string
   const projectId = 'proj'
   const sessionId = 'sess-1'
   let projectDir: string
-  let parentPath: string
   let subagentsDir: string
   let childPath: string
 
   beforeEach(() => {
     vi.useFakeTimers()
     watchedInstances = []
-    mockPreferencesGet.mockReturnValue({ ...BASE_PREFS, secretScanEnabled: true })
     mockParseSession.mockReset().mockResolvedValue(fakeSummary(sessionId, projectId))
     mockPatchCachedSessionSummary.mockReset()
-    mockScanFileDelta.mockReset().mockResolvedValue({ findings: [], newOffset: 0 })
+    mockScanFileDelta.mockReset()
 
     claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'file-watcher-scan-'))
     projectDir = path.join(claudeDir, 'projects', projectId)
-    parentPath = path.join(projectDir, `${sessionId}.jsonl`)
     subagentsDir = path.join(projectDir, sessionId, 'subagents')
     childPath = path.join(subagentsDir, 'agent-1.jsonl')
 
     fs.mkdirSync(subagentsDir, { recursive: true })
-    fs.writeFileSync(parentPath, '')
+    fs.writeFileSync(path.join(projectDir, `${sessionId}.jsonl`), '')
     fs.writeFileSync(childPath, '')
   })
 
@@ -271,9 +266,6 @@ describe('FileWatcher — secret scanning after coalescing', () => {
 
   function makeWatcher(): { projectsWatcher: FakeChokidarWatcher } {
     const broadcast = vi.fn()
-    // A real toast destination: with secret scanning on, a null main window
-    // would already short-circuit the scan (see scanSessionFileForSecrets),
-    // which would mask exactly the regression these tests exist to catch.
     const getMainWindow = vi.fn(() => ({ webContents: { send: vi.fn() } }) as never)
     const watcher = new FileWatcher(claudeDir, { broadcast, getMainWindow })
     watcher.start()
@@ -281,38 +273,12 @@ describe('FileWatcher — secret scanning after coalescing', () => {
     return { projectsWatcher }
   }
 
-  it('scans the subagent file itself, not the parent, when only a subagent writes', async () => {
+  it('never runs the secret scanner on a transcript change, whatever the preference says', async () => {
+    mockPreferencesGet.mockReturnValue({ ...BASE_PREFS, secretScanEnabled: true })
     const { projectsWatcher } = makeWatcher()
-
+    fs.appendFileSync(childPath, '{"type":"assistant"}\n')
     projectsWatcher.emit('change', childPath)
-    await vi.advanceTimersByTimeAsync(FILE_WATCHER_DEBOUNCE_MS)
-
-    expect(mockScanFileDelta).toHaveBeenCalledWith(childPath, 0)
-    expect(mockScanFileDelta).not.toHaveBeenCalledWith(parentPath, expect.anything())
-  })
-
-  it('scans every child that wrote during a burst while still parsing the parent once', async () => {
-    const childPath2 = path.join(subagentsDir, 'agent-2.jsonl')
-    fs.writeFileSync(childPath2, '')
-    const { projectsWatcher } = makeWatcher()
-
-    projectsWatcher.emit('change', childPath)
-    projectsWatcher.emit('change', childPath2)
-    await vi.advanceTimersByTimeAsync(FILE_WATCHER_DEBOUNCE_MS)
-
-    expect(mockParseSession).toHaveBeenCalledTimes(1)
-    expect(mockScanFileDelta).toHaveBeenCalledWith(childPath, 0)
-    expect(mockScanFileDelta).toHaveBeenCalledWith(childPath2, 0)
-    expect(mockScanFileDelta).toHaveBeenCalledTimes(2)
-  })
-
-  it('still scans the parent transcript when only the parent itself changes', async () => {
-    const { projectsWatcher } = makeWatcher()
-
-    projectsWatcher.emit('change', parentPath)
-    await vi.advanceTimersByTimeAsync(FILE_WATCHER_DEBOUNCE_MS)
-
-    expect(mockScanFileDelta).toHaveBeenCalledWith(parentPath, 0)
-    expect(mockScanFileDelta).toHaveBeenCalledTimes(1)
+    await vi.runAllTimersAsync()
+    expect(mockScanFileDelta).not.toHaveBeenCalled()
   })
 })

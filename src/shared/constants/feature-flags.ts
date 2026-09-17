@@ -4,11 +4,7 @@
 // the local build into the corresponding UI surface. CI builds ship with the
 // defaults below until each feature reaches general availability.
 //
-// Roadmap (anticipated GA):
-//   - timeline       → 0.12 (project-wide event stream view)
-//   - lint           → 0.13 (health gauge + 45 rule runner — backend ready, UI polish pending)
-//   - costAlerts     → 0.14 (threshold notifications, requires daily-cost watcher)
-//   - sessionExport  → 0.11 (Markdown / JSON export from the session header)
+// Targets: sessionExport, lint (Health), timeline → 1.6; costAlerts → 1.7. See docs/ROADMAP.md.
 //
 // Removing a flag from this file should happen in lockstep with making the
 // gated UI unconditional. Don't leave dead flags behind.
