@@ -247,12 +247,12 @@ Cost is estimated from the raw token counters stored in each JSONL session file,
 
 The model ID is mapped to a pricing family with version-aware handling; unrecognised models are reported as unpriced rather than guessed.
 
-**These are estimates, not bills.** They are the API-equivalent value of your usage. On Pro, Max or Team plans nothing is charged per token, and the figure is not your remaining plan allowance. Fast mode, regional inference, non-standard service tiers and web search / fetch requests are not priced; the app says how many responses used them.
+**These are estimates, not bills.** They are estimated from recorded tokens using the configured API rates. They are not your bill or your remaining plan allowance: subscription inclusions, usage credits, discounts and charges the app doesn't price can make what you actually pay differ. Fast mode, regional inference, non-standard service tiers and web search / fetch requests are not priced; the app says how many responses used them.
 
 ### Auto-Update
 
 - macOS: DMG download with signature verification, or `brew upgrade --cask claudewatch`
-  - If macOS asks for a password when installing an update, the app bundle is not writable by your user; run `sudo chown -R "$(id -un)" /Applications/ClaudeWatch.app` once.
+  - If macOS asks for a password when installing an update, the app bundle or the folder containing it isn't writable by your user. If the bundle itself is the problem, `sudo chown -R "$(id -un)" /Applications/ClaudeWatch.app` usually avoids it; otherwise an administrator password is needed.
 - Windows: Squirrel auto-update applies silently
 - Linux: `sudo apt upgrade` via the signed APT repository, or manual `.deb` / `.rpm` download
 
@@ -586,14 +586,14 @@ ClaudeWatch reads files from `~/.claude` on your local machine. Here is a comple
 | What | Where it goes | When |
 |------|--------------|------|
 | Update check | GitHub releases feed via electron-updater (macOS, Windows), or the `MAIN_VITE_RELEASE_SERVER_URL` / Hazel server (Linux) | On launch and periodically — version string and platform only, no identifiers |
-| Crash reports | Sentry | Only if you opt in under **Settings → Privacy** — stack traces only, see below |
+| Crash reports | Sentry | Only if you opt in under **Settings → Privacy** — error reports, see below |
 | User feedback | Sentry | Only if you opt in and click **Send feedback** |
 | Everything else | **Nowhere** | All processing is local |
 
 - **No session content, prompts, or responses are ever sent anywhere.**
 - **Crash reports may contain file paths from stack traces.** Your username is replaced by `[user]` in these paths on macOS, Windows and Linux — including the username segment inside Claude Code's encoded project folder names (e.g. `-Users-[user]-Workspace-myproject`) — and your local account name is redacted. **Project names and the rest of the path are not removed and are sent as-is.**
 - The update check sends only your current ClaudeWatch version and platform (`darwin_arm64`, etc.).
-- **Crash reporting is opt-in and off by default.** Turning it on takes effect after you restart the app; turning it off applies immediately. When enabled, Sentry receives the error message and stack trace only — no native crash dumps are recorded or sent, no session data, no API keys. Feedback you send includes the name, email, and message you type.
+- **Crash reporting is opt-in and off by default.** Turning it on takes effect after you restart the app; turning it off applies immediately. When enabled, Sentry receives error reports: the error message and stack trace plus the SDK's standard context (app name, version and architecture; Electron, Chrome and Node versions; OS and device details such as CPU, memory, screen resolution, locale and time zone; breadcrumbs of recent app events, network requests and log lines), with your username removed from any paths. No native crash dumps are recorded or sent, and reports never include session content, prompts or API keys. Reports queued while offline are never sent after you turn reporting off. Feedback you send includes the name, email, and message you type.
 - There is no background analytics or telemetry of any kind.
 
 ---
