@@ -1,6 +1,14 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type * as fs from 'fs'
 import type * as os from 'os'
+import { createEnvelope, makeOfflineTransport } from '@sentry/core'
+import type {
+  Envelope,
+  OfflineStore,
+  OfflineTransportOptions,
+  Transport,
+  TransportMakeRequestResponse,
+} from '@sentry/core'
 
 // vi.mock is hoisted above these imports, so every factory below references
 // module-scope mock fns rather than capturing values from the test bodies.
@@ -13,6 +21,7 @@ interface MockClient {
   getOptions: () => { enabled: boolean }
   on: (hook: string, callback: (...args: never[]) => void) => void
   close?: (timeout?: number) => Promise<boolean>
+  getTransport?: () => Transport | undefined
 }
 const mockGetClient = vi.fn<() => MockClient | undefined>()
 
@@ -74,6 +83,7 @@ interface CapturedInitOptions {
   beforeSend: (event: Record<string, unknown>) => Record<string, unknown> | null
   beforeBreadcrumb: (breadcrumb: Record<string, unknown>) => Record<string, unknown> | null
   integrations: (defaults: Integration[]) => Integration[]
+  transportOptions?: Partial<OfflineTransportOptions>
 }
 
 function capturedOptions(): CapturedInitOptions {
@@ -479,6 +489,155 @@ describe('sentry service', () => {
       initSentry(true)
 
       expect(mockInit).toHaveBeenCalledTimes(1)
+    })
+  })
+  // @sentry/electron's default transport is makeOfflineTransport from
+  // @sentry/core with `flushAtStartup: true` (electron-offline-net.js). Its
+  // retry timer takes a stored envelope and hands it straight to the inner
+  // transport — beforeSend and the client's `enabled` flag are never
+  // consulted. These tests run the SDK's real offline transport, with the
+  // options sentry.ts passes, over an in-memory store and inner transport.
+  describe('offline queue consent gate', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    function queuedEnvelope(message: string): Envelope {
+      return createEnvelope({ event_id: message }, [[{ type: 'event' }, { message }]]) as Envelope
+    }
+
+    function offlineTransport(
+      queued: Envelope[],
+      options: { flushAtStartup: boolean }
+    ): {
+      transport: Transport
+      queue: Envelope[]
+      sent: Envelope[]
+    } {
+      const queue = [...queued]
+      const sent: Envelope[] = []
+      const store: OfflineStore = {
+        push: async (env) => {
+          queue.push(env)
+        },
+        unshift: async (env) => {
+          queue.unshift(env)
+        },
+        shift: async () => queue.shift(),
+      }
+      const inner = (): Transport => ({
+        send: async (env): Promise<TransportMakeRequestResponse> => {
+          sent.push(env)
+          return { statusCode: 200 }
+        },
+        flush: async () => true,
+      })
+      const transport = makeOfflineTransport(inner)({
+        url: 'https://o0.ingest.sentry.io/api/0/envelope/',
+        recordDroppedEvent: () => {},
+        ...capturedOptions().transportOptions,
+        flushAtStartup: options.flushAtStartup,
+        createStore: () => store,
+      } as OfflineTransportOptions)
+      // The drain on opt-out reaches the transport through the bound client.
+      mockGetClient.mockReturnValue({
+        getOptions: () => ({ enabled: true }),
+        on: vi.fn(),
+        getTransport: () => transport,
+      })
+      return { transport, queue, sent }
+    }
+
+    it('hands Sentry.init a transport-level consent gate', async () => {
+      const { initSentry } = await import('./sentry')
+      initSentry(true)
+
+      const { transportOptions } = capturedOptions()
+      expect(typeof transportOptions?.shouldSend).toBe('function')
+      expect(typeof transportOptions?.shouldStore).toBe('function')
+    })
+
+    it('sends a queued report on the startup retry while reporting is on', async () => {
+      vi.useFakeTimers()
+      const { initSentry } = await import('./sentry')
+      initSentry(true)
+      const { queue, sent } = offlineTransport([queuedEnvelope('queued')], {
+        flushAtStartup: true,
+      })
+
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(sent).toHaveLength(1)
+      expect(queue).toHaveLength(0)
+    })
+
+    it('sends nothing from the queue once reporting is turned off, and drops what was queued', async () => {
+      vi.useFakeTimers()
+      const { initSentry, setSentryEnabled } = await import('./sentry')
+      initSentry(true)
+      const { queue, sent } = offlineTransport(
+        [queuedEnvelope('a'), queuedEnvelope('b'), queuedEnvelope('c')],
+        { flushAtStartup: true }
+      )
+
+      setSentryEnabled(false)
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(sent).toHaveLength(0)
+      expect(queue).toHaveLength(0)
+    })
+
+    it('drops the queue on opt-out without waiting for a scheduled retry', async () => {
+      vi.useFakeTimers()
+      const { initSentry, setSentryEnabled } = await import('./sentry')
+      initSentry(true)
+      const { queue, sent } = offlineTransport([queuedEnvelope('a'), queuedEnvelope('b')], {
+        flushAtStartup: false,
+      })
+
+      setSentryEnabled(false)
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(sent).toHaveLength(0)
+      expect(queue).toHaveLength(0)
+    })
+
+    it('sends again from the queue after reporting is turned back on', async () => {
+      vi.useFakeTimers()
+      const { initSentry, setSentryEnabled } = await import('./sentry')
+      initSentry(true)
+      const { transport, queue, sent } = offlineTransport([queuedEnvelope('old')], {
+        flushAtStartup: true,
+      })
+      setSentryEnabled(false)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(sent).toHaveLength(0)
+
+      setSentryEnabled(true)
+      queue.push(queuedEnvelope('new'))
+      await transport.flush()
+      await vi.advanceTimersByTimeAsync(1_000)
+
+      expect(sent.map((env) => env[0].event_id)).toEqual(['new'])
+    })
+
+    it('keeps queued reports, unsent, while a runtime enable waits for a restart', async () => {
+      vi.useFakeTimers()
+      mockInit.mockImplementation(() => {
+        throw new Error(
+          "Sentry SDK should be initialized before the Electron app 'ready' event is fired"
+        )
+      })
+      const { setSentryEnabled } = await import('./sentry')
+      expect(setSentryEnabled(true)).toEqual({ restartRequired: true })
+      const { queue, sent } = offlineTransport([queuedEnvelope('kept')], {
+        flushAtStartup: true,
+      })
+
+      await vi.advanceTimersByTimeAsync(60_000)
+
+      expect(sent).toHaveLength(0)
+      expect(queue).toHaveLength(1)
     })
   })
 })

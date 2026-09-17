@@ -72,6 +72,51 @@ function _readSentryEnabledSync(): boolean {
   }
 }
 
+/**
+ * Ask the offline transport to retry its queue now. While reporting is off,
+ * `shouldStore` below refuses to put a retried envelope back, so each retry
+ * drops one stored report and schedules the next: the queue empties within
+ * a few hundred milliseconds, without anything being sent.
+ */
+function _drainOfflineQueue(): void {
+  try {
+    const transport = Sentry.getClient()?.getTransport?.()
+    if (!transport) return
+    Promise.resolve(transport.flush()).catch(() => {})
+  } catch (e) {
+    // Switching reporting off must never fail; the send gate still holds.
+    log.warn('Could not drain the crash report queue', e)
+  }
+}
+
+/**
+ * Consent gate for @sentry/electron's default transport. That transport is
+ * @sentry/core's `makeOfflineTransport` with `flushAtStartup: true`
+ * (@sentry/electron esm/main/transports/electron-offline-net.js); its retry
+ * timer takes an envelope stored on disk (userData/sentry/queue) and passes
+ * it straight to the network transport, so neither `beforeSend` nor the
+ * client's `enabled` flag is consulted. `shouldSend` is checked before every
+ * send, first attempts and retries alike (@sentry/core
+ * build/esm/transports/offline.js `send`).
+ *
+ * Retention: a refused send is offered to `shouldStore`, and the SDK keeps the
+ * envelope when it returns true. The SDK offers no call to clear the queue,
+ * so turning reporting off drains it instead: `shouldStore` refuses, the
+ * retried report is dropped, and the next one is retried straight away.
+ * Reports queued while the user consented and waiting for a restart after a
+ * runtime enable are kept (still unsent) for the next launch. If the app quits
+ * before a drain finishes, what is left stays on disk and is never sent while
+ * reporting is off: with reporting off at launch the SDK isn't started at all.
+ */
+const _transportOptions = {
+  shouldSend: (): boolean => _enabled && !_restartRequired,
+  shouldStore: (): boolean => {
+    if (_enabled) return true
+    _drainOfflineQueue()
+    return false
+  },
+}
+
 function _doInit(): void {
   if (_initialised || !DSN) return
 
@@ -90,6 +135,7 @@ function _doInit(): void {
       return scrubEvent(event, _knownNames)
     },
     beforeBreadcrumb: (breadcrumb) => scrubDeep(breadcrumb, _knownNames),
+    transportOptions: _transportOptions,
   })
 
   // @sentry/core's captureFeedback only runs the client through `beforeSend`
@@ -206,6 +252,8 @@ export function setSentryEnabled(enabled: boolean): SetSentryEnabledResult {
   // runtime init leaves a bound client this module never marked initialised,
   // and it must be switched off too.
   _disableBoundClient()
+  // Reports already queued on disk must not leave later either.
+  _drainOfflineQueue()
   log.info('Sentry disabled by user')
   return { restartRequired: false }
 }
