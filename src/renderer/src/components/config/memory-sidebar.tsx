@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { Brain, RefreshCw, Search, X, FolderOpen, ChevronDown, ChevronRight } from 'lucide-react'
+import { Brain, RefreshCw, Search, X, FolderOpen } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import { ScopeGroup } from './scope-group'
 import type { ProjectClaudeMd } from '@shared/types/project'
 
 function projectClaudeMdId(entry: ProjectClaudeMd): string {
@@ -47,45 +48,6 @@ function MemoryItem({
         </p>
       )}
     </button>
-  )
-}
-
-function CollapsibleGroup({
-  label,
-  count,
-  icon,
-  defaultExpanded = true,
-  children,
-}: {
-  label: string
-  count: number
-  icon?: React.ReactNode
-  defaultExpanded?: boolean
-  children: React.ReactNode
-}): React.JSX.Element {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-
-  return (
-    <div>
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left hover:bg-accent/40 rounded-md transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
-        {icon}
-        <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider truncate flex-1">
-          {label}
-        </span>
-        <span className="text-[10px] text-muted-foreground/40 shrink-0">{count}</span>
-      </button>
-      {expanded && (
-        <div className="ml-2 border-l border-border/40 pl-1.5 space-y-0.5">{children}</div>
-      )}
-    </div>
   )
 }
 
@@ -185,7 +147,7 @@ export default function MemorySidebar(): React.JSX.Element {
           )}
 
         {filteredFiles.length > 0 && (
-          <CollapsibleGroup label="Claude Memory" count={filteredFiles.length}>
+          <ScopeGroup label="Claude Memory" count={filteredFiles.length}>
             {filteredFiles.map((file) => (
               <MemoryItem
                 key={file.id}
@@ -197,11 +159,11 @@ export default function MemorySidebar(): React.JSX.Element {
                 onSelect={setSelectedMemory}
               />
             ))}
-          </CollapsibleGroup>
+          </ScopeGroup>
         )}
 
         {filteredProjectMds.map((p) => (
-          <CollapsibleGroup
+          <ScopeGroup
             key={p.projectId}
             label={p.projectName}
             count={1}
@@ -215,7 +177,7 @@ export default function MemorySidebar(): React.JSX.Element {
               selectedId={selectedMemoryId}
               onSelect={setSelectedMemory}
             />
-          </CollapsibleGroup>
+          </ScopeGroup>
         ))}
       </div>
     </div>

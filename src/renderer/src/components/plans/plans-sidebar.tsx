@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { FileText, Clock, RefreshCw, Search, X, BookOpen } from 'lucide-react'
+import { FileText, Clock, RefreshCw, Search, X, BookOpen, FolderOpen } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
+import { ScopeGroup } from '@renderer/components/config/scope-group'
 import { groupPlansByDirectory } from './group-plans'
 import type { PlanSummary } from '@shared/types'
 
@@ -41,7 +42,10 @@ export default function PlansSidebar({
   const q = search.toLowerCase()
 
   const filtered = plans.filter(
-    (p) => p.title.toLowerCase().includes(q) || p.filename.toLowerCase().includes(q)
+    (p) =>
+      p.title.toLowerCase().includes(q) ||
+      p.filename.toLowerCase().includes(q) ||
+      (p.projectName ?? '').toLowerCase().includes(q)
   )
   const groups = groupPlansByDirectory(filtered)
 
@@ -93,7 +97,7 @@ export default function PlansSidebar({
       </div>
 
       {/* List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && plans.length === 0 && (
           <div className="flex flex-col gap-2 p-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -113,18 +117,17 @@ export default function PlansSidebar({
         )}
 
         {groups.map((group) => (
-          <div key={group.key} className="mb-2">
-            <div className="px-1 pt-2 pb-1">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider truncate">
-                {group.label}
-              </p>
-              <p
-                className="text-[9px] text-muted-foreground/50 font-mono truncate"
-                title={group.directory}
-              >
-                {group.directory}
-              </p>
-            </div>
+          <ScopeGroup
+            key={group.key}
+            label={group.label}
+            count={group.plans.length}
+            title={group.directory}
+            icon={
+              group.kind === 'project' ? (
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+              ) : undefined
+            }
+          >
             {group.plans.map((plan) => (
               <button
                 key={plan.id}
@@ -165,7 +168,7 @@ export default function PlansSidebar({
                 </div>
               </button>
             ))}
-          </div>
+          </ScopeGroup>
         ))}
 
         {!isLoading && plans.length > 0 && filtered.length === 0 && (

@@ -15,10 +15,15 @@ function plan(overrides: Partial<PlanSummary>): PlanSummary {
 }
 
 describe('groupPlansByDirectory', () => {
-  it('puts the default group first, labelled "Plans"', () => {
+  it('puts the default-scope plans first, labelled "Global"', () => {
     const groups = groupPlansByDirectory([plan({ id: '/default/a.md', filename: 'a.md' })])
     expect(groups).toHaveLength(1)
-    expect(groups[0]).toMatchObject({ key: 'default', label: 'Plans', directory: '/default' })
+    expect(groups[0]).toMatchObject({
+      key: 'global',
+      label: 'Global',
+      kind: 'global',
+      directory: '/default',
+    })
   })
 
   it('groups project plans by directory, labelled with the project name', () => {
@@ -33,7 +38,7 @@ describe('groupPlansByDirectory', () => {
         projectName: 'claudewatch',
       }),
     ])
-    expect(groups.map((g) => g.label)).toEqual(['Plans', 'claudewatch'])
+    expect(groups.map((g) => g.label)).toEqual(['Global', 'claudewatch'])
     expect(groups[1].plans.map((p) => p.filename)).toEqual(['x.md'])
   })
 
