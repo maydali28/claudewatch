@@ -10,7 +10,8 @@ import * as path from 'path'
 const log = logPkg
 import { CHANNELS } from '@shared/ipc/channels'
 import type { UpdateInfo, UpdatePhase, UpdateServiceError } from '@shared/types/project'
-import { broadcastToRenderers } from '@main/window-manager'
+import { broadcastToRenderers, createOrShowUpdateWindow } from '@main/window-manager'
+import { disarmUpdateQuit } from '@main/lib/update-quit'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 import { AppConfig } from '@main/lib/app-config'
@@ -341,12 +342,27 @@ function initAutoUpdater(): void {
   autoUpdater.on('error', (err) => {
     log.error('[UpdateService] electron-updater error:', err)
     const report = errorForPhase(err)
-    if (_phase === 'installing') {
+    const wasInstalling = _phase === 'installing'
+    if (wasInstalling) {
+      // A cancelled or failed install means ShipIt/Squirrel never quit the app
+      // for us — disarm the quit that `armUpdateQuit()` scheduled so the app
+      // keeps running instead of quitting a few seconds from now with nothing
+      // left to install.
+      disarmUpdateQuit()
       // Ruling 1: a failed or cancelled install invalidates the staged update.
       _updateDownloaded = false
     }
     _phase = 'idle'
     pushUpdateServiceError(report)
+    if (wasInstalling) {
+      // `quitAndInstall` closes every window before Squirrel asks for (and,
+      // here, did not get) the password, so the broadcast above may have
+      // reached no renderer at all. Reopen the update window so the error is
+      // actually visible instead of leaving the app running with nothing on
+      // screen — see disarmUpdateQuit's onUpdateQuitDisarmed hook for the
+      // matching dashboard-window recovery.
+      createOrShowUpdateWindow(_latestInfo, undefined, report)
+    }
   })
 }
 

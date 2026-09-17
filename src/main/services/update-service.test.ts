@@ -24,7 +24,13 @@ vi.mock('electron-log', () => ({
   default: { info: () => {}, warn: () => {}, error: () => {} },
 }))
 const broadcast = vi.hoisted(() => vi.fn())
-vi.mock('@main/window-manager', () => ({ broadcastToRenderers: broadcast }))
+const createOrShowUpdateWindow = vi.hoisted(() => vi.fn())
+vi.mock('@main/window-manager', () => ({
+  broadcastToRenderers: broadcast,
+  createOrShowUpdateWindow,
+}))
+const disarmUpdateQuit = vi.hoisted(() => vi.fn())
+vi.mock('@main/lib/update-quit', () => ({ disarmUpdateQuit }))
 vi.mock('@main/lib/app-config', () => ({
   AppConfig: {
     githubReleasesUrl: 'https://github.com/maydali28/claudewatch/releases',
@@ -183,6 +189,8 @@ describe('installUpdate lifecycle', () => {
     vi.resetModules()
     updaterHandlers.clear()
     broadcast.mockClear()
+    disarmUpdateQuit.mockClear()
+    createOrShowUpdateWindow.mockClear()
   })
 
   it('rejects when nothing has been downloaded', async () => {
@@ -215,6 +223,57 @@ describe('installUpdate lifecycle', () => {
     )
     // Retry must go through download again — install alone is refused.
     await expect(svc.installUpdate()).rejects.toThrow('No update has been downloaded yet')
+  })
+
+  it('an updater error during install disarms the update quit, so a cancelled password prompt does not quit the app a few seconds later', async () => {
+    const svc = await import('./update-service')
+    svc.initUpdateService()
+    updaterHandlers.get('update-downloaded')!({})
+    await svc.installUpdate()
+    updaterHandlers.get('error')!(new Error('user cancelled the password prompt'))
+    expect(disarmUpdateQuit).toHaveBeenCalledTimes(1)
+  })
+
+  it('an updater error during install reopens the update window with the error, since quitAndInstall may have already closed it', async () => {
+    const svc = await import('./update-service')
+    svc.initUpdateService()
+    updaterHandlers.get('update-downloaded')!({})
+    await svc.installUpdate()
+    updaterHandlers.get('error')!(new Error('user cancelled the password prompt'))
+    expect(createOrShowUpdateWindow).toHaveBeenCalledTimes(1)
+    expect(createOrShowUpdateWindow).toHaveBeenCalledWith(
+      null,
+      undefined,
+      expect.objectContaining({ phase: 'install' })
+    )
+  })
+
+  it('an updater error during a plain check does not reopen the update window — nothing was installing', async () => {
+    await withNonLinuxPlatform(async () => {
+      const svc = await import('./update-service')
+      const { autoUpdater } = await import('electron-updater')
+      svc.initUpdateService()
+      vi.mocked(autoUpdater.checkForUpdates).mockImplementation(async () => {
+        updaterHandlers.get('error')!(new Error('net::ERR_INTERNET_DISCONNECTED'))
+        throw new Error('net::ERR_INTERNET_DISCONNECTED')
+      })
+      await expect(svc.checkForUpdate()).rejects.toThrow('net::ERR_INTERNET_DISCONNECTED')
+      expect(createOrShowUpdateWindow).not.toHaveBeenCalled()
+    })
+  })
+
+  it('an updater error during a plain check does not disarm the update quit — nothing armed it', async () => {
+    await withNonLinuxPlatform(async () => {
+      const svc = await import('./update-service')
+      const { autoUpdater } = await import('electron-updater')
+      svc.initUpdateService()
+      vi.mocked(autoUpdater.checkForUpdates).mockImplementation(async () => {
+        updaterHandlers.get('error')!(new Error('net::ERR_INTERNET_DISCONNECTED'))
+        throw new Error('net::ERR_INTERNET_DISCONNECTED')
+      })
+      await expect(svc.checkForUpdate()).rejects.toThrow('net::ERR_INTERNET_DISCONNECTED')
+      expect(disarmUpdateQuit).not.toHaveBeenCalled()
+    })
   })
 
   it('an updater error during a real check reports phase=check and leaves the service idle', async () => {
