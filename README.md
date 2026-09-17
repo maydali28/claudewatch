@@ -88,7 +88,7 @@ You use Claude Code every day. But do you know which sessions blew your budget? 
 
 ## How It Works
 
-ClaudeWatch watches `~/.claude/projects/` using [chokidar](https://github.com/paulmillr/chokidar) for file system events. When Claude Code writes to a session file (JSONL format), ClaudeWatch detects the change, streams the file line-by-line without loading it fully into memory, and updates the UI in real time. There is no polling interval — changes propagate as fast as the OS delivers the event.
+ClaudeWatch watches `~/.claude/projects/` using [chokidar](https://github.com/paulmillr/chokidar) for file system events. When Claude Code writes to a session file (JSONL format), ClaudeWatch detects the change, streams the file line-by-line without loading it fully into memory, and updates the UI in real time. There is no polling interval — changes propagate as fast as the OS delivers the event. If you relocate Claude Code's folder with `CLAUDE_CONFIG_DIR` (in your shell or in the `env` block of `~/.claude/settings.json`), ClaudeWatch reads that folder instead.
 
 On first launch, ClaudeWatch performs a one-time scan to build the project and session index. From that point, only changed files are re-parsed. Cost calculations happen inline at parse time so the analytics view never needs a separate aggregation pass.
 
@@ -189,7 +189,7 @@ ClaudeWatch lives in your menu bar — always one click away, never in your way.
 
 ### Session Explorer
 
-Every conversation Claude Code has ever had, fully accessible and searchable.
+Every conversation Claude Code still has on disk, fully accessible and searchable.
 
 - **Real-time updates** — sessions appear the moment Claude Code writes a new file; no refresh needed
 - **Full transcript view** — browse the complete conversation including user messages, assistant responses, thinking blocks, tool calls, file reads, and bash output
@@ -214,6 +214,8 @@ Six purpose-built analytics tabs, each answering a different question about how 
 
 **Effort** — Not every session is equal. Turn effort is classified into Low, Medium, High, and Ultrathink levels. See where your ultrathink budget goes, cost by effort level, and parallel tool usage distribution.
 
+**Configuration scopes.** Hooks and Commands below are both read from user (`~/.claude`) and project (`<repo>/.claude`) scopes, including `settings.local.json`. Plugin and managed scopes are on the roadmap.
+
 ### Hooks
 
 All your Claude Code hook events in one place — no more digging through config files. Every registered hook is grouped by event type (`PreToolUse`, `PostToolUse`, `PermissionDenied`, `SessionStart`, `Stop`, `UserPromptSubmit`, `Notification`) and displayed with its matcher pattern, the command it runs, and its timeout setting.
@@ -221,8 +223,6 @@ All your Claude Code hook events in one place — no more digging through config
 ### Commands
 
 Every custom slash command you have defined, rendered as markdown exactly as Claude Code sees it. Browse, search, and review your command library without leaving the app.
-
-**Configuration scopes.** ClaudeWatch reads user (`~/.claude`) and project (`<repo>/.claude`) scopes, including `settings.local.json`. Plugin and managed scopes are on the roadmap.
 
 ### Skills
 
@@ -247,7 +247,7 @@ Cost is estimated from the raw token counters stored in each JSONL session file,
 
 The model ID is mapped to a pricing family with version-aware handling; unrecognised models are reported as unpriced rather than guessed.
 
-**These are estimates, not bills.** They are the API-equivalent value of your usage. On Pro, Max or Team plans nothing is charged per token, and the figure is not your remaining plan allowance. Fast mode, regional inference and web search / fetch requests are not priced; the app says how many responses used them.
+**These are estimates, not bills.** They are the API-equivalent value of your usage. On Pro, Max or Team plans nothing is charged per token, and the figure is not your remaining plan allowance. Fast mode, regional inference, non-standard service tiers and web search / fetch requests are not priced; the app says how many responses used them.
 
 ### Auto-Update
 
@@ -591,7 +591,7 @@ ClaudeWatch reads files from `~/.claude` on your local machine. Here is a comple
 | Everything else | **Nowhere** | All processing is local |
 
 - **No session content, prompts, or responses are ever sent anywhere.**
-- **Crash reports may contain file paths from stack traces.** Your home folder is replaced by `[user]` on macOS, Windows and Linux, including inside Claude's encoded project folder names, and your local account name is redacted.
+- **Crash reports may contain file paths from stack traces.** Your username is replaced by `[user]` in these paths on macOS, Windows and Linux — including the username segment inside Claude Code's encoded project folder names (e.g. `-Users-[user]-Workspace-myproject`) — and your local account name is redacted. **Project names and the rest of the path are not removed and are sent as-is.**
 - The update check sends only your current ClaudeWatch version and platform (`darwin_arm64`, etc.).
 - **Crash reporting is opt-in and off by default.** Turning it on takes effect after you restart the app; turning it off applies immediately. When enabled, Sentry receives the error message and stack trace only — no native crash dumps are recorded or sent, no session data, no API keys. Feedback you send includes the name, email, and message you type.
 - There is no background analytics or telemetry of any kind.
