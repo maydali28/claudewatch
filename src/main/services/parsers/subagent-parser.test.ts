@@ -293,6 +293,46 @@ describe('parseSubagents — completeness contract', () => {
     expect(diagnostics.conflictCount).toBe(1)
   })
 
+  // Task 17: estimate gaps roll up across every subagent file, summed the
+  // same way the completeness counts are.
+  it('sums pricing-modifier and server-tool counts across subagent files', async () => {
+    const parent = path.join(dir, 'sess-estimate-gaps.jsonl')
+    fs.writeFileSync(parent, '')
+    const subdir = path.join(dir, 'sess-estimate-gaps', 'subagents')
+    fs.mkdirSync(subdir, { recursive: true })
+    const child = (id: string, usageExtra: Record<string, unknown>): string =>
+      JSON.stringify({
+        type: 'assistant',
+        uuid: `u-${id}`,
+        timestamp: '2026-09-10T10:00:01.000Z',
+        message: {
+          id,
+          model: 'claude-opus-5',
+          content: [{ type: 'text', text: 'done' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 5, ...usageExtra },
+        },
+      })
+    fs.writeFileSync(
+      path.join(subdir, 'agent-one.jsonl'),
+      child('c1', { inference_geo: 'us', server_tool_use: { web_fetch_requests: 2 } })
+    )
+    fs.writeFileSync(
+      path.join(subdir, 'agent-two.jsonl'),
+      child('c2', { service_tier: 'priority', server_tool_use: { web_search_requests: 1 } })
+    )
+
+    const { diagnostics } = await parseSubagents(
+      parent,
+      'sess-estimate-gaps',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(diagnostics.pricingModifierResponses).toBe(2)
+    expect(diagnostics.serverToolRequests).toBe(3)
+  })
+
   it('zeroes the completeness fields when there is no subagents directory at all', async () => {
     const parent = path.join(dir, 'sess-no-subagents.jsonl')
     fs.writeFileSync(parent, '')
@@ -313,6 +353,8 @@ describe('parseSubagents — completeness contract', () => {
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     })
   })
 })

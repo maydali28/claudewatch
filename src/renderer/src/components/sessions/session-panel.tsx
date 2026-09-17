@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { windowAfterScroll, windowAfterAppend, scrollTopAfterPrepend } from './render-window'
+import { sessionPanelView } from './session-panel-state'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { format } from 'date-fns'
 import { useSessionsStore } from '@renderer/store/sessions.store'
@@ -168,7 +169,7 @@ function SessionLintBadge({
   )
 }
 
-export default function SessionPanel(): React.JSX.Element {
+export default function SessionPanel(): React.JSX.Element | null {
   const {
     parsedSession,
     isLoadingSession,
@@ -176,6 +177,7 @@ export default function SessionPanel(): React.JSX.Element {
     sessionError,
     activeSessionId,
     projects,
+    closeActiveSession,
   } = useSessionsStore()
   const { setView } = useUIStore()
   const lintEnabled = useFeatureFlags((s) => s.lint)
@@ -426,39 +428,56 @@ export default function SessionPanel(): React.JSX.Element {
     if (!growTowardTop(el)) scrollToEndRef.current = false
   })
 
-  if (!activeSessionId) {
-    return (
-      <EmptyState
-        icon={Layers}
-        title="No session selected"
-        description="Select a session to view the conversation"
-      />
-    )
+  const view = sessionPanelView({
+    activeSessionId,
+    isLoadingSession,
+    sessionError,
+    hasParsedSession: parsedSession !== null,
+  })
+
+  switch (view) {
+    case 'empty':
+      return (
+        <EmptyState
+          icon={Layers}
+          title="No session selected"
+          description="Select a session to view the conversation"
+        />
+      )
+    case 'loading':
+      return (
+        <div className="flex flex-col h-full">
+          <div className="border-b border-border/50 p-4 space-y-2">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-3 w-64" />
+          </div>
+          <div className="flex-1 p-4 space-y-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <Skeleton key={i} className="h-16" />
+            ))}
+          </div>
+        </div>
+      )
+    case 'error':
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 text-destructive text-sm px-8 text-center">
+          <span>{sessionError}</span>
+          <button
+            onClick={closeActiveSession}
+            className="rounded px-3 py-1.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            Back to sessions
+          </button>
+        </div>
+      )
+    case 'content':
+      break
   }
 
-  if (isLoadingSession || !parsedSession) {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="border-b border-border/50 p-4 space-y-2">
-          <Skeleton className="h-5 w-48" />
-          <Skeleton className="h-3 w-64" />
-        </div>
-        <div className="flex-1 p-4 space-y-3">
-          {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-16" />
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  if (sessionError) {
-    return (
-      <div className="flex h-full items-center justify-center text-destructive text-sm px-8 text-center">
-        {sessionError}
-      </div>
-    )
-  }
+  // `view === 'content'` guarantees parsedSession is non-null (that's the
+  // condition sessionPanelView uses to reach it), but the type system can't
+  // see through the switch above — narrow explicitly rather than assert.
+  if (!parsedSession) return null
 
   const { toolResultMap, metadata } = parsedSession
 

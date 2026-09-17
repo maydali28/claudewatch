@@ -191,6 +191,8 @@ describe('parseSessionMetadata — diagnostics', () => {
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     })
   })
 })
@@ -1041,6 +1043,7 @@ describe('parseSessionMetadata + computeAnalytics — partial TTL has one price 
         id: 'proj',
         name: 'proj',
         path: '/proj',
+        pathResolved: true,
         sessions: [],
         sessionCount: 1,
         localSkills: [],
@@ -1076,6 +1079,7 @@ describe('parseSessionMetadata + computeAnalytics — an undated response keeps 
       id: 'proj',
       name: 'proj',
       path: '/proj',
+      pathResolved: true,
       sessions: [],
       sessionCount: 1,
       localSkills: [],
@@ -1157,6 +1161,7 @@ describe('parseSessionMetadata + computeAnalytics — a repaired response lands 
       id: 'proj',
       name: 'proj',
       path: '/proj',
+      pathResolved: true,
       sessions: [],
       sessionCount: 1,
       localSkills: [],
@@ -1353,6 +1358,47 @@ describe('parseSessionMetadata — turnOpen reflects whether the last turn is st
     ])
     const s = await parseSessionMetadata(closedThenCommand, 'turn-command', 'p', ANTHROPIC_PRICING)
     expect(s.turnOpen).toBe(false)
+  })
+
+  // L15/L16 left `userTurnEffect` alone: a task notification is answered by
+  // Claude, so it opens the turn; a sub-agent hand-back is `isMeta`, so it
+  // does not. The user message count now excludes both — the live state
+  // must not follow it.
+  it('is opened by a background task notification and not by a sub-agent hand-back', async () => {
+    const notice = session('turn-task-notice', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'end_turn' }),
+      {
+        type: 'user',
+        uuid: 'u2',
+        timestamp: '2026-09-10T10:01:00.000Z',
+        origin: { kind: 'task-notification' },
+        message: { role: 'user', content: '<task-notification>\n</task-notification>' },
+      },
+    ])
+    expect(
+      (await parseSessionMetadata(notice, 'turn-task-notice', 'p', ANTHROPIC_PRICING)).turnOpen
+    ).toBe(true)
+
+    const handBack = session('turn-hand-back', [
+      user('u1'),
+      assistant({ uuid: 'a1', id: 'msg_1', stopReason: 'end_turn' }),
+      {
+        type: 'user',
+        uuid: 'u2',
+        isMeta: true,
+        timestamp: '2026-09-10T10:01:00.000Z',
+        origin: { kind: 'peer', from: 'a1', handback: true },
+        message: {
+          role: 'user',
+          content:
+            'Another Claude session sent a message:\n<agent-message from="a1">\n</agent-message>',
+        },
+      },
+    ])
+    expect(
+      (await parseSessionMetadata(handBack, 'turn-hand-back', 'p', ANTHROPIC_PRICING)).turnOpen
+    ).toBe(false)
   })
 
   it('is closed on an empty transcript', async () => {

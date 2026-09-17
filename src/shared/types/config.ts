@@ -1,15 +1,49 @@
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
+/**
+ * Which settings file a value came from. Precedence, lowest to highest:
+ * `user` (`<claudeDir>/settings.json`) < `project` (`<root>/.claude/settings.json`)
+ * < `local` (`<root>/.claude/settings.local.json`).
+ *
+ * There is deliberately no `user-local`. Claude Code's scopes are managed,
+ * project-local, shared project and user; `<claudeDir>/settings.local.json` is
+ * not a fifth one. It is only the project-local file of a project whose root
+ * happens to be the home directory, and it is read as that project's `local`
+ * layer — once.
+ */
+export type ConfigScope = 'user' | 'project' | 'local'
+
 export interface HookCommand {
   type?: 'command'
   command: string
   timeout?: number
+  statusMessage?: string
 }
 
 export interface HookRule {
   id: string
   matcher: string
   hooks: HookCommand[]
+  scope: ConfigScope
+  /** Absolute path of the settings file the rule came from. */
+  sourcePath: string
+  projectId?: string
+  projectName?: string
+}
+
+/** A project whose real filesystem root is known (from a transcript `cwd`), never a decoded guess. */
+export interface ProjectRootRef {
+  id: string
+  name: string
+  path: string
+}
+
+/** One settings file that exists on disk, with the scope it was read as. */
+export interface SettingsLayer {
+  scope: ConfigScope
+  path: string
+  settings: RawSettings
+  project?: ProjectRootRef
 }
 
 export interface HookEventGroup {
@@ -50,6 +84,12 @@ export interface CommandEntry {
   description?: string
   content: string
   sizeBytes: number
+  /** Commands exist only in `user` and `project` scope — no local commands directory. */
+  scope: ConfigScope
+  /** Absolute path of the command's markdown file. */
+  filePath: string
+  projectId?: string
+  projectName?: string
 }
 
 // ─── Skills ───────────────────────────────────────────────────────────────────
@@ -144,4 +184,5 @@ export interface RawSettings {
   marketplaces?: MarketplaceSource[]
   profile?: ClaudeProfile
   allowedChannelPlugins?: string[]
+  plansDirectory?: string
 }

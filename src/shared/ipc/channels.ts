@@ -41,6 +41,7 @@ export const CHANNELS = {
   UPDATES_CHECK: 'updates:check',
   UPDATES_DOWNLOAD: 'updates:download',
   UPDATES_INSTALL: 'updates:install',
+  UPDATES_RESIZE_WINDOW: 'updates:resize-window',
 
   // Tray
   TRAY_GET_SNAPSHOT: 'tray:get-snapshot',
@@ -59,6 +60,7 @@ export const CHANNELS = {
   APP_QUIT: 'app:quit',
   APP_RELAUNCH: 'app:relaunch',
   APP_GET_VERSION: 'app:get-version',
+  APP_GET_PATHS: 'app:get-paths',
 
   // ─── Main → Renderer push events (webContents.send / ipcRenderer.on) ───────
 
@@ -72,7 +74,6 @@ export const CHANNELS = {
    */
   PUSH_SESSION_DELETED: 'push:session-deleted',
   PUSH_CONFIG_CHANGED: 'push:config-changed',
-  PUSH_SECRETS_DETECTED: 'push:secrets-detected',
   PUSH_UPDATE_AVAILABLE: 'push:update-available',
   PUSH_UPDATE_DOWNLOAD_PROGRESS: 'push:update-download-progress',
   PUSH_UPDATE_SERVICE_ERROR: 'push:update-service-error',
@@ -102,7 +103,6 @@ export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_SESSION_CREATED'
   | 'PUSH_SESSION_DELETED'
   | 'PUSH_CONFIG_CHANGED'
-  | 'PUSH_SECRETS_DETECTED'
   | 'PUSH_UPDATE_AVAILABLE'
   | 'PUSH_UPDATE_DOWNLOAD_PROGRESS'
   | 'PUSH_UPDATE_SERVICE_ERROR'

@@ -1,7 +1,14 @@
-import { app, autoUpdater as squirrelUpdater, BrowserWindow, screen, shell } from 'electron'
+import { app, BrowserWindow, screen, shell } from 'electron'
 import { join } from 'path'
 import { Preferences } from './store/preferences'
-import type { UpdateInfo } from '@shared/types/project'
+import type { UpdateInfo, UpdateServiceError } from '@shared/types/project'
+import { CHANNELS } from '@shared/ipc/channels'
+import { isAppQuitting } from './lib/update-quit'
+import {
+  UPDATE_WINDOW_WIDTH,
+  UPDATE_WINDOW_MIN_HEIGHT,
+  UPDATE_WINDOW_MAX_HEIGHT,
+} from '@shared/utils/update-window-size'
 
 const IS_DEV = !app.isPackaged
 
@@ -183,25 +190,20 @@ export function createTrayPopoverWindow(): BrowserWindow {
   // menu is set, so Electron's default menu is active and Cmd+W closes the
   // focused window — which this panel is after popover.focus(). Intercept
   // close and hide instead; let the real close through during app quit.
-  let quitting = false
-  const markQuitting = (): void => {
-    quitting = true
-  }
-  app.once('before-quit', markQuitting)
-  // An update quit emits 'before-quit-for-update' instead of 'before-quit', so
-  // without this the popover refuses to close and keeps the process alive,
-  // which makes Squirrel's ShipIt abort the install. See src/main/index.ts.
-  // Emitted by Electron's built-in autoUpdater, not by `app`.
-  squirrelUpdater.once('before-quit-for-update', markQuitting)
+  //
+  // `isAppQuitting()` is shared module state from `./lib/update-quit`, set by
+  // `index.ts` on both `before-quit` (real quit) and `before-quit-for-update`
+  // (update quit — emitted by Electron's built-in autoUpdater, not by `app`).
+  // Routing through that shared flag rather than each window registering its
+  // own `once` listener is what lets a cancelled install disarm the quit and
+  // re-arm it later — see `disarmUpdateQuit`.
   win.on('close', (event) => {
-    if (!quitting) {
+    if (!isAppQuitting()) {
       event.preventDefault()
       win.hide()
     }
   })
   win.on('closed', () => {
-    app.removeListener('before-quit', markQuitting)
-    squirrelUpdater.removeListener('before-quit-for-update', markQuitting)
     if (trayPopoverWindow === win) {
       trayPopoverWindow = null
     }
@@ -229,27 +231,47 @@ export function getTrayPopoverWindow(): BrowserWindow | null {
 
 let updateWindow: BrowserWindow | null = null
 
+// Set when a fresh update window is created, cleared the first time its
+// content is resized (see `centerUpdateWindowOnFirstResize`, called from the
+// `updates:resize-window` handler). The window opens at a placeholder height
+// (360) and grows to fit its content on the first measured resize; recentering
+// then keeps it visually balanced instead of drifting toward one edge. Once
+// consumed, later resizes of the same (reused) window — e.g. switching state
+// from the tray while it's open — must not recenter it out from under the user.
+let updateWindowNeedsCenterOnResize = false
+
+export function centerUpdateWindowOnFirstResize(win: BrowserWindow): void {
+  if (!updateWindowNeedsCenterOnResize) return
+  updateWindowNeedsCenterOnResize = false
+  win.center()
+}
+
 export function createOrShowUpdateWindow(
   updateInfo: UpdateInfo | null,
-  errorMessage?: string
+  errorMessage?: string,
+  updateError?: UpdateServiceError
 ): BrowserWindow {
   if (updateWindow && !updateWindow.isDestroyed()) {
     // Already open — push fresh data and focus
-    updateWindow.webContents.send('push:show-update', { updateInfo, errorMessage })
+    updateWindow.webContents.send(CHANNELS.PUSH_SHOW_UPDATE, {
+      updateInfo,
+      errorMessage,
+      updateError,
+    })
     updateWindow.show()
     updateWindow.focus()
     return updateWindow
   }
 
   const win = new BrowserWindow({
-    width: 520,
-    height: 640,
-    minWidth: 460,
-    minHeight: 500,
-    maxWidth: 680,
-    maxHeight: 800,
+    width: UPDATE_WINDOW_WIDTH,
+    height: 360,
+    minHeight: UPDATE_WINDOW_MIN_HEIGHT,
+    maxHeight: UPDATE_WINDOW_MAX_HEIGHT,
+    minWidth: UPDATE_WINDOW_WIDTH,
+    maxWidth: UPDATE_WINDOW_WIDTH,
     useContentSize: true,
-    resizable: true,
+    resizable: false,
     center: true,
     show: false,
     title: 'ClaudeWatch — Updates',
@@ -284,6 +306,7 @@ export function createOrShowUpdateWindow(
   // the React useEffect listener is registered.
   const query: Record<string, string> = { window: 'update', updateInfo: JSON.stringify(updateInfo) }
   if (errorMessage) query['errorMessage'] = errorMessage
+  if (updateError) query['updateError'] = JSON.stringify(updateError)
   if (DEV_SERVER_URL) {
     const qs = new URLSearchParams(query).toString()
     win.loadURL(`${DEV_SERVER_URL}?${qs}`)
@@ -291,6 +314,7 @@ export function createOrShowUpdateWindow(
     win.loadFile(join(__dirname, '../renderer/index.html'), { query })
   }
 
+  updateWindowNeedsCenterOnResize = true
   updateWindow = win
   return win
 }

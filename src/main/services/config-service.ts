@@ -1,7 +1,17 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { getClaudeDir } from '@main/lib/claude-paths'
+import {
+  getClaudeDir,
+  getClaudeJsonPath,
+  getMcpDebugLatestPath,
+  getProjectsDirPath,
+  getUserCommandsDirPath,
+  getUserSettingsPath,
+} from '@main/lib/claude-paths'
+import { assertSafePath } from '@main/lib/safe-path'
+import { samePath } from '@main/lib/same-path'
 import type {
+  ConfigScope,
   ExtendedConfig,
   HookEventGroup,
   HookCommand,
@@ -10,7 +20,9 @@ import type {
   CommandEntry,
   SkillEntry,
   MemoryFile,
+  ProjectRootRef,
   RawSettings,
+  SettingsLayer,
 } from '@shared/types/config'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -69,71 +81,177 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
   return { meta, body }
 }
 
+// ─── Settings layers ─────────────────────────────────────────────────────────
+// Claude Code reads settings from up to four files and merges them itself.
+// The project files live in the project's own `.claude/` folder, never under
+// `<claudeDir>/projects/<id>/` (that directory only holds transcripts and
+// `memory/`), so a project layer needs the real root from a transcript `cwd`.
+
+async function readLayer(
+  scope: ConfigScope,
+  filePath: string,
+  project?: ProjectRootRef
+): Promise<SettingsLayer | null> {
+  const settings = await readJsonFile<RawSettings>(filePath)
+  if (!settings || typeof settings !== 'object' || Array.isArray(settings)) return null
+  return project
+    ? { scope, path: filePath, settings, project }
+    : { scope, path: filePath, settings }
+}
+
 /**
- * Read and merge settings.json files. Project-level overrides global.
+ * The settings files that exist, lowest precedence first: `user`, then (with a
+ * project) `project` and `local`. Missing or unparseable files produce no
+ * layer.
+ *
+ * A project whose root is the home directory — the user ran `claude` in `~` —
+ * makes `<root>/.claude/settings.json` the very same file as the user
+ * settings. Reading it again as a project layer listed every user hook twice
+ * (once as "user", once as "<name> · project") and made `readRawSettings`
+ * concatenate the user's permissions and hooks with themselves. A layer whose
+ * resolved path is already a user-layer path is skipped, which also covers a
+ * `CLAUDE_CONFIG_DIR` override that points `<claudeDir>` at `<root>/.claude`
+ * and a root that reaches the home directory through a symlink (`samePath`
+ * follows symlinks).
+ *
+ * `<claudeDir>/settings.local.json` is deliberately not a layer of its own:
+ * it is that home-directory project's `local` file and nothing else, so it is
+ * read here exactly once, under that project.
  */
-async function readSettings(claudeDir: string, projectEncodedId?: string): Promise<RawSettings> {
-  const globalPath = path.join(claudeDir, 'settings.json')
-  const global = (await readJsonFile<RawSettings>(globalPath)) ?? {}
-
-  if (!projectEncodedId) return global
-
-  const projectPath = path.join(claudeDir, 'projects', projectEncodedId, 'settings.json')
-  const project = (await readJsonFile<RawSettings>(projectPath)) ?? {}
-
-  // Shallow merge — project values override global
-  return {
-    ...global,
-    ...project,
-    hooks: { ...global.hooks, ...project.hooks },
-    mcpServers: { ...global.mcpServers, ...project.mcpServers },
-    env: { ...global.env, ...project.env },
-    permissions: {
-      allow: [...(global.permissions?.allow ?? []), ...(project.permissions?.allow ?? [])],
-      deny: [...(global.permissions?.deny ?? []), ...(project.permissions?.deny ?? [])],
-    },
+export async function readSettingsLayers(project?: ProjectRootRef): Promise<SettingsLayer[]> {
+  const userSettingsPath = getUserSettingsPath()
+  const candidates: Array<Promise<SettingsLayer | null>> = [readLayer('user', userSettingsPath)]
+  if (project) {
+    const dotClaude = path.join(project.path, '.claude')
+    const projectPath = path.join(dotClaude, 'settings.json')
+    const localPath = path.join(dotClaude, 'settings.local.json')
+    if (!samePath(projectPath, userSettingsPath)) {
+      candidates.push(readLayer('project', projectPath, project))
+    }
+    if (!samePath(localPath, userSettingsPath)) {
+      candidates.push(readLayer('local', localPath, project))
+    }
   }
+  return (await Promise.all(candidates)).filter((l): l is SettingsLayer => l !== null)
+}
+
+/** A value that can be spread key-wise — not null, not an array, not a scalar. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** The value if it is a list, otherwise an empty one. */
+function asList<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+/**
+ * Precedence local > project > user. Scalars: highest wins.
+ * Lists (`permissions.allow/deny`, hooks per event): concatenated user → local.
+ * Objects (`env`, `mcpServers`): key-wise, highest wins.
+ *
+ * Every settings file here is hand-editable JSON, so nothing about its shape
+ * can be assumed. A single `"permissions": {"allow": {}}` in any one project
+ * used to throw out of the spread below, and that one exception blanked the
+ * Plans view for every project and failed the lint run. Values of the wrong
+ * type are ignored instead.
+ */
+export function mergeSettingsLayers(layers: SettingsLayer[]): RawSettings {
+  const out: RawSettings = {}
+  for (const { settings } of layers) {
+    // Ascending precedence: a later layer wins.
+    const { hooks, mcpServers, env, permissions, ...scalars } = settings
+    Object.assign(out, scalars)
+    if (isPlainObject(env)) out.env = { ...(out.env ?? {}), ...env }
+    if (isPlainObject(mcpServers)) out.mcpServers = { ...(out.mcpServers ?? {}), ...mcpServers }
+    if (isPlainObject(permissions)) {
+      out.permissions = {
+        allow: [...asList(out.permissions?.allow), ...asList(permissions.allow)],
+        deny: [...asList(out.permissions?.deny), ...asList(permissions.deny)],
+      }
+    }
+    if (isPlainObject(hooks)) {
+      const merged: NonNullable<RawSettings['hooks']> = out.hooks ?? {}
+      for (const [event, entries] of Object.entries(hooks)) {
+        if (!Array.isArray(entries)) continue
+        merged[event] = [...asList(merged[event]), ...entries]
+      }
+      out.hooks = merged
+    }
+  }
+  return out
 }
 
 // ─── parseHooks ──────────────────────────────────────────────────────────────
 
-function parseHooks(rawHooks: RawSettings['hooks'] = {}): HookEventGroup[] {
-  const groups: HookEventGroup[] = []
-
-  for (const [event, entries] of Object.entries(rawHooks)) {
-    const rules: HookEventGroup['rules'] = []
-
-    for (const entry of entries) {
-      if ('command' in entry) {
-        // Bare HookCommand — wrap in a rule with empty matcher
-        rules.push({
-          id: `${event}-bare-${rules.length}`,
-          matcher: '',
-          hooks: [entry as HookCommand],
-        })
-      } else if ('hooks' in entry && Array.isArray(entry.hooks)) {
-        rules.push({
-          id: `${event}-${rules.length}`,
-          matcher: (entry as { matcher?: string }).matcher ?? '',
-          hooks: entry.hooks as HookCommand[],
-        })
+/**
+ * Every hook rule from every layer, in layer order. Claude Code runs the
+ * hooks of all scopes, so nothing is replaced; each rule records the scope
+ * and file it came from. Ids are built from the scope, the project id (when
+ * the layer belongs to a project) and an index counted within that single
+ * layer's rules for that event — never across the whole event group. That
+ * keeps an id stable when another project or scope later gains a rule for
+ * the same event, and keeps two projects' rules for the same event distinct.
+ * Segments are joined so the id never contains `::` (the separator
+ * `hooks-panel.tsx` uses to split a group id from a rule id).
+ */
+export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
+  const byEvent = new Map<string, HookEventGroup>()
+  for (const layer of layers) {
+    for (const [event, entries] of Object.entries(layer.settings.hooks ?? {})) {
+      if (!Array.isArray(entries)) continue
+      let group = byEvent.get(event)
+      if (!group) {
+        group = { id: event, event, rules: [] }
+        byEvent.set(event, group)
+      }
+      const base = {
+        scope: layer.scope,
+        sourcePath: layer.path,
+        projectId: layer.project?.id,
+        projectName: layer.project?.name,
+      }
+      let localIndex = 0
+      for (const entry of entries) {
+        if (!entry || typeof entry !== 'object') continue
+        const idSegments = [layer.scope, layer.project?.id, `${event}-${localIndex}`].filter(
+          (s): s is string => s !== undefined
+        )
+        const id = idSegments.join(':')
+        if ('command' in entry) {
+          // Bare HookCommand — wrap in a rule with an empty matcher
+          group.rules.push({ ...base, id, matcher: '', hooks: [entry as HookCommand] })
+          localIndex++
+        } else if ('hooks' in entry && Array.isArray(entry.hooks)) {
+          group.rules.push({
+            ...base,
+            id,
+            matcher: (entry as { matcher?: string }).matcher ?? '',
+            hooks: entry.hooks as HookCommand[],
+          })
+          localIndex++
+        }
       }
     }
-
-    groups.push({ id: event, event, rules })
   }
-
-  return groups
+  return [...byEvent.values()]
 }
 
 // ─── readExtendedConfig ───────────────────────────────────────────────────────
 
-export async function readExtendedConfig(projectEncodedId?: string): Promise<ExtendedConfig> {
-  const claudeDir = getClaudeDir()
-  const settings = await readSettings(claudeDir, projectEncodedId)
+/**
+ * Hooks from the user layers plus the project and local layers of every
+ * project passed. The panel's scalar settings come from the user layers only.
+ */
+export async function readExtendedConfig(projects: ProjectRootRef[]): Promise<ExtendedConfig> {
+  const userLayers = await readSettingsLayers()
+  const projectLayers = (await Promise.all(projects.map((p) => readSettingsLayers(p))))
+    .flat()
+    .filter((l) => l.scope === 'project' || l.scope === 'local')
+  const settings = mergeSettingsLayers(userLayers)
 
   return {
-    hooks: parseHooks(settings.hooks),
+    hooks: parseHooks([...userLayers, ...projectLayers]),
     sandbox: settings.sandbox,
     skipDangerousModePermissionPrompt: settings.skipDangerousModePermissionPrompt ?? false,
     disableSkillShellExecution: settings.disableSkillShellExecution ?? false,
@@ -144,14 +262,6 @@ export async function readExtendedConfig(projectEncodedId?: string): Promise<Ext
     allowedChannelPlugins: settings.allowedChannelPlugins ?? [],
     env: settings.env ?? {},
   }
-}
-
-// ─── readHooks ────────────────────────────────────────────────────────────────
-
-export async function readHooks(projectEncodedId?: string): Promise<HookEventGroup[]> {
-  const claudeDir = getClaudeDir()
-  const settings = await readSettings(claudeDir, projectEncodedId)
-  return parseHooks(settings.hooks)
 }
 
 // ─── readMcps ─────────────────────────────────────────────────────────────────
@@ -179,8 +289,7 @@ interface McpRuntimeStatus {
 }
 
 async function readMcpStatuses(): Promise<Map<string, McpRuntimeStatus>> {
-  const claudeDir = getClaudeDir()
-  const debugLatest = path.join(claudeDir, 'debug', 'latest')
+  const debugLatest = getMcpDebugLatestPath()
   const log = await readTextFile(debugLatest)
   const result = new Map<string, McpRuntimeStatus>()
   if (!log) return result
@@ -239,18 +348,23 @@ async function readMcpStatuses(): Promise<Map<string, McpRuntimeStatus>> {
   return result
 }
 
-export async function readMcps(projectEncodedId?: string): Promise<McpServerEntry[]> {
-  const claudeDir = getClaudeDir()
+type McpLevel = NonNullable<McpServerEntry['level']>
+
+function mcpLevelFor(scope: ConfigScope): McpLevel {
+  if (scope === 'project') return 'project'
+  if (scope === 'local') return 'local'
+  return 'global'
+}
+
+export async function readMcps(project?: ProjectRootRef): Promise<McpServerEntry[]> {
   const seen = new Set<string>()
   const entries: McpServerEntry[] = []
 
   const statuses = await readMcpStatuses()
 
-  // 1. Read from ~/.claude.json (primary source for global MCPs)
-  const claudeJsonPath = path.join(path.dirname(claudeDir), '.claude.json')
-  const claudeJson = await readJsonFile<ClaudeJson>(claudeJsonPath)
-  for (const [name, cfg] of Object.entries(claudeJson?.mcpServers ?? {})) {
-    if (seen.has(name)) continue
+  const add = (name: string, cfg: ClaudeJsonMcpServer, level: McpLevel): void => {
+    // First definition wins, as before.
+    if (seen.has(name)) return
     seen.add(name)
     const s = statuses.get(name)
     entries.push({
@@ -261,7 +375,7 @@ export async function readMcps(projectEncodedId?: string): Promise<McpServerEntr
       args: cfg.args ?? [],
       url: cfg.url,
       env: cfg.env ?? {},
-      level: 'global',
+      level,
       status: s?.status ?? 'unknown',
       error: s?.error,
       capabilities: s?.capabilities,
@@ -269,26 +383,19 @@ export async function readMcps(projectEncodedId?: string): Promise<McpServerEntr
     })
   }
 
-  // 2. Also read from ~/.claude/settings.json (some setups use this)
-  const settings = await readSettings(claudeDir, projectEncodedId)
-  for (const [name, cfg] of Object.entries(settings.mcpServers ?? {})) {
-    if (seen.has(name)) continue
-    seen.add(name)
-    const s = statuses.get(name)
-    entries.push({
-      id: name,
-      name,
-      type: cfg.type ?? (cfg.command ? 'stdio' : cfg.url ? 'sse' : undefined),
-      command: cfg.command,
-      args: cfg.args ?? [],
-      url: cfg.url,
-      env: cfg.env ?? {},
-      level: projectEncodedId ? 'project' : 'global',
-      status: s?.status ?? 'unknown',
-      error: s?.error,
-      capabilities: s?.capabilities,
-      lastSeen: s?.lastSeen,
-    })
+  // 1. ~/.claude.json (primary source for global MCPs)
+  const claudeJson = await readJsonFile<ClaudeJson>(getClaudeJsonPath())
+  for (const [name, cfg] of Object.entries(claudeJson?.mcpServers ?? {})) {
+    add(name, cfg, 'global')
+  }
+
+  // 2. The settings layers (some setups use these). Walk the layers rather
+  // than the merged object so each server keeps the level of the file that
+  // defined it.
+  for (const layer of await readSettingsLayers(project)) {
+    for (const [name, cfg] of Object.entries(layer.settings.mcpServers ?? {})) {
+      add(name, cfg, mcpLevelFor(layer.scope))
+    }
   }
 
   return entries
@@ -296,46 +403,98 @@ export async function readMcps(projectEncodedId?: string): Promise<McpServerEntr
 
 // ─── readCommands ─────────────────────────────────────────────────────────────
 
-export async function readCommands(projectEncodedId?: string): Promise<CommandEntry[]> {
-  const claudeDir = getClaudeDir()
-  const dirs: string[] = [path.join(claudeDir, 'commands')]
+/** One `.md` file found while walking a commands directory, with its path
+ * segments relative to that directory, e.g. `git/commit.md` -> `['git', 'commit.md']`. */
+interface MarkdownFile {
+  file: string
+  rel: string[]
+}
 
-  if (projectEncodedId) {
-    dirs.push(path.join(claudeDir, 'projects', projectEncodedId, 'commands'))
+/**
+ * Recursively lists the `.md` files under `dir`, skipping dotfiles and
+ * dot-directories. A missing directory produces an empty list.
+ */
+async function walkMarkdown(dir: string, rel: string[] = []): Promise<MarkdownFile[]> {
+  let dirEntries: fs.Dirent[]
+  try {
+    dirEntries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch {
+    return []
   }
 
+  const results: MarkdownFile[] = []
+  for (const entry of dirEntries) {
+    if (entry.name.startsWith('.')) continue
+    const entryPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      results.push(...(await walkMarkdown(entryPath, [...rel, entry.name])))
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      results.push({ file: entryPath, rel: [...rel, entry.name] })
+    }
+  }
+  return results
+}
+
+/**
+ * Reads every command markdown file under `dir` (recursively). The display
+ * name for a namespaced file joins its directory segments and base name with
+ * `:` (e.g. `git/commit.md` -> `git:commit`), unless the frontmatter sets an
+ * explicit `name`, which replaces that computed name entirely.
+ */
+async function readCommandsFromDir(
+  dir: string,
+  scope: 'user' | 'project',
+  project?: ProjectRootRef
+): Promise<CommandEntry[]> {
+  const files = await walkMarkdown(dir)
   const entries: CommandEntry[] = []
 
-  for (const dir of dirs) {
-    let files: string[] = []
-    try {
-      const dirEntries = await fs.promises.readdir(dir, { withFileTypes: true })
-      files = dirEntries.filter((e) => e.isFile() && e.name.endsWith('.md')).map((e) => e.name)
-    } catch {
-      continue
-    }
+  for (const { file, rel } of files) {
+    const content = await readTextFile(file)
+    if (content === null) continue
 
-    for (const file of files) {
-      const filePath = path.join(dir, file)
-      const content = await readTextFile(filePath)
-      if (content === null) continue
+    const stat = await fs.promises.stat(file).catch(() => null)
+    const sizeBytes = stat?.size ?? Buffer.byteLength(content, 'utf-8')
+    const { meta, body } = parseFrontmatter(content)
+    const baseName = rel[rel.length - 1].replace(/\.md$/, '')
+    const defaultName = [...rel.slice(0, -1), baseName].join(':')
 
-      const stat = await fs.promises.stat(filePath).catch(() => null)
-      const sizeBytes = stat?.size ?? Buffer.byteLength(content, 'utf-8')
-      const { meta, body } = parseFrontmatter(content)
-      const baseName = file.replace(/\.md$/, '')
-
-      entries.push({
-        id: `${dir}:${baseName}`,
-        name: meta['name'] ?? baseName,
-        description: meta['description'],
-        content: body.trim() || content,
-        sizeBytes,
-      })
-    }
+    entries.push({
+      id: `${scope}:${file}`,
+      name: meta['name'] ?? defaultName,
+      description: meta['description'],
+      content: body.trim() || content,
+      sizeBytes,
+      scope,
+      filePath: file,
+      projectId: project?.id,
+      projectName: project?.name,
+    })
   }
 
   return entries
+}
+
+/**
+ * User commands from `getUserCommandsDirPath()`, then each project's
+ * `<root>/.claude/commands`, recursively. Never
+ * `<claudeDir>/projects/<id>/commands` — that directory only holds
+ * transcripts and `memory/`, never commands.
+ *
+ * A project rooted at the home directory shares its commands directory with
+ * the user one, and every command in it was listed twice. Such a project is
+ * skipped here, exactly as its settings layer is in `readSettingsLayers`.
+ */
+export async function readCommands(projects: ProjectRootRef[]): Promise<CommandEntry[]> {
+  const userCommandsDir = getUserCommandsDirPath()
+  const userCommands = await readCommandsFromDir(userCommandsDir, 'user')
+  const projectCommands = await Promise.all(
+    projects
+      .map((project) => ({ project, dir: path.join(project.path, '.claude', 'commands') }))
+      .filter(({ dir }) => !samePath(dir, userCommandsDir))
+      .map(({ project, dir }) => readCommandsFromDir(dir, 'project', project))
+  )
+  return [...userCommands, ...projectCommands.flat()]
 }
 
 // ─── readSkills ───────────────────────────────────────────────────────────────
@@ -383,7 +542,15 @@ export async function readSkills(): Promise<SkillEntry[]> {
 
 // ─── readMemoryFiles ──────────────────────────────────────────────────────────
 
-export async function readMemoryFiles(projectEncodedId?: string): Promise<MemoryFile[]> {
+/**
+ * The user `CLAUDE.md`, the project's `CLAUDE.md` (read from the project's
+ * real root, so only when one is known), and the auto-memory files, which
+ * Claude Code keeps under `<claudeDir>/projects/<id>/memory`.
+ */
+export async function readMemoryFiles(
+  projectEncodedId?: string,
+  project?: ProjectRootRef
+): Promise<MemoryFile[]> {
   const claudeDir = getClaudeDir()
   const files: MemoryFile[] = []
 
@@ -402,9 +569,9 @@ export async function readMemoryFiles(projectEncodedId?: string): Promise<Memory
     })
   }
 
-  // 2. Project CLAUDE.md
-  if (projectEncodedId) {
-    const projectClaudeMd = path.join(claudeDir, 'projects', projectEncodedId, 'CLAUDE.md')
+  // 2. Project CLAUDE.md, from the project root
+  if (project) {
+    const projectClaudeMd = path.join(project.path, 'CLAUDE.md')
     if (await fileExists(projectClaudeMd)) {
       const content = await readTextFile(projectClaudeMd)
       const stat = await fs.promises.stat(projectClaudeMd).catch(() => null)
@@ -417,9 +584,14 @@ export async function readMemoryFiles(projectEncodedId?: string): Promise<Memory
         sizeBytes: stat?.size,
       })
     }
+  }
 
-    // 3. Auto-memory files
-    const memoryDir = path.join(claudeDir, 'projects', projectEncodedId, 'memory')
+  // 3. Auto-memory files
+  if (projectEncodedId) {
+    // `projectEncodedId` is renderer-supplied; `assertSafePath` rejects an id
+    // like `../../x` instead of joining it and reading outside the projects
+    // directory.
+    const memoryDir = assertSafePath(getProjectsDirPath(), projectEncodedId, 'memory')
     try {
       const memEntries = await fs.promises.readdir(memoryDir, { withFileTypes: true })
       for (const entry of memEntries) {
@@ -445,8 +617,8 @@ export async function readMemoryFiles(projectEncodedId?: string): Promise<Memory
 }
 
 // ─── readRawSettings ──────────────────────────────────────────────────────────
-// Exported for use by lint rules that need the raw settings object
+// Exported for use by lint rules that need the merged settings object
 
-export async function readRawSettings(projectEncodedId?: string): Promise<RawSettings> {
-  return readSettings(getClaudeDir(), projectEncodedId)
+export async function readRawSettings(project?: ProjectRootRef): Promise<RawSettings> {
+  return mergeSettingsLayers(await readSettingsLayers(project))
 }

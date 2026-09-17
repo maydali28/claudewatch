@@ -2,24 +2,29 @@ import React from 'react'
 import { BarChart2, RefreshCw, Search, X } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
-import { useSessionsStore } from '@renderer/store/sessions.store'
+import { shouldAutoLoadProjects, useSessionsStore } from '@renderer/store/sessions.store'
 import { formatCost, formatTokens } from '@shared/utils'
+import { COST_ESTIMATE_NOTE_SHORT } from '@shared/constants/copy'
 import { isProjectVisibleInRange } from './project-visibility'
 
 export default function AnalyticsSidebar(): React.JSX.Element {
   const { selectedProjectIds, isLoading, baselineData, setProjectFilter, refresh } =
     useAnalyticsStore()
-  const { projects, loadProjects, isLoadingProjects } = useSessionsStore()
+  const { projects, loadProjects, isLoadingProjects, projectsError, projectsLoaded } =
+    useSessionsStore()
   const [search, setSearch] = React.useState('')
 
   // Load projects on first mount if they haven't been fetched yet.
   // This handles the case where the app starts directly on the analytics view,
   // bypassing SessionsSidebar which is the only other caller of loadProjects.
+  // Only until a load has finished: an empty or failed result is not retried
+  // from here, or `isLoadingProjects` flipping back to false would re-run this
+  // effect and rescan in a loop. The refresh button below reloads the list.
   React.useEffect(() => {
-    if (projects.length === 0 && !isLoadingProjects) {
+    if (shouldAutoLoadProjects({ projectsLoaded, isLoadingProjects })) {
       loadProjects()
     }
-  }, [projects.length, isLoadingProjects, loadProjects])
+  }, [projectsLoaded, isLoadingProjects, loadProjects])
 
   const selectedProjectId = selectedProjectIds.length === 1 ? selectedProjectIds[0] : null
 
@@ -43,6 +48,12 @@ export default function AnalyticsSidebar(): React.JSX.Element {
     [projects, projectCostMap, selectedProjectId, search]
   )
 
+  function handleRefresh(): void {
+    refresh(true)
+    // Manual refresh is how an empty or failed project list is retried here.
+    if (!isLoadingProjects) loadProjects()
+  }
+
   function handleProjectSelect(projectId: string | null): void {
     setProjectFilter(projectId ? [projectId] : [])
   }
@@ -55,7 +66,7 @@ export default function AnalyticsSidebar(): React.JSX.Element {
           Analytics
         </span>
         <button
-          onClick={() => refresh(true)}
+          onClick={handleRefresh}
           disabled={isLoading}
           className="p-1 rounded hover:bg-accent transition-colors disabled:opacity-50"
           title="Refresh"
@@ -108,7 +119,9 @@ export default function AnalyticsSidebar(): React.JSX.Element {
               >
                 All projects
               </span>
-              <span className="text-[10px] text-muted-foreground">{formatCost(totalCost)}</span>
+              <span className="text-[10px] text-muted-foreground" title={COST_ESTIMATE_NOTE_SHORT}>
+                {formatCost(totalCost)}
+              </span>
             </div>
             <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
               <div className="h-full w-full rounded-full bg-primary/40" />
@@ -119,8 +132,16 @@ export default function AnalyticsSidebar(): React.JSX.Element {
           </button>
         )}
 
+        {/* The project list itself failed to load */}
+        {!isLoadingProjects && projectsError && (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-3">
+            <p className="text-xs text-destructive font-medium">Failed to load projects</p>
+            <p className="text-[10px] text-muted-foreground mt-1 break-all">{projectsError}</p>
+          </div>
+        )}
+
         {/* No projects at all */}
-        {!isLoadingProjects && projects.length === 0 && (
+        {!isLoadingProjects && !projectsError && projects.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <BarChart2 className="h-6 w-6 text-muted-foreground/30 mb-2" />
             <p className="text-xs text-muted-foreground">No projects found</p>
@@ -172,7 +193,10 @@ export default function AnalyticsSidebar(): React.JSX.Element {
                 >
                   {project.name}
                 </span>
-                <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
+                <span
+                  className="ml-2 shrink-0 text-[10px] text-muted-foreground"
+                  title={COST_ESTIMATE_NOTE_SHORT}
+                >
                   {formatCost(pCost)}
                 </span>
               </div>

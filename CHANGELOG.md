@@ -1,3 +1,44 @@
+## 1.5.1 (2026-09-17)
+
+> **User message counts drop, and cached session data is rebuilt on first
+> launch.** Background-task notices, sub-agent reports, injected context and
+> local commands were counted as messages you wrote; only your own prompts
+> count now, and those other records appear as their own cards in the
+> conversation. Costs are labelled as estimates throughout. Live secret
+> scanning is switched off until its alert ships. Crash reports no longer
+> send app-session records, turning them off also discards reports queued
+> while offline, and turning them on takes effect after a restart.
+> Installing 1.5.1 over 1.5.0 still runs 1.5.0's updater: if you cancel the
+> macOS password prompt, quit and reopen ClaudeWatch before trying again.
+> Updates from 1.5.1 onward recover on their own.
+
+### Bug Fixes
+
+* **analytics:** label every cost as an estimate and explain what it is not
+* **analytics:** say which usage the estimate leaves out, such as fast mode or web searches
+* **analytics:** stop rescanning in a loop when there are no projects
+* **commands:** list each project's .claude/commands, including namespaced ones
+* **config:** group hooks, commands and plans under global and each project
+* **config:** honour a relocated claude config folder and resolve every path through one helper
+* **config:** list skills, hooks and commands once when a project is your home folder
+* **hooks:** read project and local settings files and keep hooks from every scope
+* **hooks:** show project and local hooks with their scope and source file
+* **plans:** honour the plans directory setting and show where each plan lives
+* **privacy:** describe crash reports and feedback accurately in settings
+* **privacy:** hide your username in crash reports on every platform and send no memory dumps
+* **privacy:** never send queued crash reports after you turn reporting off
+* **privacy:** say when feedback cannot be sent until a restart
+* **privacy:** send no usage sessions with crash reports and describe what a report contains
+* **privacy:** send nothing after crash reports are switched back off before a restart
+* **privacy:** stop scanning transcripts for secrets until the alert and toggle ship
+* **sessions:** count only messages you wrote as user messages
+* **sessions:** show sub-agent reports and background task notices as their own cards
+* **sessions:** show the error when a conversation fails to load and recover when its file is deleted
+* **updates:** keep the app running after an install is cancelled instead of half-quitting
+* **updates:** point linux users to apt or the download page instead of a failing button
+* **updates:** report install failures and allow a retry after a cancelled password prompt
+* **updates:** show a clear install error with a working retry and block double installs
+* **updates:** size the update window to its content instead of a fixed 520×640
 ## 1.5.0 (2026-09-16)
 
 > **Sessions now show their generated names, and cached session data is

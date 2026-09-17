@@ -380,11 +380,11 @@ export function CacheTab({ data }: Props): React.JSX.Element {
                 <span className="font-medium">{formatTokens(data.totalCache1hTokens)}</span>
               </div>
               <div className="flex justify-between border-t pt-1">
-                <span className="text-muted-foreground">5-min tier cost</span>
+                <span className="text-muted-foreground">Est. 5-min tier cost</span>
                 <span className="font-medium">{formatCost(data.tierCostBreakdown.cost5m)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">1-hour tier cost</span>
+                <span className="text-muted-foreground">Est. 1-hour tier cost</span>
                 <span className="font-medium">{formatCost(data.tierCostBreakdown.cost1h)}</span>
               </div>
               {/* A flat cache-write counter with no TTL split reported. Shown

@@ -135,9 +135,24 @@ interface CacheFile {
 // the id-as-title until the transcript itself was next written to. Discard,
 // so the first scan re-reads every title.
 //
+// v12: `SessionSummary.diagnostics` and `dailyUsage[]` gained
+// `pricingModifierResponses` and `serverToolRequests` (fast mode / regional
+// inference / non-standard tier, and web search/fetch requests). A v11 entry
+// lacks both, and serving it would report them as a measured zero. No rate
+// changed, so `PRICING_REVISION` stays put; readers in `analytics-engine.ts`
+// still treat a missing field as 0.
+//
+// v13: user message counts exclude task notifications, hand-backs, injected
+// context, local commands and interrupts (`classifyUserRecord`). No field
+// changed shape, but `messageCount`, `parentMessageCount` and every
+// `dailyUsage[].messageCount` a v12 entry holds are inflated by those
+// records, and nothing about the transcript changes when the parser learns
+// to tell them apart. Discard, so the first scan recounts. Tokens and cost
+// are unaffected.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 11
+const CACHE_VERSION = 13
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

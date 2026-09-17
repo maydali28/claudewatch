@@ -5,12 +5,13 @@ import { Label } from '@renderer/components/ui/label'
 import { Button } from '@renderer/components/ui/button'
 import { useSettingsStore } from '@renderer/store/settings.store'
 import { ipc } from '@renderer/lib/ipc-client'
+import { shouldShowRestartBanner } from './restart-banner'
 
 type FeedbackState = 'idle' | 'sending' | 'sent' | 'error'
 
 export default function PrivacySettings(): React.JSX.Element {
   const { prefs, updatePref } = useSettingsStore()
-  const [pendingRestart, setPendingRestart] = useState(false)
+  const [showRestartBanner, setShowRestartBanner] = useState(false)
 
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -50,8 +51,11 @@ export default function PrivacySettings(): React.JSX.Element {
               Crash reports
             </Label>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Send anonymous crash reports to help fix bugs. No session content, file paths, or
-              personal data is ever included.
+              Send crash reports to help fix bugs. A report contains the error message and stack
+              trace plus standard context (app and OS versions, device and GPU details, recent app
+              events and log lines), with your username replaced by [user] in paths. Reports never
+              include session content, prompts or API keys. Turning this off stops sending at once,
+              including reports queued while offline.
             </p>
           </div>
         </div>
@@ -59,16 +63,16 @@ export default function PrivacySettings(): React.JSX.Element {
           id="sentry-toggle"
           checked={prefs.sentryEnabled}
           onCheckedChange={(v) => {
+            setShowRestartBanner(shouldShowRestartBanner(prefs.sentryEnabled, v))
             updatePref('sentryEnabled', v)
-            setPendingRestart(true)
           }}
         />
       </div>
 
-      {pendingRestart && (
+      {showRestartBanner && (
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950">
           <p className="text-xs text-amber-800 dark:text-amber-200">
-            Restart required for crash report changes to take effect.
+            Restart ClaudeWatch to start sending crash reports.
           </p>
           <Button
             size="sm"
@@ -83,8 +87,8 @@ export default function PrivacySettings(): React.JSX.Element {
       )}
 
       <p className="text-xs text-muted-foreground">
-        Crash reports are processed by Sentry and contain only stack traces and error messages.
-        ClaudeWatch never sends session data, API keys, or file contents.
+        Crash reports go to Sentry. Feedback you send below includes the name and email you type and
+        your message. Nothing is sent while crash reports are off.
       </p>
 
       {/* User feedback form */}

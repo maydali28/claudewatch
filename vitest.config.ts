@@ -5,6 +5,10 @@ export default defineConfig({
   test: {
     environment: 'node',
     globals: true,
+    // Runs before every test file. See src/test/setup.ts: it keeps a
+    // `CLAUDE_CONFIG_DIR` exported in the contributor's shell from changing
+    // what the suite reads.
+    setupFiles: ['src/test/setup.ts'],
     include: ['src/**/*.{test,spec}.{ts,tsx}', 'tests/**/*.{test,spec}.{ts,tsx}'],
     coverage: {
       provider: 'v8',

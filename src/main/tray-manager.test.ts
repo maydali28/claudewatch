@@ -159,7 +159,7 @@ async function setup(): Promise<{ tray: FakeTray; popover: FakeWindow }> {
   const { setupTray } = await import('./tray-manager')
   const mainWindow = new FakeWindow()
   allWindows.push(mainWindow)
-  setupTray(mainWindow as unknown as BrowserWindow)
+  setupTray(() => mainWindow as unknown as BrowserWindow)
   return { tray: FakeTray.latest!, popover: createdPopovers[0]! }
 }
 

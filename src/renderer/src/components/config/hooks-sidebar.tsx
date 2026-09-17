@@ -1,49 +1,15 @@
 import React, { useState } from 'react'
-import { RefreshCw, Search, X, ChevronDown, ChevronRight, Webhook } from 'lucide-react'
+import { RefreshCw, Search, X, Webhook, FolderOpen } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
-import type { HookEventGroup, HookRule } from '@shared/types'
+import { ScopeGroup } from './scope-group'
+import { groupHooksByScope } from './scope-groups'
+import { hookScopeOrder } from './hook-scope-label'
+import type { HookRule } from '@shared/types'
 
-function hookRuleId(group: HookEventGroup, rule: HookRule): string {
-  return `${group.id}::${rule.id}`
-}
-
-function CollapsibleGroup({
-  label,
-  count,
-  defaultExpanded = true,
-  children,
-}: {
-  label: string
-  count: number
-  defaultExpanded?: boolean
-  children: React.ReactNode
-}): React.JSX.Element {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-
-  return (
-    <div>
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left hover:bg-accent/40 rounded-md transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
-        <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-        <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider truncate flex-1">
-          {label}
-        </span>
-        <span className="text-[10px] text-muted-foreground/40 shrink-0">{count}</span>
-      </button>
-      {expanded && (
-        <div className="ml-2 border-l border-border/40 pl-1.5 space-y-0.5">{children}</div>
-      )}
-    </div>
-  )
+function hookRuleId(eventGroupId: string, rule: HookRule): string {
+  return `${eventGroupId}::${rule.id}`
 }
 
 function RuleItem({
@@ -51,7 +17,7 @@ function RuleItem({
   selectedId,
   onSelect,
 }: {
-  rule: { id: string; matcher: string; commandCount: number }
+  rule: { id: string; matcher: string; commandCount: number; isLocal: boolean }
   selectedId: string | null
   onSelect: (id: string) => void
 }): React.JSX.Element {
@@ -63,13 +29,20 @@ function RuleItem({
         selectedId === rule.id ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
       )}
     >
-      <p
-        className={cn(
-          'text-xs font-medium font-mono truncate',
-          selectedId === rule.id ? 'text-primary' : 'text-foreground'
+      <p className="flex items-center gap-1.5 min-w-0">
+        <span
+          className={cn(
+            'text-xs font-medium font-mono truncate',
+            selectedId === rule.id ? 'text-primary' : 'text-foreground'
+          )}
+        >
+          {rule.matcher || '*'}
+        </span>
+        {rule.isLocal && (
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
+            local
+          </span>
         )}
-      >
-        {rule.matcher || '*'}
       </p>
       <p className="text-[10px] text-muted-foreground mt-0.5">
         {rule.commandCount} command{rule.commandCount !== 1 ? 's' : ''}
@@ -92,12 +65,16 @@ export default function HooksSidebar(): React.JSX.Element {
     .map((g) => ({
       ...g,
       rules: g.rules.filter(
-        (r) => g.event.toLowerCase().includes(q) || (r.matcher ?? '').toLowerCase().includes(q)
+        (r) =>
+          g.event.toLowerCase().includes(q) ||
+          (r.matcher ?? '').toLowerCase().includes(q) ||
+          (r.projectName ?? '').toLowerCase().includes(q)
       ),
     }))
     .filter((g) => g.rules.length > 0)
 
   const total = hooks.reduce((acc, g) => acc + g.rules.length, 0)
+  const scopeGroups = groupHooksByScope(filteredGroups)
 
   return (
     <div className="flex flex-col h-full">
@@ -163,26 +140,46 @@ export default function HooksSidebar(): React.JSX.Element {
           </div>
         )}
 
-        {!isLoading && total > 0 && filteredGroups.length === 0 && search && (
+        {!isLoading && total > 0 && scopeGroups.length === 0 && search && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
           </div>
         )}
 
-        {filteredGroups.map((group) => (
-          <CollapsibleGroup key={group.id} label={group.event} count={group.rules.length}>
-            {group.rules.map((rule) => {
-              const id = hookRuleId(group, rule)
-              return (
-                <RuleItem
-                  key={id}
-                  rule={{ id, matcher: rule.matcher, commandCount: rule.hooks.length }}
-                  selectedId={selectedHookId}
-                  onSelect={setSelectedHook}
-                />
-              )
-            })}
-          </CollapsibleGroup>
+        {scopeGroups.map((sg) => (
+          <ScopeGroup
+            key={sg.key}
+            label={sg.label}
+            count={sg.eventGroups.reduce((acc, eg) => acc + eg.rules.length, 0)}
+            icon={
+              sg.kind === 'project' ? (
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+              ) : undefined
+            }
+          >
+            {sg.eventGroups.map((eg) => (
+              <ScopeGroup key={eg.id} label={eg.event} count={eg.rules.length}>
+                {[...eg.rules]
+                  .sort((a, b) => hookScopeOrder(a).localeCompare(hookScopeOrder(b)))
+                  .map((rule) => {
+                    const id = hookRuleId(eg.id, rule)
+                    return (
+                      <RuleItem
+                        key={id}
+                        rule={{
+                          id,
+                          matcher: rule.matcher,
+                          commandCount: rule.hooks.length,
+                          isLocal: rule.scope === 'local',
+                        }}
+                        selectedId={selectedHookId}
+                        onSelect={setSelectedHook}
+                      />
+                    )
+                  })}
+              </ScopeGroup>
+            ))}
+          </ScopeGroup>
         ))}
       </div>
     </div>

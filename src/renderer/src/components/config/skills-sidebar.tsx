@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
-import { RefreshCw, Search, X, FolderOpen, ChevronDown, ChevronRight, Layers } from 'lucide-react'
+import { RefreshCw, Search, X, FolderOpen, Layers } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import { ScopeGroup } from './scope-group'
 import type { SkillEntry } from '@shared/types'
 import type { ProjectSkillEntry } from '@shared/types/project'
 
@@ -45,45 +46,6 @@ function SkillItem({
       )}
       <p className="text-[10px] text-muted-foreground/50 mt-0.5 font-mono">{skill.name}</p>
     </button>
-  )
-}
-
-function CollapsibleGroup({
-  label,
-  count,
-  icon,
-  defaultExpanded = true,
-  children,
-}: {
-  label: string
-  count: number
-  icon?: React.ReactNode
-  defaultExpanded?: boolean
-  children: React.ReactNode
-}): React.JSX.Element {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-
-  return (
-    <div>
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-left hover:bg-accent/40 rounded-md transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
-        )}
-        {icon}
-        <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider truncate flex-1">
-          {label}
-        </span>
-        <span className="text-[10px] text-muted-foreground/40 shrink-0">{count}</span>
-      </button>
-      {expanded && (
-        <div className="ml-2 border-l border-border/40 pl-1.5 space-y-0.5">{children}</div>
-      )}
-    </div>
   )
 }
 
@@ -191,7 +153,7 @@ export default function SkillsSidebar(): React.JSX.Element {
           )}
 
         {filteredGlobal.length > 0 && (
-          <CollapsibleGroup label="Global" count={filteredGlobal.length}>
+          <ScopeGroup label="Global" count={filteredGlobal.length}>
             {filteredGlobal.map((s) => (
               <SkillItem
                 key={s.id}
@@ -200,13 +162,13 @@ export default function SkillsSidebar(): React.JSX.Element {
                 onSelect={setSelectedSkill}
               />
             ))}
-          </CollapsibleGroup>
+          </ScopeGroup>
         )}
 
         {Object.entries(byProject).map(([, skills]) => {
           const first = skills[0]
           return (
-            <CollapsibleGroup
+            <ScopeGroup
               key={first.projectId}
               label={first.projectName}
               count={skills.length}
@@ -220,7 +182,7 @@ export default function SkillsSidebar(): React.JSX.Element {
                   onSelect={setSelectedSkill}
                 />
               ))}
-            </CollapsibleGroup>
+            </ScopeGroup>
           )
         })}
       </div>

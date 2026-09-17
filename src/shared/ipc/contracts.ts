@@ -120,7 +120,7 @@ export interface IPCContracts {
     response: Result<PlanSummary[]>
   }
   'plans:get': {
-    request: { filename: string }
+    request: { id: string }
     response: Result<PlanDetail>
   }
   'plans:get-projects': {
@@ -137,6 +137,10 @@ export interface IPCContracts {
   }
   'updates:install': {
     request: void
+    response: Result<void>
+  }
+  'updates:resize-window': {
+    request: { height: number }
     response: Result<void>
   }
   'tray:get-snapshot': {
@@ -178,6 +182,18 @@ export interface IPCContracts {
   'app:get-version': {
     request: void
     response: Result<string>
+  }
+  'app:get-paths': {
+    request: void
+    // Mirrors `ClaudeDirSource` from `@main/lib/claude-paths` structurally —
+    // `src/shared/` stays free of main-process imports (see
+    // .dependency-cruiser.cjs), so the union is repeated here rather than
+    // imported.
+    response: Result<{
+      claudeDir: string
+      display: string
+      source: 'env' | 'user-settings' | 'default'
+    }>
   }
 }
 

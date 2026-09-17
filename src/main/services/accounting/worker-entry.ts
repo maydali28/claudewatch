@@ -8,6 +8,7 @@ import { configureMetadataCacheDir, setCachedSummary } from '@main/services/meta
 import { pricingFingerprint } from '@main/services/pricing-engine'
 import { currentTimezone } from '@shared/utils/date-ranges'
 import { createLogger } from '@main/lib/logger'
+import { seedClaudeDir, type ClaudeDirSource } from '@main/lib/claude-paths'
 import type { WorkerRequest, WorkerResponse } from './worker-protocol'
 
 const log = createLogger('AccountingWorker')
@@ -15,6 +16,14 @@ const log = createLogger('AccountingWorker')
 export interface AccountingWorkerData {
   /** Electron's userData directory, resolved by main — `app` is unavailable here. */
   userDataPath: string
+  /**
+   * The main thread's already-resolved Claude directory (and how it was
+   * resolved), handed over because `worker_threads` do not share module
+   * state — this worker's own `@main/lib/claude-paths` import would
+   * otherwise re-resolve independently. See `seedClaudeDir()`.
+   */
+  claudeDir: string
+  claudeDirSource: ClaudeDirSource
 }
 
 /**
@@ -87,6 +96,12 @@ export async function handleRequest(request: WorkerRequest): Promise<WorkerRespo
 if (parentPort) {
   const port = parentPort
   const data = workerData as AccountingWorkerData | null
+  // Must run before any request can be handled — `scanProjects`/`parseSession`
+  // (imported above) call `getClaudeDir()`/`getProjectsDirPath()` lazily, from
+  // inside their own function bodies, never at module import time, so seeding
+  // here is guaranteed to land before the first path resolution this worker
+  // ever performs.
+  if (data?.claudeDir) seedClaudeDir(data.claudeDir, data.claudeDirSource)
   if (data?.userDataPath) configureMetadataCacheDir(data.userDataPath)
   port.on('message', (request: WorkerRequest) => {
     void handleRequest(request).then((response) => port.postMessage(response))

@@ -36,6 +36,8 @@ export interface SubagentDiagnostics {
   incompleteUsageResponses: number
   responsesWithoutCompletionSignal: number
   reducedConfidenceResponses: number
+  pricingModifierResponses: number
+  serverToolRequests: number
 }
 
 export interface SubagentParseResult {
@@ -87,6 +89,8 @@ export async function parseSubagents(
         incompleteUsageResponses: 0,
         responsesWithoutCompletionSignal: 0,
         reducedConfidenceResponses: 0,
+        pricingModifierResponses: 0,
+        serverToolRequests: 0,
       },
     }
   }
@@ -116,6 +120,8 @@ export async function parseSubagents(
     incompleteUsageResponses: 0,
     responsesWithoutCompletionSignal: 0,
     reducedConfidenceResponses: 0,
+    pricingModifierResponses: 0,
+    serverToolRequests: 0,
   }
   for (const result of parsed) {
     diagnostics.malformedLines += result.diagnostics.malformedLines
@@ -127,6 +133,8 @@ export async function parseSubagents(
     diagnostics.responsesWithoutCompletionSignal +=
       result.diagnostics.responsesWithoutCompletionSignal
     diagnostics.reducedConfidenceResponses += result.diagnostics.reducedConfidenceResponses
+    diagnostics.pricingModifierResponses += result.diagnostics.pricingModifierResponses
+    diagnostics.serverToolRequests += result.diagnostics.serverToolRequests
     if (!result.summary) continue
     summaries.push(result.summary)
     entries.push(...result.entries)
@@ -209,6 +217,8 @@ async function parseSingleSubagent(
         incompleteUsageResponses: 0,
         responsesWithoutCompletionSignal: 0,
         reducedConfidenceResponses: 0,
+        pricingModifierResponses: 0,
+        serverToolRequests: 0,
       },
     }
   }
@@ -229,6 +239,8 @@ async function parseSingleSubagent(
     incompleteUsageResponses: usage.combined.incompleteUsageResponses,
     responsesWithoutCompletionSignal: usage.combined.responsesWithoutCompletionSignal,
     reducedConfidenceResponses: usage.combined.reducedConfidenceResponses,
+    pricingModifierResponses: usage.combined.pricingModifierResponses,
+    serverToolRequests: usage.combined.serverToolRequests,
   }
   if (activityCounts.total === 0) {
     return { summary: null, entries: [], activityByDay: new Map(), diagnostics }

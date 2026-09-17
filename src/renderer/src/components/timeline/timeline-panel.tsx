@@ -10,6 +10,7 @@ import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import { useSessionsStore } from '@renderer/store/sessions.store'
 import { useUIStore } from '@renderer/store/ui.store'
 import { formatCost } from '@shared/utils'
+import { COST_ESTIMATE_LABEL } from '@shared/constants/copy'
 import { cn } from '@renderer/lib/cn'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { Project, SessionSummary } from '@shared/types'
@@ -282,7 +283,9 @@ export default function TimelinePanel(): React.JSX.Element {
                           <p className="font-semibold text-sm">{block.session.title}</p>
                           <p className="text-xs text-muted-foreground">{block.projectName}</p>
                           <div className="flex gap-3 text-xs">
-                            <span>{formatCost(block.session.estimatedCost)}</span>
+                            <span>
+                              {COST_ESTIMATE_LABEL}: {formatCost(block.session.estimatedCost)}
+                            </span>
                             {block.session.dominantModel && (
                               <span className="text-muted-foreground">
                                 {block.session.dominantModel}
