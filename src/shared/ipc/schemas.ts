@@ -151,9 +151,12 @@ export const TrayOpenDashboardSchema = z
 /** tray:show-onboarding */
 export const TrayShowOnboardingSchema = z.object({ launchAtLogin: z.boolean() })
 
-// ─── Updates (no payload on any channel) ─────────────────────────────────────
+// ─── Updates ──────────────────────────────────────────────────────────────────
 
 // updates:check / updates:download / updates:install — all void
+
+/** updates:resize-window — the renderer's measured content height, untrusted. */
+export const UpdatesResizeSchema = z.object({ height: z.number().finite().min(0).max(10_000) })
 
 // ─── Sentry ───────────────────────────────────────────────────────────────────
 

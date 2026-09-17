@@ -355,12 +355,14 @@ function initAutoUpdater(): void {
     _phase = 'idle'
     pushUpdateServiceError(report)
     if (wasInstalling) {
-      // `quitAndInstall` closes every window before Squirrel asks for (and,
-      // here, did not get) the password, so the broadcast above may have
-      // reached no renderer at all. Reopen the update window so the error is
-      // actually visible instead of leaving the app running with nothing on
-      // screen — see disarmUpdateQuit's onUpdateQuitDisarmed hook for the
-      // matching dashboard-window recovery.
+      // A cancelled password prompt still has every window on screen: the
+      // native updater raises that panel inside `quitAndInstall`, before
+      // `before-quit-for-update` and before anything is closed. But once the
+      // handoff has begun the windows are being torn down, so a failure from
+      // there on may leave the broadcast above with no renderer to reach.
+      // Reopening the update window covers that case and is a no-op focus in
+      // the common one — see disarmUpdateQuit's onUpdateQuitDisarmed hook for
+      // the matching dashboard-window recovery.
       createOrShowUpdateWindow(_latestInfo, undefined, report)
     }
   })
@@ -445,6 +447,14 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
 }
 
 export async function downloadUpdate(): Promise<void> {
+  // A second surface (the reopened update window, or the tray popover) can
+  // still be offering "Download" while an install started elsewhere is in
+  // flight. Letting it through flipped the phase to 'downloading', which made
+  // electron-updater close the local proxy Squirrel is reading and swap the
+  // native updater underneath it; the failure that followed was then reported
+  // as a download error, so neither `disarmUpdateQuit()` nor the staged-
+  // download reset ran and the installing surface stayed on "Installing…".
+  if (_phase === 'installing') throw new Error('An install is already in progress')
   _phase = 'downloading'
   try {
     await autoUpdater.downloadUpdate()
@@ -458,8 +468,12 @@ export async function downloadUpdate(): Promise<void> {
 export async function installUpdate(): Promise<void> {
   if (_phase === 'installing') throw new Error('An install is already in progress')
   if (!_updateDownloaded) throw new Error('No update has been downloaded yet')
-  _installHint = await bundleWritabilityHint()
+  // Claim the phase BEFORE the first await. Two near-simultaneous IPC calls
+  // (the tray popover and the update window both show "Install & Restart")
+  // otherwise both clear the guard while the first one is still awaiting the
+  // writability probe, and electron-updater is asked to hand off twice.
   _phase = 'installing'
+  _installHint = await bundleWritabilityHint()
   autoUpdater.quitAndInstall(false, true)
 }
 
@@ -480,16 +494,50 @@ export async function showUpdateWindowAfterCheck(): Promise<void> {
   }
 }
 
-/** macOS only: ShipIt asks for a password when the current user cannot write the bundle. */
-async function bundleWritabilityHint(): Promise<string | undefined> {
-  if (process.platform !== 'darwin') return undefined
-  // <App>.app/Contents/MacOS/ClaudeWatch → <App>.app
-  const bundle = path.resolve(process.execPath, '..', '..', '..')
+async function isWritable(target: string): Promise<boolean> {
   try {
-    await fs.promises.access(bundle, fs.constants.W_OK)
-    return undefined
+    await fs.promises.access(target, fs.constants.W_OK)
+    return true
   } catch {
-    log.warn('[UpdateService] app bundle is not writable by the current user:', bundle)
-    return `macOS asked for a password because ${bundle} is not writable by your user. Fix it once with: sudo chown -R "$(id -un)" "${bundle}"`
+    return false
   }
+}
+
+/**
+ * macOS only: explain, before the fact, why ShipIt is about to raise a
+ * password panel.
+ *
+ * Squirrel.Mac installs by writing the new bundle as a sibling of the current
+ * one and swapping the two, so it needs write access to the bundle *and* to
+ * the directory containing it. Checking only the bundle missed the ordinary
+ * non-admin case — a user-owned app sitting in a root-owned /Applications —
+ * where the app is perfectly writable and the prompt still appears, and where
+ * the chown advice would have changed nothing.
+ *
+ * The dependencies are injected so both branches (and the non-darwin
+ * short-circuit) are testable without touching the filesystem.
+ */
+export async function bundleWritabilityHint(
+  options: {
+    platform?: NodeJS.Platform
+    bundlePath?: string
+    canWrite?: (target: string) => Promise<boolean>
+  } = {}
+): Promise<string | undefined> {
+  const platform = options.platform ?? process.platform
+  if (platform !== 'darwin') return undefined
+  // <App>.app/Contents/MacOS/ClaudeWatch → <App>.app
+  const bundle = options.bundlePath ?? path.resolve(process.execPath, '..', '..', '..')
+  const parent = path.dirname(bundle)
+  const canWrite = options.canWrite ?? isWritable
+
+  if (!(await canWrite(bundle))) {
+    log.warn('[UpdateService] app bundle is not writable by the current user:', bundle)
+    return `macOS asks for a password because ${bundle} is not writable by your user. You can usually avoid it with: sudo chown -R "$(id -un)" "${bundle}"`
+  }
+  if (!(await canWrite(parent))) {
+    log.warn('[UpdateService] the folder holding the app is not writable:', parent)
+    return `macOS will ask for an administrator password because the folder holding the app (${parent}) is not writable by your user.`
+  }
+  return undefined
 }

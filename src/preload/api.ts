@@ -88,6 +88,8 @@ export const api = {
     download: () => invoke(CHANNELS.UPDATES_DOWNLOAD),
 
     install: () => invoke(CHANNELS.UPDATES_INSTALL),
+
+    resizeWindow: (height: number) => invoke(CHANNELS.UPDATES_RESIZE_WINDOW, { height }),
   },
 
   // ─── Tray ─────────────────────────────────────────────────────────────────

@@ -28,8 +28,11 @@ class FakeWindow {
   private listeners = new Map<string, Listener[]>()
   private visible = false
   private destroyed = false
+  options: Record<string, unknown> | undefined
 
-  constructor(_opts?: unknown) {}
+  constructor(opts?: Record<string, unknown>) {
+    this.options = opts
+  }
 
   on(event: string, cb: Listener): this {
     const arr = this.listeners.get(event) ?? []
@@ -68,6 +71,8 @@ class FakeWindow {
     return { x: 0, y: 0, width: 380, height: 560 }
   }
   setPosition = vi.fn()
+  setContentSize = vi.fn()
+  center = vi.fn()
 }
 
 // `app` here is only ever read for `app.isPackaged` (see IS_DEV) — window-manager.ts
@@ -233,6 +238,26 @@ describe('createTrayPopoverWindow', () => {
     win.emit('closed')
 
     expect(mod.getTrayPopoverWindow()).toBeNull()
+  })
+})
+
+// ─── createOrShowUpdateWindow sizing ───────────────────────────────────────────
+
+describe('createOrShowUpdateWindow — window options', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  it('creates a fixed-width, content-clamped, non-resizable window', async () => {
+    const mod = await import('./window-manager')
+    const win = mod.createOrShowUpdateWindow(null) as unknown as FakeWindow
+
+    expect(win.options).toMatchObject({
+      resizable: false,
+      minHeight: 300,
+      maxHeight: 760,
+      width: 520,
+    })
   })
 })
 

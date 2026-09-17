@@ -208,6 +208,49 @@ describe('installUpdate lifecycle', () => {
     await expect(svc.installUpdate()).rejects.toThrow('An install is already in progress')
   })
 
+  it('calls quitAndInstall once when two installs race, and rejects the loser', async () => {
+    // Two surfaces (tray popover and update window) can both be showing the
+    // "Install & Restart" button. Their IPC calls arrive back-to-back, so the
+    // guard has to be closed before the first `await` inside installUpdate —
+    // otherwise both calls pass it and electron-updater is asked to hand off
+    // twice.
+    const svc = await import('./update-service')
+    const { autoUpdater } = await import('electron-updater')
+    svc.initUpdateService()
+    updaterHandlers.get('update-downloaded')!({})
+    vi.mocked(autoUpdater.quitAndInstall).mockClear()
+
+    // Settled together: the loser rejects in the same tick it is created, so
+    // awaiting the winner first would leave that rejection unhandled.
+    const [first, second] = await Promise.allSettled([svc.installUpdate(), svc.installUpdate()])
+
+    expect(first.status).toBe('fulfilled')
+    expect(second).toMatchObject({
+      status: 'rejected',
+      reason: expect.objectContaining({ message: 'An install is already in progress' }),
+    })
+    expect(vi.mocked(autoUpdater.quitAndInstall)).toHaveBeenCalledTimes(1)
+  })
+
+  it('refuses a download while an install is in flight', async () => {
+    // A second (or reopened) surface starting a download mid-install used to
+    // flip the phase to 'downloading'. electron-updater then closed the local
+    // proxy Squirrel was reading and swapped the native updater, and the
+    // resulting error was attributed to 'download' — so the install recovery
+    // (disarmUpdateQuit + forgetting the staged download) never ran and the
+    // installing surface sat on "Installing…" forever.
+    const svc = await import('./update-service')
+    const { autoUpdater } = await import('electron-updater')
+    svc.initUpdateService()
+    updaterHandlers.get('update-downloaded')!({})
+    await svc.installUpdate()
+    vi.mocked(autoUpdater.downloadUpdate).mockClear()
+
+    await expect(svc.downloadUpdate()).rejects.toThrow('An install is already in progress')
+    expect(vi.mocked(autoUpdater.downloadUpdate)).not.toHaveBeenCalled()
+    expect(svc.getUpdatePhase()).toBe('installing')
+  })
+
   it('an updater error during install resets to idle, forgets the download, and reports phase=install', async () => {
     const svc = await import('./update-service')
     svc.initUpdateService()
@@ -393,5 +436,59 @@ describe('showUpdateWindowAfterCheck', () => {
       expect(createOrShowUpdateWindow).toHaveBeenCalledTimes(1)
       expect(createOrShowUpdateWindow).toHaveBeenCalledWith(null, 'net::ERR_INTERNET_DISCONNECTED')
     })
+  })
+})
+
+describe('bundleWritabilityHint', () => {
+  // Squirrel.Mac replaces the bundle by writing a sibling directory next to it
+  // and swapping the two, so it needs write access to the bundle AND to the
+  // directory that holds it. Only the bundle was checked, so the common
+  // non-admin case — a self-owned app inside a root-owned /Applications —
+  // produced no hint at all, and the one hint that did exist offered a chown
+  // that would not have helped.
+  const BUNDLE = '/Applications/ClaudeWatch.app'
+
+  it('says nothing on a platform that does not use Squirrel', async () => {
+    const svc = await import('./update-service')
+    const canWrite = vi.fn().mockResolvedValue(false)
+    await expect(
+      svc.bundleWritabilityHint({ platform: 'linux', bundlePath: BUNDLE, canWrite })
+    ).resolves.toBeUndefined()
+    expect(canWrite).not.toHaveBeenCalled()
+  })
+
+  it('says nothing when both the bundle and its folder are writable', async () => {
+    const svc = await import('./update-service')
+    await expect(
+      svc.bundleWritabilityHint({
+        platform: 'darwin',
+        bundlePath: BUNDLE,
+        canWrite: async () => true,
+      })
+    ).resolves.toBeUndefined()
+  })
+
+  it('suggests chown when the bundle itself is not writable', async () => {
+    const svc = await import('./update-service')
+    const hint = await svc.bundleWritabilityHint({
+      platform: 'darwin',
+      bundlePath: BUNDLE,
+      canWrite: async (target) => target !== BUNDLE,
+    })
+    expect(hint).toContain('macOS asks for a password')
+    expect(hint).toContain(BUNDLE)
+    expect(hint).toContain('You can usually avoid it with: sudo chown')
+  })
+
+  it('blames the containing folder, with no chown advice, when only the parent is unwritable', async () => {
+    const svc = await import('./update-service')
+    const hint = await svc.bundleWritabilityHint({
+      platform: 'darwin',
+      bundlePath: BUNDLE,
+      canWrite: async (target) => target === BUNDLE,
+    })
+    expect(hint).toContain('administrator password')
+    expect(hint).toContain('/Applications')
+    expect(hint).not.toContain('chown')
   })
 })

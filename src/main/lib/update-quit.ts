@@ -65,8 +65,17 @@ export function armUpdateQuit(deps: UpdateQuitDeps): void {
  * Called when the updater reports an error after an install was requested.
  * Clears timers and the quitting flag so the app keeps running normally, then
  * notifies every listener registered via `onUpdateQuitDisarmed` — this is how
- * `index.ts` recovers a dashboard window that `quitAndInstall` already closed
- * before Squirrel asked for (and did not get) the password.
+ * `index.ts` recovers a dashboard window that was already on its way out.
+ *
+ * Note the two failure shapes are not the same. The authorization panel is
+ * raised by the native updater inside `quitAndInstall`, before
+ * `before-quit-for-update` and before any window closes, so a cancelled
+ * password prompt arrives with nothing armed and nothing torn down. Only a
+ * failure after that handoff — the quit armed, windows closing — needs the
+ * window recovery. (A cancelled authorization is cached on that native
+ * updater, which is why clicking Install again did nothing; a fresh
+ * `downloadUpdate()` re-runs `setFeedURL` and builds a new native updater, so
+ * the prompt reappears.)
  */
 export function disarmUpdateQuit(): void {
   if (handoff) clearTimeout(handoff)

@@ -48,13 +48,18 @@ let fileWatcher: FileWatcher | null = null
 /**
  * Create the dashboard window and wire its close/closed handlers.
  *
- * Used both at startup and to recover the dashboard after a cancelled
- * install: `autoUpdater.quitAndInstall()` closes every open window
- * (including this one) before Squirrel asks the user for a password, and if
- * that prompt is cancelled the app never actually quits — see
- * `disarmUpdateQuit` in `./lib/update-quit`. Without recreating it here,
- * `mainWindow` stays null afterwards, so `tray:open-dashboard` and the tray
- * menu's "Open Dashboard" have nothing to show and silently do nothing.
+ * Used both at startup and to recover the dashboard after an install that
+ * failed once the handoff was already under way. With
+ * `autoInstallOnAppQuit = false`, `quitAndInstall()` asks the native updater
+ * to prepare the install; the authorization panel is raised there, *before*
+ * `before-quit-for-update` and before any window is closed, so a cancelled
+ * password prompt leaves every window standing. A failure after that point
+ * does not: Squirrel has emitted `before-quit-for-update`, the quit is armed
+ * and the windows are on their way out when the error arrives, and the app
+ * never actually quits — see `disarmUpdateQuit` in `./lib/update-quit`.
+ * Without recreating the dashboard here, `mainWindow` stays null afterwards,
+ * so `tray:open-dashboard` and the tray menu's "Open Dashboard" have nothing
+ * to show and silently do nothing.
  */
 function createAndWireDashboardWindow(): BrowserWindow {
   const win = createDashboardWindow()
@@ -264,13 +269,18 @@ function bootstrap(): void {
   // from the updater's `error` handler.
   registerUpdateQuitHandlers({ app, squirrelUpdater, log })
 
-  // `quitAndInstall` closes every window — including the dashboard — before
-  // Squirrel asks for the password, and a cancelled/failed prompt never
-  // actually quits the app (see disarmUpdateQuit). Without this, mainWindow
-  // stays null afterwards and both `tray:open-dashboard` and the tray menu's
-  // "Open Dashboard" silently do nothing. Recreate it hidden — the update
-  // window (reopened by update-service.ts alongside the error) is what the
-  // user actually sees, so this does not force the dashboard visible.
+  // Recovery for an install that failed *after* the handoff started. The
+  // authorization panel is raised by the native updater inside
+  // `quitAndInstall`, before `before-quit-for-update` and before any window
+  // closes, so a cancelled password prompt on its own leaves the dashboard
+  // alone. Once Squirrel has emitted `before-quit-for-update`, though, the
+  // quit is armed and the windows are being torn down — and a failure from
+  // there on never actually quits the app (see disarmUpdateQuit). Without
+  // this, mainWindow stays null afterwards and both `tray:open-dashboard` and
+  // the tray menu's "Open Dashboard" silently do nothing. Recreate it hidden —
+  // the update window (reopened by update-service.ts alongside the error) is
+  // what the user actually sees, so this does not force the dashboard
+  // visible.
   onUpdateQuitDisarmed(() => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       mainWindow = createAndWireDashboardWindow()

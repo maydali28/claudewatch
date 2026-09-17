@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer } from 'react'
+import React, { useEffect, useReducer, useRef } from 'react'
 import { Download, Zap, CheckCircle, AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
@@ -15,6 +15,7 @@ import {
   type UpdateEvent,
   type UpdateState,
 } from '@shared/update-state'
+import { clampUpdateWindowHeight } from '@shared/utils/update-window-size'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import appIcon from '@renderer/assets/claudewatch-ring.svg'
 
@@ -84,7 +85,7 @@ function UpdateAvailable({
     <div className="flex flex-col gap-5">
       {/* Release notes */}
       {info.releaseNotes && (
-        <div className="rounded-xl border bg-muted/40 px-4 py-3 flex-1 overflow-y-auto max-h-64">
+        <div className="rounded-xl border bg-muted/40 px-4 py-3 flex-1 overflow-y-auto max-h-80">
           <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
             What&apos;s new
           </p>
@@ -164,10 +165,46 @@ function windowReducer(state: UpdateState, event: WindowEvent): UpdateState {
   return reduceUpdateState(state, event)
 }
 
+/**
+ * Measures the window's root element and asks main to size the window's
+ * content to fit — a content-sized dialog beats a fixed 520×640 that's mostly
+ * empty for the common "you're up to date" case, or too short for long
+ * release notes. Debounced 50 ms so a burst of layout changes (e.g. a phase
+ * transition that swaps in a taller view) doesn't spam the IPC channel, and
+ * only sent when the clamped value actually changed so settling back on the
+ * same height after a debounce window is a no-op.
+ */
+function useFitWindowToContent(ref: React.RefObject<HTMLDivElement | null>): void {
+  useEffect(() => {
+    const el = ref.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let last = -1
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const request = (): void => {
+      const next = clampUpdateWindowHeight(el.scrollHeight)
+      if (next === last) return
+      last = next
+      void ipc.updates.resizeWindow(next)
+    }
+    const ro = new ResizeObserver(() => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(request, 50)
+    })
+    ro.observe(el)
+    request()
+    return () => {
+      ro.disconnect()
+      if (timer) clearTimeout(timer)
+    }
+  }, [ref])
+}
+
 export default function UpdateWindow(): React.JSX.Element {
   const [state, dispatch] = useReducer(windowReducer, undefined, () =>
     stateFromShowUpdate(parseFromUrl())
   )
+  const rootRef = useRef<HTMLDivElement>(null)
+  useFitWindowToContent(rootRef)
 
   // Reflect electron-updater's download-progress events in the bar.
   useEffect(() => {
@@ -254,7 +291,7 @@ export default function UpdateWindow(): React.JSX.Element {
   const info = 'info' in state ? state.info : null
 
   return (
-    <div className="flex flex-col min-h-screen bg-background text-foreground">
+    <div ref={rootRef} className="flex flex-col bg-background text-foreground">
       {/* Title bar area for macOS traffic lights */}
       <div className="h-8 shrink-0 [-webkit-app-region:drag]" />
 

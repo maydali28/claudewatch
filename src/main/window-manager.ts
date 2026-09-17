@@ -4,6 +4,11 @@ import { Preferences } from './store/preferences'
 import type { UpdateInfo, UpdateServiceError } from '@shared/types/project'
 import { CHANNELS } from '@shared/ipc/channels'
 import { isAppQuitting } from './lib/update-quit'
+import {
+  UPDATE_WINDOW_WIDTH,
+  UPDATE_WINDOW_MIN_HEIGHT,
+  UPDATE_WINDOW_MAX_HEIGHT,
+} from '@shared/utils/update-window-size'
 
 const IS_DEV = !app.isPackaged
 
@@ -226,6 +231,21 @@ export function getTrayPopoverWindow(): BrowserWindow | null {
 
 let updateWindow: BrowserWindow | null = null
 
+// Set when a fresh update window is created, cleared the first time its
+// content is resized (see `centerUpdateWindowOnFirstResize`, called from the
+// `updates:resize-window` handler). The window opens at a placeholder height
+// (360) and grows to fit its content on the first measured resize; recentering
+// then keeps it visually balanced instead of drifting toward one edge. Once
+// consumed, later resizes of the same (reused) window — e.g. switching state
+// from the tray while it's open — must not recenter it out from under the user.
+let updateWindowNeedsCenterOnResize = false
+
+export function centerUpdateWindowOnFirstResize(win: BrowserWindow): void {
+  if (!updateWindowNeedsCenterOnResize) return
+  updateWindowNeedsCenterOnResize = false
+  win.center()
+}
+
 export function createOrShowUpdateWindow(
   updateInfo: UpdateInfo | null,
   errorMessage?: string,
@@ -244,14 +264,14 @@ export function createOrShowUpdateWindow(
   }
 
   const win = new BrowserWindow({
-    width: 520,
-    height: 640,
-    minWidth: 460,
-    minHeight: 500,
-    maxWidth: 680,
-    maxHeight: 800,
+    width: UPDATE_WINDOW_WIDTH,
+    height: 360,
+    minHeight: UPDATE_WINDOW_MIN_HEIGHT,
+    maxHeight: UPDATE_WINDOW_MAX_HEIGHT,
+    minWidth: UPDATE_WINDOW_WIDTH,
+    maxWidth: UPDATE_WINDOW_WIDTH,
     useContentSize: true,
-    resizable: true,
+    resizable: false,
     center: true,
     show: false,
     title: 'ClaudeWatch — Updates',
@@ -294,6 +314,7 @@ export function createOrShowUpdateWindow(
     win.loadFile(join(__dirname, '../renderer/index.html'), { query })
   }
 
+  updateWindowNeedsCenterOnResize = true
   updateWindow = win
   return win
 }
