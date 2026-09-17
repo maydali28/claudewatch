@@ -517,6 +517,46 @@ describe('a project whose root is the home directory', () => {
   })
 })
 
+// The same home directory reached through a symlink: the transcript `cwd`
+// names the link, the Claude directory names the real folder (or the other
+// way round). Compared as text, the two never matched and every user hook and
+// command was listed twice again.
+describe('a project whose root is a symlink to the home directory', () => {
+  let linkedHome = ''
+  let canSymlink = true
+
+  beforeEach(() => {
+    linkedHome = path.join(dirs.tmp, 'linked-home')
+    try {
+      fs.symlinkSync(path.join(dirs.tmp, 'home'), linkedHome, 'dir')
+    } catch {
+      canSymlink = false
+    }
+  })
+
+  const linkedProject = (): { id: string; name: string; path: string } => ({
+    id: '-tmp-linked-home',
+    name: 'linked-home',
+    path: linkedHome,
+  })
+
+  it('does not read the user settings file again as a project layer', async (ctx) => {
+    if (!canSymlink && process.platform === 'win32') ctx.skip()
+    const layers = await readSettingsLayers(linkedProject())
+    expect(layers.map((l) => l.scope)).toEqual(['user'])
+  })
+
+  it('lists every user command once', async (ctx) => {
+    if (!canSymlink && process.platform === 'win32') ctx.skip()
+    const userCmdPath = path.join(dirs.claudeDir, 'commands', 'deploy.md')
+    fs.mkdirSync(path.dirname(userCmdPath), { recursive: true })
+    fs.writeFileSync(userCmdPath, '# deploy')
+
+    const cmds = await readCommands([linkedProject()])
+    expect(cmds.map((c) => c.scope)).toEqual(['user'])
+  })
+})
+
 describe('readMemoryFiles — untrusted project id', () => {
   it('refuses an id that walks out of the projects directory', async () => {
     // `projectEncodedId` comes straight from the renderer.

@@ -608,4 +608,83 @@ describe('scanProjects — the merge is actually wired into the scan', () => {
       fs.rmSync(cacheDir, { recursive: true, force: true })
     }
   })
+
+  // `claude` run in `~` records the home directory as the project's cwd, so
+  // `<cwd>/.claude/skills` is the user skills folder: every user skill was
+  // listed again as a skill of that project. Also when the cwd reaches home
+  // through a symlink.
+  describe('a project whose root is the home directory', () => {
+    let homeRoot = ''
+    let cacheDir = ''
+
+    beforeEach(() => {
+      homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-home-skills-'))
+      cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-home-skills-cache-'))
+      fixtureHome.path = path.join(homeRoot, 'home')
+      configureMetadataCacheDir(cacheDir)
+      const skill = path.join(homeRoot, 'home', '.claude', 'skills', 'mine', 'SKILL.md')
+      fs.mkdirSync(path.dirname(skill), { recursive: true })
+      fs.writeFileSync(skill, '---\nname: mine\n---\nbody')
+    })
+    afterEach(() => {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    })
+
+    function writeSession(dirName: string, cwd: string): void {
+      const projectDir = path.join(homeRoot, 'home', '.claude', 'projects', dirName)
+      fs.mkdirSync(projectDir, { recursive: true })
+      const records = [
+        {
+          type: 'user',
+          uuid: `u-${dirName}`,
+          cwd,
+          timestamp: '2026-09-10T09:59:00.000Z',
+          message: { role: 'user', content: 'hi' },
+        },
+      ]
+      fs.writeFileSync(
+        path.join(projectDir, 'session.jsonl'),
+        records.map((r) => JSON.stringify(r)).join('\n') + '\n'
+      )
+    }
+
+    it('does not list the user skills again as that project’s skills', async () => {
+      const home = path.join(homeRoot, 'home')
+      writeSession('-home', home)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+
+      expect(projects.find((p) => p.id === '-home')?.localSkills).toEqual([])
+    })
+
+    it('does not list them when the cwd reaches home through a symlink', async (ctx) => {
+      const linked = path.join(homeRoot, 'linked-home')
+      try {
+        fs.symlinkSync(path.join(homeRoot, 'home'), linked, 'dir')
+      } catch {
+        if (process.platform === 'win32') ctx.skip()
+        throw new Error('could not create a symlink')
+      }
+      writeSession('-linked-home', linked)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+
+      expect(projects.find((p) => p.id === '-linked-home')?.localSkills).toEqual([])
+    })
+
+    it('still lists a real project’s own skills', async () => {
+      const repo = path.join(homeRoot, 'repo')
+      const skill = path.join(repo, '.claude', 'skills', 'local', 'SKILL.md')
+      fs.mkdirSync(path.dirname(skill), { recursive: true })
+      fs.writeFileSync(skill, '---\nname: local\n---\nbody')
+      writeSession('-repo', repo)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+
+      expect(projects.find((p) => p.id === '-repo')?.localSkills.map((s) => s.id)).toEqual([
+        'local',
+      ])
+    })
+  })
 })

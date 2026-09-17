@@ -9,6 +9,7 @@ import {
   getUserSettingsPath,
 } from '@main/lib/claude-paths'
 import { assertSafePath } from '@main/lib/safe-path'
+import { samePath } from '@main/lib/same-path'
 import type {
   ConfigScope,
   ExtendedConfig,
@@ -98,11 +99,6 @@ async function readLayer(
     : { scope, path: filePath, settings }
 }
 
-/** Whether two paths name the same location once resolved. */
-function samePath(a: string, b: string): boolean {
-  return path.resolve(a) === path.resolve(b)
-}
-
 /**
  * The settings files that exist, lowest precedence first: `user`, then (with a
  * project) `project` and `local`. Missing or unparseable files produce no
@@ -114,7 +110,9 @@ function samePath(a: string, b: string): boolean {
  * (once as "user", once as "<name> · project") and made `readRawSettings`
  * concatenate the user's permissions and hooks with themselves. A layer whose
  * resolved path is already a user-layer path is skipped, which also covers a
- * `CLAUDE_CONFIG_DIR` override that points `<claudeDir>` at `<root>/.claude`.
+ * `CLAUDE_CONFIG_DIR` override that points `<claudeDir>` at `<root>/.claude`
+ * and a root that reaches the home directory through a symlink (`samePath`
+ * follows symlinks).
  *
  * `<claudeDir>/settings.local.json` is deliberately not a layer of its own:
  * it is that home-directory project's `local` file and nothing else, so it is
