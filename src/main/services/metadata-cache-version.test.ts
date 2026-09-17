@@ -80,15 +80,26 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(12, tz)
+    writeCacheFile(13, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 12, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 11, or a
-    // bump to 13 without a matching migration, would do.
+    // If the constant is not 13, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 12, or a
+    // bump to 14 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
+  })
+
+  it('discards a v12 cache file rather than serving it under the v13 contract', () => {
+    const tz = `${TZ}-stale-v12`
+    writeCacheFile(12, tz)
+
+    // A v12 summary counted task notifications, sub-agent hand-backs,
+    // injected context, local commands and interrupts as user messages.
+    // Serving it back would keep the inflated counts until each transcript
+    // changed. See `CACHE_VERSION`'s v13 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards a v11 cache file rather than serving it under the v12 contract', () => {
@@ -114,7 +125,7 @@ describe('CACHE_VERSION', () => {
   })
 
   it('discards every version below the current one, not just the immediately previous', () => {
-    for (const stale of [1, 5, 6, 7, 8, 9, 10, 11]) {
+    for (const stale of [1, 5, 6, 7, 8, 9, 10, 11, 12]) {
       const tz = `${TZ}-stale-${stale}`
       writeCacheFile(stale, tz)
       expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()

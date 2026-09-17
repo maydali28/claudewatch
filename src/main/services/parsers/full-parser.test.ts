@@ -337,6 +337,102 @@ describe('parseSessionFull — parity with the sessions sidebar', () => {
 })
 
 /**
+ * L15/L16: records Claude Code writes as `type: 'user'` that nobody typed —
+ * background task notices, sub-agent hand-backs, injected context — carry
+ * their kind to the renderer and stay out of the user message count.
+ */
+describe('parseSessionFull — user record kinds', () => {
+  const at = '2026-09-10T09:59:30.000Z'
+  const kinds = [
+    {
+      type: 'user',
+      uuid: 'k-prompt',
+      timestamp: at,
+      origin: { kind: 'human' },
+      message: { role: 'user', content: 'do it' },
+    },
+    {
+      type: 'user',
+      uuid: 'k-task',
+      timestamp: at,
+      origin: { kind: 'task-notification' },
+      message: {
+        role: 'user',
+        content: '<task-notification>\n<summary>Agent "x" finished</summary>\n</task-notification>',
+      },
+    },
+    {
+      type: 'user',
+      uuid: 'k-peer',
+      timestamp: at,
+      isMeta: true,
+      origin: {
+        kind: 'peer',
+        from: 'a35e2511de91949d1',
+        senderTaskId: 'a35e2511de91949d1',
+        handback: true,
+      },
+      message: {
+        role: 'user',
+        content:
+          'Another Claude session sent a message:\n<agent-message from="a35e2511de91949d1">\nreport\n</agent-message>',
+      },
+    },
+    {
+      type: 'user',
+      uuid: 'k-meta',
+      timestamp: at,
+      isMeta: true,
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Base directory for this skill: /x' }],
+      },
+    },
+    {
+      type: 'user',
+      uuid: 'k-cmd',
+      timestamp: at,
+      message: { role: 'user', content: '<command-name>/model</command-name>' },
+    },
+    {
+      type: 'user',
+      uuid: 'k-int',
+      timestamp: at,
+      message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] },
+    },
+  ]
+
+  it('marks each user record with its kind and a hand-back with its agent id', async () => {
+    const file = write('kinds', [user, ...kinds, ...responseAsThreeRecords('msg_1')])
+    const { records } = await parseSessionFull(file, 'kinds', 'proj', ANTHROPIC_PRICING)
+    const byUuid = new Map(records.map((r) => [r.uuid, r]))
+
+    expect(byUuid.get('u1')?.userKind).toBe('prompt')
+    expect(byUuid.get('k-prompt')?.userKind).toBe('prompt')
+    expect(byUuid.get('k-task')?.userKind).toBe('task-notification')
+    expect(byUuid.get('k-peer')?.userKind).toBe('agent-message')
+    expect(byUuid.get('k-peer')?.originAgentId).toBe('a35e2511de91949d1')
+    expect(byUuid.get('k-meta')?.userKind).toBe('meta')
+    expect(byUuid.get('k-cmd')?.userKind).toBe('local-command')
+    expect(byUuid.get('k-int')?.userKind).toBe('interrupt')
+    expect(byUuid.get('k-prompt')?.originAgentId).toBeUndefined()
+    // Only user records carry a kind.
+    expect(byUuid.get('msg_1-a')?.userKind).toBeUndefined()
+  })
+
+  it('counts only the two prompts as user messages, in step with the sessions sidebar', async () => {
+    const file = write('kinds-count', [user, ...kinds, ...responseAsThreeRecords('msg_1')])
+    const full = await parseSessionFull(file, 'kinds-count', 'proj', ANTHROPIC_PRICING)
+    const summary = await parseSessionMetadata(file, 'kinds-count', 'proj', ANTHROPIC_PRICING)
+
+    expect(full.metadata.userMessageCount).toBe(2)
+    expect(full.metadata.messageCount).toBe(3)
+    expect(full.metadata.messageCount).toBe(summary.parentMessageCount)
+    expect(summary.dailyUsage.reduce((s, d) => s + d.messageCount, 0)).toBe(summary.messageCount)
+  })
+})
+
+/**
  * A response's content blocks land as separate records with separate
  * timestamps. Effort and turn-duration must be judged from the whole
  * response, once — not once per record, which either inflates the vote

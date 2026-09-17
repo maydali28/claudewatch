@@ -18,8 +18,10 @@ import { IDLE_GAP_MS, ERROR_SNIPPET_MAX_CHARS } from '@shared/constants/tuning'
 import {
   extractTextFromContent,
   getRawBlocks,
+  INTERRUPT_PREFIX,
   isSyntheticAssistant,
   isToolResultCarrierUser,
+  LOCAL_COMMAND_PREFIXES,
   parseTokenUsage,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
@@ -149,15 +151,10 @@ function shouldSkipRecord(raw: RawRecord, seenUuids: Set<string>): boolean {
  * local history: local slash commands (`/model`, `/cost`), the caveat that
  * accompanies them, and the Esc interrupt marker. Meta records (`isMeta`) are
  * injected context that always rides alongside a real prompt or tool_result,
- * which is what opens the turn.
+ * which is what opens the turn. The prefixes are `LOCAL_COMMAND_PREFIXES`
+ * and `INTERRUPT_PREFIX` from `parser-helpers.ts`, shared with
+ * `classifyUserRecord` so the two rules cannot drift.
  */
-const UNANSWERED_USER_PREFIXES = [
-  '<command-name>',
-  '<local-command-stdout>',
-  '<local-command-caveat>',
-] as const
-const INTERRUPT_PREFIX = '[Request interrupted by user'
-
 function userTurnEffect(raw: RawRecord): 'open' | 'close' | 'none' {
   if (raw.isMeta === true) return 'none'
   if (isToolResultCarrierUser(raw)) return 'open'
@@ -169,7 +166,7 @@ function userTurnEffect(raw: RawRecord): 'open' | 'close' | 'none' {
   // An interrupt ENDS whatever was running (a tool call, a generation), so
   // it closes rather than merely not opening.
   if (text.startsWith(INTERRUPT_PREFIX)) return 'close'
-  if (UNANSWERED_USER_PREFIXES.some((prefix) => text.startsWith(prefix))) return 'none'
+  if (LOCAL_COMMAND_PREFIXES.some((prefix) => text.startsWith(prefix))) return 'none'
   return 'open'
 }
 

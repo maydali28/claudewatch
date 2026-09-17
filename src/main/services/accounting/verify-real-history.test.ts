@@ -4,7 +4,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
 import { UNDATED_DAY } from '@shared/utils/date-ranges'
-import type { EffortDistribution } from '@shared/types/session'
+import type { EffortDistribution, RawRecord } from '@shared/types/session'
 import { getProjectsDirPath } from '@main/lib/claude-paths'
 import { ingestFile, type SourceIdentity } from './ledger'
 import { projectUsage } from './projection'
@@ -487,6 +487,65 @@ describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
     )
 
     expect(multiDay).toBeGreaterThan(0)
+  }, 180_000)
+
+  /**
+   * L16: a user message is a prompt a person wrote. Tallies every user
+   * record by `classifyUserRecord` kind, using the same admission rules as
+   * the activity reducer (no compact summaries, no transcript-only records,
+   * record-uuid dedup per file), and checks the reducer counts exactly the
+   * prompts. `before` is what the old rule counted: every user record that
+   * is not a tool_result carrier.
+   */
+  it('counts only prompts as user messages across the whole history', async () => {
+    const { classifyUserRecord } = await import('@main/services/parsers/parser-helpers')
+    const { createActivityAccumulator } = await import('@main/services/parsers/activity-reducer')
+    const all = transcripts(root)
+    const groups = {
+      parents: all.filter((f) => !f.includes(`${path.sep}subagents${path.sep}`)),
+      subagents: all.filter((f) => f.includes(`${path.sep}subagents${path.sep}`)),
+    }
+
+    for (const [label, files] of Object.entries(groups)) {
+      const byKind = new Map<string, number>()
+      let reducerUserMessages = 0
+      for (const file of files) {
+        const acc = createActivityAccumulator()
+        const seen = new Set<string>()
+        for (const line of fs.readFileSync(file, 'utf-8').split('\n')) {
+          if (!line.trim()) continue
+          let raw: RawRecord
+          try {
+            raw = JSON.parse(line) as RawRecord
+          } catch {
+            continue
+          }
+          acc.add(raw)
+          if (raw.type !== 'user') continue
+          if (raw.isCompactSummary === true || raw.isVisibleInTranscriptOnly === true) continue
+          if (raw.uuid) {
+            if (seen.has(raw.uuid)) continue
+            seen.add(raw.uuid)
+          }
+          const kind = classifyUserRecord(raw)
+          byKind.set(kind, (byKind.get(kind) ?? 0) + 1)
+        }
+        reducerUserMessages += acc.counts().userMessages
+      }
+      const prompts = byKind.get('prompt') ?? 0
+      const before = [...byKind].reduce((sum, [k, n]) => (k === 'tool-result' ? sum : sum + n), 0)
+      const nonPrompt = [...byKind]
+        .filter(([k]) => k !== 'prompt' && k !== 'tool-result')
+        .sort((a, b) => b[1] - a[1])
+      console.log(
+        `\n  ${label} (${files.length} files)` +
+          `\n    user messages            ${prompts.toLocaleString()} (old rule ${before.toLocaleString()})` +
+          `\n    non-prompt user records  ${(before - prompts).toLocaleString()}` +
+          nonPrompt.map(([k, n]) => `\n      ${k.padEnd(22)} ${n.toLocaleString()}`).join('')
+      )
+
+      expect(reducerUserMessages).toBe(prompts)
+    }
   }, 180_000)
 
   it('is idempotent on the largest transcript', async () => {

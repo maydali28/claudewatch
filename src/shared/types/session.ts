@@ -130,7 +130,49 @@ export interface RawRecord {
   effort?: string
   /** Present on newer records; useful for provenance and reconciliation. */
   requestId?: string
+  /**
+   * Who wrote a `type: 'user'` record, on recent Claude Code versions only —
+   * and not on every record even then. Observed kinds: `human` (a prompt),
+   * `task-notification` (a background task finished), `peer` (a sub-agent
+   * hand-back; `from` is the agent id, `handback` is set) and, in sub-agent
+   * transcripts, `coordinator`. Other fields Claude Code writes (`body`, …)
+   * are not read. See `classifyUserRecord`.
+   */
+  origin?: {
+    kind?: string
+    from?: string
+    senderTaskId?: string
+    handback?: boolean
+  }
 }
+
+/**
+ * What a `type: 'user'` record is. Only `prompt` is something a person wrote;
+ * everything else is written by Claude Code. Decided by `classifyUserRecord`
+ * in `src/main/services/parsers/parser-helpers.ts`.
+ *
+ * In a sub-agent transcript, the opening prompt is written by the parent
+ * agent with no `origin`; it counts as `'prompt'` (the sub-agent's user
+ * message). Mid-task coordinator notes (`origin.kind: 'coordinator'`,
+ * `isMeta`) are `'meta'`.
+ */
+export type UserRecordKind =
+  /** A person wrote it: counts as a user message, shown as the user's bubble. */
+  | 'prompt'
+  /** Carries tool_result blocks only. */
+  | 'tool-result'
+  /** A background task finished. */
+  | 'task-notification'
+  /** A sub-agent or peer session handed back a report. */
+  | 'agent-message'
+  /** Injected context: a skill body, an image caption, a coordinator note. */
+  | 'meta'
+  /** A local slash command, its output or its caveat — never sent to the model. */
+  | 'local-command'
+  /** The "[Request interrupted by user…" marker. */
+  | 'interrupt'
+  /** A compaction summary. */
+  | 'compact-summary'
 
 // ─── Parsed Record (clean, typed) ─────────────────────────────────────────────
 
@@ -160,6 +202,14 @@ export interface ParsedRecord {
    * records, which are not API responses.
    */
   responseId?: string
+  /**
+   * What kind of user record this is. Set on every `type: 'user'` record;
+   * undefined on other records. A consumer must treat undefined on a user
+   * record as `'prompt'`.
+   */
+  userKind?: UserRecordKind
+  /** The sub-agent that sent an `'agent-message'` record (`origin.from`), when known. */
+  originAgentId?: string
 }
 
 // ─── Tool Result Map ───────────────────────────────────────────────────────────

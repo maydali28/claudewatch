@@ -142,9 +142,17 @@ interface CacheFile {
 // changed, so `PRICING_REVISION` stays put; readers in `analytics-engine.ts`
 // still treat a missing field as 0.
 //
+// v13: user message counts exclude task notifications, hand-backs, injected
+// context, local commands and interrupts (`classifyUserRecord`). No field
+// changed shape, but `messageCount`, `parentMessageCount` and every
+// `dailyUsage[].messageCount` a v12 entry holds are inflated by those
+// records, and nothing about the transcript changes when the parser learns
+// to tell them apart. Discard, so the first scan recounts. Tokens and cost
+// are unaffected.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 12
+const CACHE_VERSION = 13
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the
