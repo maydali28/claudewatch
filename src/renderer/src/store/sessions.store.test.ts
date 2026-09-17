@@ -16,7 +16,11 @@ vi.mock('@renderer/lib/ipc-client', () => ({
   },
 }))
 
-import { useSessionsStore, loadingSessionInFlightBySession } from './sessions.store'
+import {
+  useSessionsStore,
+  loadingSessionInFlightBySession,
+  shouldAutoLoadProjects,
+} from './sessions.store'
 import { sessionPanelView } from '@renderer/components/sessions/session-panel-state'
 
 interface Deferred<T> {
@@ -154,6 +158,7 @@ beforeEach(() => {
     isRefreshingSession: false,
     sessionError: null,
     projectsError: null,
+    projectsLoaded: false,
     liveSessionIds: new Set<string>(),
   })
 })
@@ -723,5 +728,79 @@ describe('useSessionsStore — closeActiveSession ("Back to sessions")', () => {
     next.resolve(ok(fakeParsed('next-one')))
     await loading
     expect(panelView()).toBe('content')
+  })
+})
+
+// ─── Auto-loading the project list ──────────────────────────────────────────
+//
+// The Analytics sidebar loads the project list on mount when nothing has been
+// loaded yet. It used to test "the list is empty, nothing is loading, no
+// error" — which is exactly the state a successful scan of an empty profile
+// ends in, and the `isLoadingProjects` flip re-ran its effect: an endless
+// rescan loop on a machine with no projects.
+
+describe('shouldAutoLoadProjects', () => {
+  it('loads when nothing has been loaded and nothing is loading', () => {
+    expect(shouldAutoLoadProjects({ projectsLoaded: false, isLoadingProjects: false })).toBe(true)
+  })
+
+  it('does not load while a load is in flight', () => {
+    expect(shouldAutoLoadProjects({ projectsLoaded: false, isLoadingProjects: true })).toBe(false)
+  })
+
+  it('does not load again once a load has completed, even with no projects', () => {
+    expect(shouldAutoLoadProjects({ projectsLoaded: true, isLoadingProjects: false })).toBe(false)
+  })
+})
+
+describe('useSessionsStore — an empty project list settles after one load', () => {
+  // Stands in for the sidebar's effect: re-evaluated on every store change,
+  // loading whenever the rule says so. Capped so a regression fails instead
+  // of hanging the run.
+  async function runAutoLoader(): Promise<void> {
+    let calls = 0
+    const maybeLoad = (): void => {
+      if (calls >= 5) return
+      if (shouldAutoLoadProjects(useSessionsStore.getState())) {
+        calls += 1
+        void useSessionsStore.getState().loadProjects()
+      }
+    }
+    const unsubscribe = useSessionsStore.subscribe(maybeLoad)
+    maybeLoad()
+    for (let i = 0; i < 10; i += 1) await flushAsync()
+    unsubscribe()
+  }
+
+  it('marks the list loaded after an empty successful scan and does not scan again', async () => {
+    mockListProjects.mockResolvedValue({ ok: true, data: { projects: [] } })
+
+    await runAutoLoader()
+
+    expect(mockListProjects).toHaveBeenCalledTimes(1)
+    expect(useSessionsStore.getState()).toMatchObject({
+      projects: [],
+      projectsLoaded: true,
+      isLoadingProjects: false,
+      projectsError: null,
+    })
+  })
+
+  it('marks the list loaded after a failed scan and does not retry on its own', async () => {
+    mockListProjects.mockResolvedValue({ ok: false, error: 'scan failed' })
+
+    await runAutoLoader()
+
+    expect(mockListProjects).toHaveBeenCalledTimes(1)
+    expect(useSessionsStore.getState().projectsLoaded).toBe(true)
+  })
+
+  it('still scans when refreshed by hand after an empty load', async () => {
+    mockListProjects.mockResolvedValue({ ok: true, data: { projects: [] } })
+    await runAutoLoader()
+
+    await useSessionsStore.getState().loadProjects()
+
+    expect(mockListProjects).toHaveBeenCalledTimes(2)
   })
 })

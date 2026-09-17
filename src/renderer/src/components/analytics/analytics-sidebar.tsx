@@ -2,26 +2,28 @@ import React from 'react'
 import { BarChart2, RefreshCw, Search, X } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
-import { useSessionsStore } from '@renderer/store/sessions.store'
+import { shouldAutoLoadProjects, useSessionsStore } from '@renderer/store/sessions.store'
 import { formatCost, formatTokens } from '@shared/utils'
 import { isProjectVisibleInRange } from './project-visibility'
 
 export default function AnalyticsSidebar(): React.JSX.Element {
   const { selectedProjectIds, isLoading, baselineData, setProjectFilter, refresh } =
     useAnalyticsStore()
-  const { projects, loadProjects, isLoadingProjects, projectsError } = useSessionsStore()
+  const { projects, loadProjects, isLoadingProjects, projectsError, projectsLoaded } =
+    useSessionsStore()
   const [search, setSearch] = React.useState('')
 
   // Load projects on first mount if they haven't been fetched yet.
   // This handles the case where the app starts directly on the analytics view,
   // bypassing SessionsSidebar which is the only other caller of loadProjects.
-  // A failed load is not retried from here: `isLoadingProjects` flipping back
-  // to false would otherwise re-run this effect and hammer the scan in a loop.
+  // Only until a load has finished: an empty or failed result is not retried
+  // from here, or `isLoadingProjects` flipping back to false would re-run this
+  // effect and rescan in a loop. The refresh button below reloads the list.
   React.useEffect(() => {
-    if (projects.length === 0 && !isLoadingProjects && !projectsError) {
+    if (shouldAutoLoadProjects({ projectsLoaded, isLoadingProjects })) {
       loadProjects()
     }
-  }, [projects.length, isLoadingProjects, projectsError, loadProjects])
+  }, [projectsLoaded, isLoadingProjects, loadProjects])
 
   const selectedProjectId = selectedProjectIds.length === 1 ? selectedProjectIds[0] : null
 
@@ -45,6 +47,12 @@ export default function AnalyticsSidebar(): React.JSX.Element {
     [projects, projectCostMap, selectedProjectId, search]
   )
 
+  function handleRefresh(): void {
+    refresh(true)
+    // Manual refresh is how an empty or failed project list is retried here.
+    if (!isLoadingProjects) loadProjects()
+  }
+
   function handleProjectSelect(projectId: string | null): void {
     setProjectFilter(projectId ? [projectId] : [])
   }
@@ -57,7 +65,7 @@ export default function AnalyticsSidebar(): React.JSX.Element {
           Analytics
         </span>
         <button
-          onClick={() => refresh(true)}
+          onClick={handleRefresh}
           disabled={isLoading}
           className="p-1 rounded hover:bg-accent transition-colors disabled:opacity-50"
           title="Refresh"

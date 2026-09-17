@@ -96,6 +96,11 @@ interface SessionsState {
    * transcript's error under "Failed to load projects".
    */
   projectsError: string | null
+  /**
+   * True once any project-list load has finished, successfully or not. An
+   * empty list alone can't tell "not loaded yet" from "loaded, no projects".
+   */
+  projectsLoaded: boolean
   /** Session IDs that received a PUSH_SESSION_UPDATED event during this app session. */
   liveSessionIds: Set<string>
 
@@ -159,6 +164,18 @@ function sortProjectsByLatestSession(projects: Project[]): Project[] {
   })
 }
 
+/**
+ * Whether a view should load the project list on its own. Only before the
+ * first load has finished: a finished load — even one that found no projects
+ * or failed — must not trigger another, or an empty profile rescans forever.
+ * Manual refresh calls `loadProjects()` directly and is not gated by this.
+ */
+export function shouldAutoLoadProjects(
+  state: Pick<SessionsState, 'projectsLoaded' | 'isLoadingProjects'>
+): boolean {
+  return !state.projectsLoaded && !state.isLoadingProjects
+}
+
 export const useSessionsStore = create<SessionsState>((set, get) => ({
   projects: [],
   activeProjectId: null,
@@ -169,6 +186,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   isRefreshingSession: false,
   sessionError: null,
   projectsError: null,
+  projectsLoaded: false,
   liveSessionIds: new Set<string>(),
 
   async loadProjects() {
@@ -184,7 +202,7 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
     } catch (err) {
       set({ projectsError: String(err) })
     } finally {
-      set({ isLoadingProjects: false })
+      set({ isLoadingProjects: false, projectsLoaded: true })
     }
   },
 
