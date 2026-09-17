@@ -1,5 +1,14 @@
 import React, { useState } from 'react'
-import { Brain, Clock, GitBranch, Bot } from 'lucide-react'
+import {
+  Bell,
+  Brain,
+  ChevronDown,
+  ChevronRight,
+  Clock,
+  GitBranch,
+  Bot,
+  Paperclip,
+} from 'lucide-react'
 import type {
   ParsedRecord,
   ContentBlock,
@@ -12,6 +21,18 @@ import ThinkingBlock from '@renderer/components/shared/thinking-block'
 import ToolResultBlock from '@renderer/components/shared/tool-result-block'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import { parseUserMessage, type ParsedContextTag } from './user-message-parser'
+import {
+  AGENT_MESSAGE_LABEL,
+  INJECTED_CONTEXT_LABEL,
+  TASK_NOTIFICATION_FALLBACK,
+  TASK_NOTIFICATION_LABEL,
+  agentMessageBody,
+  extractTaskSummary,
+  injectedContextPreview,
+  shortAgentId,
+  textMatchesQuery,
+  userRecordVariant,
+} from './user-record-presentation'
 import { cn } from '@renderer/lib/cn'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import {
@@ -107,6 +128,152 @@ function ContextTagPill({ ctag }: { ctag: ParsedContextTag }): React.JSX.Element
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Machine-written user records ─────────────────────────────────────────────
+
+function highlightMatches(text: string, searchQuery: string): string {
+  if (!searchQuery) return text
+  return text.replace(
+    new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
+    (m) => `**${m}**`
+  )
+}
+
+/**
+ * Open state for a collapsed card: whatever the reader chose, otherwise open
+ * while the in-session search matches text the card would hide.
+ */
+function useCardOpen(hiddenText: string, searchQuery: string): [boolean, () => void] {
+  const [chosen, setChosen] = useState<boolean | null>(null)
+  const open = chosen ?? textMatchesQuery(hiddenText, searchQuery)
+  return [open, () => setChosen(!open)]
+}
+
+/**
+ * A background task finished. Claude Code writes the notice as a user
+ * record, but nobody typed it, so it sits on the assistant side, collapsed.
+ */
+function TaskNotificationCard({
+  body,
+  searchQuery,
+}: {
+  body: string
+  searchQuery: string
+}): React.JSX.Element {
+  const [open, toggle] = useCardOpen(body, searchQuery)
+  const summary = extractTaskSummary(body)
+  return (
+    <div className="px-4 py-1">
+      <div className="max-w-[85%] rounded-md border border-border/50 bg-muted/30 text-xs">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Bell className="h-3 w-3 shrink-0 text-emerald-500" />
+          {open ? (
+            <ChevronDown className="h-3 w-3 shrink-0" />
+          ) : (
+            <ChevronRight className="h-3 w-3 shrink-0" />
+          )}
+          <span className="font-medium shrink-0">
+            {summary ? TASK_NOTIFICATION_LABEL : TASK_NOTIFICATION_FALLBACK}
+          </span>
+          {summary && <span className="truncate text-muted-foreground/70">{summary}</span>}
+        </button>
+        {open && (
+          <pre className="overflow-x-auto px-3 pb-3 pt-2 font-mono text-[10px] text-muted-foreground whitespace-pre-wrap break-words leading-relaxed border-t border-border/50">
+            {body}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** A sub-agent handed its report back. Written by the agent, not the user. */
+function AgentMessageCard({
+  text,
+  agentId,
+  searchQuery,
+}: {
+  text: string
+  agentId?: string
+  searchQuery: string
+}): React.JSX.Element {
+  const report = agentMessageBody(text)
+  const [open, toggle] = useCardOpen(report, searchQuery)
+  const shortId = shortAgentId(agentId)
+  return (
+    <div className="px-4 py-1">
+      <div className="max-w-[85%] rounded-md border border-border/50 bg-muted/30 text-xs">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Bot className="h-3 w-3 shrink-0 text-sky-500" />
+          {open ? (
+            <ChevronDown className="h-3 w-3 shrink-0" />
+          ) : (
+            <ChevronRight className="h-3 w-3 shrink-0" />
+          )}
+          <span className="font-medium">{AGENT_MESSAGE_LABEL}</span>
+          {shortId && (
+            <span className="font-mono text-muted-foreground/70" title={agentId}>
+              {shortId}
+            </span>
+          )}
+          {!open && (
+            <span className="ml-auto text-muted-foreground/70">
+              {report.length.toLocaleString()} chars
+            </span>
+          )}
+        </button>
+        {open && (
+          <div className="px-3 pb-3 pt-2 border-t border-border/50">
+            <MarkdownRenderer content={highlightMatches(report, searchQuery)} className="text-sm" />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** Context Claude Code injected beside a prompt (a skill body, an image caption). */
+function InjectedContextPill({
+  text,
+  searchQuery,
+}: {
+  text: string
+  searchQuery: string
+}): React.JSX.Element {
+  const [open, toggle] = useCardOpen(text, searchQuery)
+  return (
+    <div className="flex flex-col items-end px-4 py-1">
+      <div className="w-full max-w-[80%] rounded-lg border border-border/40 bg-muted/30 text-[11px] text-muted-foreground overflow-hidden">
+        <button
+          type="button"
+          onClick={toggle}
+          aria-expanded={open}
+          className="flex w-full items-center gap-1.5 px-2.5 py-1 text-left hover:opacity-80 transition-opacity"
+        >
+          <Paperclip className="h-2.5 w-2.5 shrink-0" />
+          <span className="font-medium shrink-0">{INJECTED_CONTEXT_LABEL}</span>
+          <span className="truncate opacity-75">{injectedContextPreview(text)}</span>
+          <span className="ml-auto opacity-50 shrink-0">{open ? '▴' : '▾'}</span>
+        </button>
+        {open && (
+          <pre className="border-t border-current/20 px-2.5 py-2 whitespace-pre-wrap break-words font-mono text-[10px] opacity-80 max-h-48 overflow-y-auto">
+            {text}
+          </pre>
+        )}
+      </div>
     </div>
   )
 }
@@ -328,6 +495,23 @@ export default function MessageBubble({
       .trim()
     if (!rawText) return <></>
 
+    switch (userRecordVariant(record.userKind)) {
+      case 'task-notification':
+        return <TaskNotificationCard body={rawText} searchQuery={searchQuery} />
+      case 'agent-message':
+        return (
+          <AgentMessageCard
+            text={rawText}
+            agentId={record.originAgentId}
+            searchQuery={searchQuery}
+          />
+        )
+      case 'injected-context':
+        return <InjectedContextPill text={rawText} searchQuery={searchQuery} />
+      case 'bubble':
+        break
+    }
+
     const { mainText, contextTags } = parseUserMessage(rawText)
 
     // If parsing stripped everything into tags with no remaining text, and there
@@ -349,14 +533,7 @@ export default function MessageBubble({
         {mainText && (
           <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-blue-600 px-4 py-2.5 text-sm text-white shadow-sm">
             <MarkdownRenderer
-              content={
-                searchQuery
-                  ? mainText.replace(
-                      new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'),
-                      (m) => `**${m}**`
-                    )
-                  : mainText
-              }
+              content={highlightMatches(mainText, searchQuery)}
               variant="inverted"
             />
           </div>

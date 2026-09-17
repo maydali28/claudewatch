@@ -150,6 +150,11 @@ export interface RawRecord {
  * What a `type: 'user'` record is. Only `prompt` is something a person wrote;
  * everything else is written by Claude Code. Decided by `classifyUserRecord`
  * in `src/main/services/parsers/parser-helpers.ts`.
+ *
+ * In a sub-agent transcript, the opening prompt is written by the parent
+ * agent with no `origin`; it counts as `'prompt'` (the sub-agent's user
+ * message). Mid-task coordinator notes (`origin.kind: 'coordinator'`,
+ * `isMeta`) are `'meta'`.
  */
 export type UserRecordKind =
   /** A person wrote it: counts as a user message, shown as the user's bubble. */
@@ -197,6 +202,14 @@ export interface ParsedRecord {
    * records, which are not API responses.
    */
   responseId?: string
+  /**
+   * What kind of user record this is. Set on every `type: 'user'` record;
+   * undefined on other records. A consumer must treat undefined on a user
+   * record as `'prompt'`.
+   */
+  userKind?: UserRecordKind
+  /** The sub-agent that sent an `'agent-message'` record (`origin.from`), when known. */
+  originAgentId?: string
 }
 
 // ─── Tool Result Map ───────────────────────────────────────────────────────────

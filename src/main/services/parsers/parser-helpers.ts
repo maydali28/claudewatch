@@ -112,12 +112,18 @@ export function isToolResultCarrierUser(raw: RawRecord): boolean {
 
 export type { UserRecordKind }
 
-const LOCAL_COMMAND_PREFIXES = [
+/**
+ * Text a local slash command, its output or its caveat starts with. Claude
+ * never answers these; shared with `metadata-parser.ts`'s turn state so the
+ * counting and live-turn rules read the same prefixes.
+ */
+export const LOCAL_COMMAND_PREFIXES = [
+  '<command-name>',
   '<local-command-stdout>',
   '<local-command-caveat>',
-  '<command-name>',
 ] as const
-const INTERRUPT_PREFIX = '[Request interrupted by user'
+/** Text the Esc interrupt marker starts with. */
+export const INTERRUPT_PREFIX = '[Request interrupted by user'
 const TASK_NOTIFICATION_PREFIX = '<task-notification>'
 const AGENT_MESSAGE_PREFIX = 'Another Claude session sent a message'
 const AGENT_MESSAGE_TAG = '<agent-message'
@@ -153,7 +159,9 @@ export function classifyUserRecord(raw: RawRecord): UserRecordKind {
     .join('')
     .trimStart()
   if (text.startsWith(TASK_NOTIFICATION_PREFIX)) return 'task-notification'
-  if (text.startsWith(AGENT_MESSAGE_PREFIX) || text.includes(AGENT_MESSAGE_TAG)) {
+  // Prefix only: a prompt may quote the tag or the harness line mid-text
+  // (a real sub-agent opening prompt did), and it is still a prompt.
+  if (text.startsWith(AGENT_MESSAGE_PREFIX) || text.startsWith(AGENT_MESSAGE_TAG)) {
     return 'agent-message'
   }
   if (LOCAL_COMMAND_PREFIXES.some((prefix) => text.startsWith(prefix))) return 'local-command'

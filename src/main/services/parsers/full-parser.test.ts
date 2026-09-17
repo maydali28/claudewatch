@@ -402,6 +402,24 @@ describe('parseSessionFull — user record kinds', () => {
     },
   ]
 
+  it('marks each user record with its kind and a hand-back with its agent id', async () => {
+    const file = write('kinds', [user, ...kinds, ...responseAsThreeRecords('msg_1')])
+    const { records } = await parseSessionFull(file, 'kinds', 'proj', ANTHROPIC_PRICING)
+    const byUuid = new Map(records.map((r) => [r.uuid, r]))
+
+    expect(byUuid.get('u1')?.userKind).toBe('prompt')
+    expect(byUuid.get('k-prompt')?.userKind).toBe('prompt')
+    expect(byUuid.get('k-task')?.userKind).toBe('task-notification')
+    expect(byUuid.get('k-peer')?.userKind).toBe('agent-message')
+    expect(byUuid.get('k-peer')?.originAgentId).toBe('a35e2511de91949d1')
+    expect(byUuid.get('k-meta')?.userKind).toBe('meta')
+    expect(byUuid.get('k-cmd')?.userKind).toBe('local-command')
+    expect(byUuid.get('k-int')?.userKind).toBe('interrupt')
+    expect(byUuid.get('k-prompt')?.originAgentId).toBeUndefined()
+    // Only user records carry a kind.
+    expect(byUuid.get('msg_1-a')?.userKind).toBeUndefined()
+  })
+
   it('counts only the two prompts as user messages, in step with the sessions sidebar', async () => {
     const file = write('kinds-count', [user, ...kinds, ...responseAsThreeRecords('msg_1')])
     const full = await parseSessionFull(file, 'kinds-count', 'proj', ANTHROPIC_PRICING)

@@ -528,7 +528,7 @@ export default function SessionDetailsPanel({
             <StatRow
               label="User"
               value={metadata.userMessageCount}
-              hint="Number of user-turn messages sent in this session"
+              hint="Prompts you wrote. Task notices, sub-agent reports, injected context and local commands are not counted."
             />
             <StatRow
               label="Assistant"
