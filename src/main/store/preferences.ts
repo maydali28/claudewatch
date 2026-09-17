@@ -59,7 +59,7 @@ const AppPreferencesSchema = z.object({
       y: z.number().optional(),
     })
     .optional(),
-  alertedSecrets: z.array(z.string()),
+  alertedSecrets: z.array(z.string()).max(500),
   sessionTags: z.record(z.string(), z.array(z.string())).optional().default({}),
   lastSeenVersion: z.string().optional(),
   sentryEnabled: z.boolean(),
@@ -121,7 +121,15 @@ export const Preferences = {
     })
 
     try {
-      const parsed = AppPreferencesSchema.safeParse(store.store)
+      const raw = store.store
+      // Older stores predate the 500-entry cap on `alertedSecrets`; truncate
+      // to the most recent entries before validation so a legitimately
+      // oversized array is capped instead of failing schema validation and
+      // wiping the whole preferences file.
+      if (Array.isArray(raw.alertedSecrets) && raw.alertedSecrets.length > 500) {
+        raw.alertedSecrets = raw.alertedSecrets.slice(-500)
+      }
+      const parsed = AppPreferencesSchema.safeParse(raw)
       if (!parsed.success) {
         log.error('Preferences failed schema validation:', parsed.error.issues)
         backupAndReset('failed schema validation')

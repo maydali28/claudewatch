@@ -6,6 +6,10 @@ export interface AppPreferences {
   pricingProvider: PricingProvider
   pricingOverrides: Partial<Record<ModelFamily, Partial<ModelPricing>>>
   costAlertThreshold?: number
+  /**
+   * Reserved for the secret-scan alert UI (roadmap #4). No scan runs while
+   * this is the only switch.
+   */
   secretScanEnabled: boolean
   redactionLevel: 'none' | 'mask' | 'remove'
   launchAtLogin: boolean
@@ -23,7 +27,7 @@ export interface AppPreferences {
 export const DEFAULT_PREFERENCES: AppPreferences = {
   pricingProvider: 'anthropic',
   pricingOverrides: {},
-  secretScanEnabled: true,
+  secretScanEnabled: false,
   redactionLevel: 'mask',
   launchAtLogin: false,
   trayTipDismissed: false,
