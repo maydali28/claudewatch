@@ -1,7 +1,7 @@
 /**
- * The four completeness counts `AnalyticsData` and `CacheAnalytics` both carry
- * (see their doc comments) are not the same kind of fact, and they are not
- * shown the same way.
+ * The six completeness counts `AnalyticsData` and `CacheAnalytics` both carry
+ * (see their doc comments) are three kinds of fact, two of each, and they are
+ * not all shown the same way.
  *
  * - `unpricedResponses` / `incompleteUsageResponses` are ERROR-class: data
  *   really is unpriced or only partially observed, and the number is 0 across
@@ -18,21 +18,22 @@
  *   history (Task 17 probe), so they share the badge, after the error-class
  *   clauses.
  *
- * Why they were separated. Both classes used to be joined into one string on
- * the KPI badge. On real history that made the badge unconditionally present
- * — an 81-character pill beside a `text-2xl` value in a one-fifth-width card,
- * for every user, forever. A badge that never turns off is not read as a
- * signal; it is read as chrome, and the reader stops seeing it. That is
- * precisely what destroys the error-class counts it was sharing the slot
- * with: the two numbers that genuinely mean "look at this" become invisible
- * behind a number that always says the same thing.
+ * Why they were separated. The error and provenance classes used to be
+ * joined into one string on the KPI badge. On real history that made the
+ * badge unconditionally present — an 81-character pill beside a `text-2xl`
+ * value in a one-fifth-width card, for every user, forever. A badge that
+ * never turns off is not read as a signal; it is read as chrome, and the
+ * reader stops seeing it. That is precisely what destroys the error-class
+ * counts it was sharing the slot with: the two numbers that genuinely mean
+ * "look at this" become invisible behind a number that always says the same
+ * thing.
  *
  * This is the same prevalence trap the export layer already fixed once, where
  * a 28%-prevalence provenance condition was firing a missing-data lead
  * sentence on 22.5% of sessions. The resolution there and here is the same —
  * prevalence decides the PROMINENCE, never whether the fact is reported.
  *
- * Nothing is collapsed and nothing is deleted: all four counts keep their own
+ * Nothing is collapsed and nothing is deleted: all six counts keep their own
  * independent clause and their own wording, in the same vocabulary
  * `export-service.ts`'s `diagnosticsNote` and `session-details-panel.tsx`
  * use, so an export, the session panel and these two surfaces never describe
