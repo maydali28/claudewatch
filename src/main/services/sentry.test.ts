@@ -12,6 +12,7 @@ const mockCaptureFeedback = vi.fn()
 interface MockClient {
   getOptions: () => { enabled: boolean }
   on: (hook: string, callback: (...args: never[]) => void) => void
+  close?: (timeout?: number) => Promise<boolean>
 }
 const mockGetClient = vi.fn<() => MockClient | undefined>()
 
@@ -253,6 +254,63 @@ describe('sentry service', () => {
       expect(mockInit).toHaveBeenCalledTimes(1) // _doInit no-ops once initialised
       expect(result).toEqual({ restartRequired: false })
       expect(mockGetClient()?.getOptions().enabled).toBe(true)
+    })
+
+    // @sentry/electron's init() creates the client and binds it to the scope
+    // (`scope.setClient(client); client.init()`) BEFORE `configureIPC`, which
+    // is the step that throws after app ready. So a failed runtime enable
+    // leaves a live, enabled client behind while this module still believes
+    // nothing was initialised: uncaught errors were sent while handled ones
+    // were not, the session integration still sent its envelope at quit even
+    // after crash reports were switched back off, and every further off→on
+    // built another client and stacked more process listeners.
+    function halfInitialisedClient(): {
+      options: { enabled: boolean }
+      close: ReturnType<typeof vi.fn>
+    } {
+      const options = { enabled: true }
+      const close = vi.fn(async () => true)
+      mockInit.mockImplementation(() => {
+        mockGetClient.mockReturnValue({ getOptions: () => options, on: vi.fn(), close })
+        throw new Error(
+          "Sentry SDK should be initialized before the Electron app 'ready' event is fired"
+        )
+      })
+      return { options, close }
+    }
+
+    it('disables and closes the client a failed runtime init left bound', async () => {
+      const { options, close } = halfInitialisedClient()
+      const { setSentryEnabled } = await import('./sentry')
+
+      expect(setSentryEnabled(true)).toEqual({ restartRequired: true })
+
+      expect(options.enabled).toBe(false)
+      expect(close).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not call Sentry.init again after a failed runtime init', async () => {
+      halfInitialisedClient()
+      const { setSentryEnabled } = await import('./sentry')
+
+      setSentryEnabled(true)
+      setSentryEnabled(false)
+      const again = setSentryEnabled(true)
+
+      expect(mockInit).toHaveBeenCalledTimes(1)
+      expect(again).toEqual({ restartRequired: true })
+    })
+
+    it('switching off after a failed runtime init disables the bound client', async () => {
+      const { options } = halfInitialisedClient()
+      const { setSentryEnabled } = await import('./sentry')
+      setSentryEnabled(true)
+      // Isolate the disable path from the enable path's own clean-up.
+      options.enabled = true
+
+      setSentryEnabled(false)
+
+      expect(options.enabled).toBe(false)
     })
 
     it('reports restartRequired: false for the disable path, which always applies immediately', async () => {

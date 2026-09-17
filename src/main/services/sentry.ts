@@ -13,6 +13,16 @@ const DSN = AppConfig.sentryDsn || undefined
 let _initialised = false
 let _enabled = false
 /**
+ * True once a runtime `Sentry.init()` has thrown. @sentry/electron creates the
+ * client and binds it to the scope (`scope.setClient(client); client.init()`)
+ * before `configureIPC`, the step that throws once the app is ready — so the
+ * failure leaves a live, enabled client behind even though `_initialised`
+ * stays false. That client is shut off on the spot, and init is never tried
+ * again in this process: each further attempt would build another client and
+ * stack another set of process listeners. The user gets "restart required".
+ */
+let _restartRequired = false
+/**
  * Machine-identifying names collected once at init — the OS account name and
  * the home-directory basename (these are usually the same string, but not
  * always: a renamed account keeps its original home-directory name on
@@ -130,6 +140,17 @@ export function initSentry(enabled: boolean): void {
   _doInit()
 }
 
+/**
+ * Stop whatever client the SDK has bound — the one `_doInit` finished, or one
+ * a failed runtime init left behind. The SDK's own `enabled` flag is what its
+ * transport checks before sending anything, including the session envelope
+ * the session integration sends at quit.
+ */
+function _disableBoundClient(): void {
+  const client = Sentry.getClient()
+  if (client) client.getOptions().enabled = false
+}
+
 export interface SetSentryEnabledResult {
   /**
    * True when the caller asked to enable crash reports but the SDK is still
@@ -145,16 +166,31 @@ export function setSentryEnabled(enabled: boolean): SetSentryEnabledResult {
   _enabled = enabled
 
   if (enabled) {
-    try {
-      _doInit() // idempotent — safe to call even if already initialised
-    } catch (e) {
-      // @sentry/electron's IPC transport must be wired up before the
-      // Electron app's 'ready' event fires (it registers a custom protocol
-      // scheme). Enabling from off happens at runtime, well after ready, so
-      // Sentry.init() throws synchronously here every time — _initialised
-      // stays false. Swallow it rather than letting it bubble up as an IPC
-      // handler failure; the caller sees restartRequired instead.
-      log.warn('Sentry could not be initialised at runtime — a restart is required', e)
+    if (!_initialised && !_restartRequired) {
+      try {
+        _doInit()
+      } catch (e) {
+        // @sentry/electron's IPC transport must be wired up before the
+        // Electron app's 'ready' event fires (it registers a custom protocol
+        // scheme). Enabling from off happens at runtime, well after ready, so
+        // Sentry.init() throws synchronously here every time — _initialised
+        // stays false. Swallow it rather than letting it bubble up as an IPC
+        // handler failure; the caller sees restartRequired instead.
+        //
+        // The client that init() had already created and bound is still
+        // live, though (see `_restartRequired`). Nothing may be sent until
+        // the restart the user is about to be asked for, so turn it off and
+        // close it.
+        _restartRequired = true
+        const client = Sentry.getClient()
+        if (client) {
+          client.getOptions().enabled = false
+          if (typeof client.close === 'function') {
+            Promise.resolve(client.close(0)).catch(() => {})
+          }
+        }
+        log.warn('Sentry could not be initialised at runtime — a restart is required', e)
+      }
     }
     // If already initialised, flip the SDK's own enabled flag back on.
     if (_initialised) {
@@ -166,11 +202,10 @@ export function setSentryEnabled(enabled: boolean): SetSentryEnabledResult {
   }
 
   // Use the SDK's own enabled flag so the transport stops sending immediately,
-  // in addition to the beforeSend gate.
-  if (_initialised) {
-    const client = Sentry.getClient()
-    if (client) client.getOptions().enabled = false
-  }
+  // in addition to the beforeSend gate. Not gated on `_initialised`: a failed
+  // runtime init leaves a bound client this module never marked initialised,
+  // and it must be switched off too.
+  _disableBoundClient()
   log.info('Sentry disabled by user')
   return { restartRequired: false }
 }
