@@ -17,6 +17,7 @@ vi.mock('@renderer/lib/ipc-client', () => ({
 }))
 
 import { useSessionsStore, loadingSessionInFlightBySession } from './sessions.store'
+import { sessionPanelView } from '@renderer/components/sessions/session-panel-state'
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -66,6 +67,14 @@ function makeParsedSession(sessionId: string, marker: number): ParsedSession {
 
 function ok(data: ParsedSession): Result<ParsedSession> {
   return { ok: true, data }
+}
+
+// Minimal fixture for tests that only need a distinct, identifiable
+// ParsedSession value (not the marker-based equality `makeParsedSession`
+// supports) — thin wrapper so those tests read as "a parsed session for this
+// id" rather than reusing an unrelated marker convention.
+function fakeParsed(sessionId: string): ParsedSession {
+  return makeParsedSession(sessionId, 0)
 }
 
 function makeSummary(id: string, projectId: string, lastTimestamp: string): SessionSummary {
@@ -144,9 +153,20 @@ beforeEach(() => {
     isLoadingSession: false,
     isRefreshingSession: false,
     sessionError: null,
+    projectsError: null,
     liveSessionIds: new Set<string>(),
   })
 })
+
+function panelView(): ReturnType<typeof sessionPanelView> {
+  const s = useSessionsStore.getState()
+  return sessionPanelView({
+    activeSessionId: s.activeSessionId,
+    isLoadingSession: s.isLoadingSession,
+    sessionError: s.sessionError,
+    hasParsedSession: s.parsedSession !== null,
+  })
+}
 
 describe('useSessionsStore — request-generation guard for the same session id', () => {
   it('loads a session normally on an ordinary single request', async () => {
@@ -277,6 +297,108 @@ describe('useSessionsStore — request-generation guard for the same session id'
     await flushAsync()
     expect(useSessionsStore.getState().parsedSession).toBe(DATA_SECOND)
     expect(useSessionsStore.getState().isRefreshingSession).toBe(false)
+  })
+})
+
+describe('useSessionsStore — a deleted session resets its own loading state', () => {
+  it('a session deleted while its cold load is in flight does not leave isLoadingSession stuck', async () => {
+    let resolveParsed!: (v: Result<ParsedSession>) => void
+    mockGetParsed.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveParsed = r
+      })
+    )
+    const p = useSessionsStore.getState().loadParsedSession('s1', PROJECT_ID)
+    expect(useSessionsStore.getState().isLoadingSession).toBe(true)
+
+    useSessionsStore.getState().handleSessionDeleted({ sessionId: 's1', projectId: PROJECT_ID })
+    expect(useSessionsStore.getState().isLoadingSession).toBe(false)
+    expect(useSessionsStore.getState().sessionError).toBeNull()
+
+    resolveParsed(ok(fakeParsed('s1')))
+    await p
+
+    expect(useSessionsStore.getState().activeSessionId).toBeNull()
+    // Late result for a deleted session is dropped.
+    expect(useSessionsStore.getState().parsedSession).toBeNull()
+    expect(useSessionsStore.getState().isLoadingSession).toBe(false)
+  })
+
+  it('a failed cold load leaves sessionError set and isLoadingSession false', async () => {
+    mockGetParsed.mockResolvedValueOnce({ ok: false, error: 'transcript unreadable' })
+
+    await useSessionsStore.getState().loadParsedSession('s2', PROJECT_ID)
+
+    expect(useSessionsStore.getState()).toMatchObject({
+      isLoadingSession: false,
+      sessionError: 'transcript unreadable',
+      parsedSession: null,
+    })
+  })
+
+  // Round-2 review finding 2: the map itself already stays non-negative
+  // (`bumpLoadingSessionInFlight`'s pre-existing `if (next <= 0) delete`
+  // branch), so asserting on `loadingSessionInFlightBySession` directly
+  // isn't an observable regression check — it can't fail. What CAN actually
+  // regress is `isLoadingSession` itself: if closeActiveSession doesn't
+  // drain the counter, a real, later, fully-completed load of the SAME
+  // session can inherit the abandoned request's leftover "+1" and get
+  // stuck showing the skeleton until that abandoned request also happens to
+  // settle (which may be never).
+  it('a stale finally after closeActiveSession does not leave a phantom in-flight count that blocks a later real load of the same session from clearing isLoadingSession', async () => {
+    let resolveStale!: (v: Result<ParsedSession>) => void
+    mockGetParsed.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveStale = r
+      })
+    )
+    const stale = useSessionsStore.getState().loadParsedSession('reset-drain', PROJECT_ID)
+    expect(useSessionsStore.getState().isLoadingSession).toBe(true)
+
+    // The user gives up on this in-flight load ("Back to sessions") before
+    // the request itself has settled.
+    useSessionsStore.getState().closeActiveSession()
+    expect(useSessionsStore.getState().isLoadingSession).toBe(false)
+
+    // A fresh, real cold load for the SAME session starts while the first
+    // one is still abandoned in flight (e.g. the user retries) and runs to
+    // completion before the abandoned one settles.
+    mockGetParsed.mockResolvedValueOnce(ok(fakeParsed('reset-drain')))
+    const fresh = useSessionsStore.getState().loadParsedSession('reset-drain', PROJECT_ID)
+    await fresh
+
+    // The fresh load fully completed — isLoadingSession must reflect that,
+    // not an undrained leftover count from the abandoned first request.
+    expect(useSessionsStore.getState().isLoadingSession).toBe(false)
+
+    // The abandoned first request finally settles, late. It must not flip
+    // isLoadingSession back on.
+    resolveStale(ok(fakeParsed('reset-drain')))
+    await stale
+    expect(useSessionsStore.getState().isLoadingSession).toBe(false)
+  })
+})
+
+describe('useSessionsStore — handleSessionDeleted only affects the session it names', () => {
+  it('deleting a non-active session while another session is loading leaves the active session loading', async () => {
+    let resolveActive!: (v: Result<ParsedSession>) => void
+    mockGetParsed.mockReturnValueOnce(
+      new Promise((r) => {
+        resolveActive = r
+      })
+    )
+    const active = useSessionsStore.getState().loadParsedSession('del-active-a', PROJECT_ID)
+    expect(useSessionsStore.getState().isLoadingSession).toBe(true)
+
+    useSessionsStore
+      .getState()
+      .handleSessionDeleted({ sessionId: 'del-inactive-b', projectId: PROJECT_ID })
+
+    expect(useSessionsStore.getState().activeSessionId).toBe('del-active-a')
+    expect(useSessionsStore.getState().isLoadingSession).toBe(true)
+
+    resolveActive(ok(fakeParsed('del-active-a')))
+    await active
   })
 })
 
@@ -509,5 +631,97 @@ describe('useSessionsStore — an update push for a project this renderer has no
     await flushAsync()
 
     expect(mockListProjects).not.toHaveBeenCalled()
+  })
+})
+
+// ─── A conversation's load error vs. the project list ────────────────────────
+//
+// `sessionError` used to be shared with project loading. `loadProjects()`
+// began with `sessionError: null`, and the sidebar calls it on every mount —
+// the middle sidebar remounts on every view switch — and on every push for an
+// unknown project. So after a failed conversation load, switching to
+// Analytics and back wiped the error, `sessionPanelView` fell through to
+// 'loading', and the endless skeleton this branch set out to fix came back.
+// The sidebar also showed that transcript's error under "Failed to load
+// projects".
+
+describe('useSessionsStore — a conversation load error survives a project reload', () => {
+  it('keeps sessionError and the error view when the project list reloads', async () => {
+    mockGetParsed.mockResolvedValueOnce({ ok: false, error: 'transcript unreadable' })
+    await useSessionsStore.getState().loadParsedSession('err-survives', PROJECT_ID)
+    expect(panelView()).toBe('error')
+
+    mockListProjects.mockResolvedValueOnce({ ok: true, data: { projects: [] } })
+    await useSessionsStore.getState().loadProjects()
+
+    expect(useSessionsStore.getState().sessionError).toBe('transcript unreadable')
+    expect(panelView()).toBe('error')
+  })
+
+  it('reports a failed project list in projectsError only', async () => {
+    mockListProjects.mockResolvedValueOnce({ ok: false, error: 'scan failed' })
+    await useSessionsStore.getState().loadProjects()
+
+    expect(useSessionsStore.getState()).toMatchObject({
+      projectsError: 'scan failed',
+      sessionError: null,
+      isLoadingProjects: false,
+    })
+  })
+
+  it('reports a thrown project list load in projectsError only', async () => {
+    mockListProjects.mockRejectedValueOnce(new Error('bridge gone'))
+    await useSessionsStore.getState().loadProjects()
+
+    expect(useSessionsStore.getState().projectsError).toContain('bridge gone')
+    expect(useSessionsStore.getState().sessionError).toBeNull()
+  })
+
+  it('clears projectsError once the project list loads again', async () => {
+    useSessionsStore.setState({ projectsError: 'scan failed' })
+    mockListProjects.mockResolvedValueOnce({ ok: true, data: { projects: [] } })
+    await useSessionsStore.getState().loadProjects()
+
+    expect(useSessionsStore.getState().projectsError).toBeNull()
+  })
+
+  it('leaves a project list error alone when a conversation loads', async () => {
+    useSessionsStore.setState({ projectsError: 'scan failed' })
+    mockGetParsed.mockResolvedValueOnce(ok(fakeParsed('loads-fine')))
+    await useSessionsStore.getState().loadParsedSession('loads-fine', PROJECT_ID)
+
+    expect(useSessionsStore.getState().projectsError).toBe('scan failed')
+  })
+})
+
+describe('useSessionsStore — closeActiveSession ("Back to sessions")', () => {
+  it('clears the error along with the selection, so the panel is empty rather than stuck on the error', async () => {
+    mockGetParsed.mockResolvedValueOnce({ ok: false, error: 'transcript unreadable' })
+    await useSessionsStore.getState().loadParsedSession('err-back', PROJECT_ID)
+    expect(panelView()).toBe('error')
+
+    useSessionsStore.getState().closeActiveSession()
+
+    expect(useSessionsStore.getState()).toMatchObject({
+      activeSessionId: null,
+      sessionError: null,
+      isLoadingSession: false,
+    })
+    expect(panelView()).toBe('empty')
+  })
+
+  it('does not carry the old error into the next conversation that is still loading', async () => {
+    mockGetParsed.mockResolvedValueOnce({ ok: false, error: 'transcript unreadable' })
+    await useSessionsStore.getState().loadParsedSession('err-then-next', PROJECT_ID)
+    useSessionsStore.getState().closeActiveSession()
+
+    const next = deferred<Result<ParsedSession>>()
+    mockGetParsed.mockReturnValueOnce(next.promise)
+    const loading = useSessionsStore.getState().loadParsedSession('next-one', PROJECT_ID)
+    expect(panelView()).toBe('loading')
+
+    next.resolve(ok(fakeParsed('next-one')))
+    await loading
+    expect(panelView()).toBe('content')
   })
 })

@@ -85,7 +85,17 @@ interface SessionsState {
   isLoadingSession: boolean
   /** True during a silent background refresh triggered by a file-watcher push event or cache-hit re-validation. No skeleton. */
   isRefreshingSession: boolean
+  /** Why the ACTIVE conversation failed to load. Owned by the conversation flows only. */
   sessionError: string | null
+  /**
+   * Why the project list failed to load. Kept apart from `sessionError`:
+   * `loadProjects()` runs on every sidebar mount (the middle sidebar remounts
+   * on every view switch) and on pushes for unknown projects, so sharing one
+   * field let a routine project reload wipe a conversation's load error — the
+   * panel then fell back to an endless skeleton — and made the sidebar show a
+   * transcript's error under "Failed to load projects".
+   */
+  projectsError: string | null
   /** Session IDs that received a PUSH_SESSION_UPDATED event during this app session. */
   liveSessionIds: Set<string>
 
@@ -97,6 +107,8 @@ interface SessionsState {
   handleSessionUpdated(summary: SessionSummary): void
   handleSessionCreated(summary: SessionSummary): void
   handleSessionDeleted(payload: { sessionId: string; projectId: string }): void
+  /** "Back to sessions": deselect the active conversation and drop its load state (error, loading flags, in-flight counter) in one update. */
+  closeActiveSession(): void
 }
 
 /**
@@ -156,19 +168,21 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   isLoadingSession: false,
   isRefreshingSession: false,
   sessionError: null,
+  projectsError: null,
   liveSessionIds: new Set<string>(),
 
   async loadProjects() {
-    set({ isLoadingProjects: true, sessionError: null })
+    // Never touches `sessionError` — see `projectsError`.
+    set({ isLoadingProjects: true, projectsError: null })
     try {
       const result = await ipc.sessions.listProjects()
       if (result.ok) {
         set({ projects: result.data.projects })
       } else {
-        set({ sessionError: result.error })
+        set({ projectsError: result.error })
       }
     } catch (err) {
-      set({ sessionError: String(err) })
+      set({ projectsError: String(err) })
     } finally {
       set({ isLoadingProjects: false })
     }
@@ -386,6 +400,17 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
   handleSessionDeleted({ sessionId, projectId }) {
     rendererSessionCache.invalidate(projectId, sessionId)
 
+    const wasActive = get().activeSessionId === sessionId
+    // Drain the in-flight counter unconditionally — an abandoned (inactive)
+    // session's stuck counter must never leak past its own deletion either.
+    // The loading/error flags, by contrast, are global and only belong to
+    // the ACTIVE session, so they're folded into the single set() below
+    // (guarded by wasActive) instead of being cleared here: two separate
+    // set() calls would let a subscriber observe an intermediate state
+    // where the flags are already cleared but activeSessionId/parsedSession
+    // still point at the just-deleted session.
+    loadingSessionInFlightBySession.delete(sessionId)
+
     set((state) => {
       const updatedProjects = updateProjectSessions(state.projects, projectId, (sessions) =>
         sessions.filter((s) => s.id !== sessionId)
@@ -393,7 +418,6 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       const liveSessionIds = new Set(state.liveSessionIds)
       liveSessionIds.delete(sessionId)
 
-      const wasActive = state.activeSessionId === sessionId
       return {
         projects: updatedProjects,
         liveSessionIds,
@@ -402,7 +426,27 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
         // session that no longer exists on disk.
         activeSessionId: wasActive ? null : state.activeSessionId,
         parsedSession: wasActive ? null : state.parsedSession,
+        ...(wasActive
+          ? { isLoadingSession: false, isRefreshingSession: false, sessionError: null }
+          : {}),
       }
+    })
+  },
+
+  closeActiveSession() {
+    // "Back to sessions" used to clear only `activeSessionId`, leaving the
+    // failed load's `sessionError` behind for whichever conversation came
+    // next. Drain the abandoned load's in-flight counter too — otherwise a
+    // later load of the SAME session inherits its leftover "+1" and keeps the
+    // skeleton up after it has finished. One `set()`, so no subscriber ever
+    // sees the flags cleared while the old selection is still in place.
+    const { activeSessionId } = get()
+    if (activeSessionId) loadingSessionInFlightBySession.delete(activeSessionId)
+    set({
+      activeSessionId: null,
+      isLoadingSession: false,
+      isRefreshingSession: false,
+      sessionError: null,
     })
   },
 }))

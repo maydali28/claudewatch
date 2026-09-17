@@ -9,17 +9,19 @@ import { isProjectVisibleInRange } from './project-visibility'
 export default function AnalyticsSidebar(): React.JSX.Element {
   const { selectedProjectIds, isLoading, baselineData, setProjectFilter, refresh } =
     useAnalyticsStore()
-  const { projects, loadProjects, isLoadingProjects } = useSessionsStore()
+  const { projects, loadProjects, isLoadingProjects, projectsError } = useSessionsStore()
   const [search, setSearch] = React.useState('')
 
   // Load projects on first mount if they haven't been fetched yet.
   // This handles the case where the app starts directly on the analytics view,
   // bypassing SessionsSidebar which is the only other caller of loadProjects.
+  // A failed load is not retried from here: `isLoadingProjects` flipping back
+  // to false would otherwise re-run this effect and hammer the scan in a loop.
   React.useEffect(() => {
-    if (projects.length === 0 && !isLoadingProjects) {
+    if (projects.length === 0 && !isLoadingProjects && !projectsError) {
       loadProjects()
     }
-  }, [projects.length, isLoadingProjects, loadProjects])
+  }, [projects.length, isLoadingProjects, projectsError, loadProjects])
 
   const selectedProjectId = selectedProjectIds.length === 1 ? selectedProjectIds[0] : null
 
@@ -119,8 +121,16 @@ export default function AnalyticsSidebar(): React.JSX.Element {
           </button>
         )}
 
+        {/* The project list itself failed to load */}
+        {!isLoadingProjects && projectsError && (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-3">
+            <p className="text-xs text-destructive font-medium">Failed to load projects</p>
+            <p className="text-[10px] text-muted-foreground mt-1 break-all">{projectsError}</p>
+          </div>
+        )}
+
         {/* No projects at all */}
-        {!isLoadingProjects && projects.length === 0 && (
+        {!isLoadingProjects && !projectsError && projects.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <BarChart2 className="h-6 w-6 text-muted-foreground/30 mb-2" />
             <p className="text-xs text-muted-foreground">No projects found</p>
