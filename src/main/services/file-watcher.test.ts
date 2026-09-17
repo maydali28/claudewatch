@@ -279,6 +279,10 @@ describe('FileWatcher — secret scanning', () => {
     fs.appendFileSync(childPath, '{"type":"assistant"}\n')
     projectsWatcher.emit('change', childPath)
     await vi.runAllTimersAsync()
+    // Prove the change was actually processed. Without this, an emit that
+    // never reached the scheduler (a wrong path, a renamed event) would leave
+    // the scanner uncalled for the wrong reason and still pass.
+    expect(mockParseSession).toHaveBeenCalled()
     expect(mockScanFileDelta).not.toHaveBeenCalled()
   })
 })
