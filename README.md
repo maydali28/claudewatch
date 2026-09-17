@@ -586,14 +586,14 @@ ClaudeWatch reads files from `~/.claude` on your local machine. Here is a comple
 | What | Where it goes | When |
 |------|--------------|------|
 | Update check | GitHub releases feed via electron-updater (macOS, Windows), or the `MAIN_VITE_RELEASE_SERVER_URL` / Hazel server (Linux) | On launch and periodically — version string and platform only, no identifiers |
-| Crash reports | Sentry | Only if you opt in under **Settings → Privacy** — error reports, see below |
+| Crash reports | Sentry | Only if you opt in under **Settings → Privacy** — error reports when an error occurs, see below |
 | User feedback | Sentry | Only if you opt in and click **Send feedback** |
 | Everything else | **Nowhere** | All processing is local |
 
 - **No session content, prompts, or responses are ever sent anywhere.**
 - **Crash reports may contain file paths from stack traces.** Your username is replaced by `[user]` in these paths on macOS, Windows and Linux — including the username segment inside Claude Code's encoded project folder names (e.g. `-Users-[user]-Workspace-myproject`) — and your local account name is redacted. **Project names and the rest of the path are not removed and are sent as-is.**
 - The update check sends only your current ClaudeWatch version and platform (`darwin_arm64`, etc.).
-- **Crash reporting is opt-in and off by default.** Turning it on takes effect after you restart the app; turning it off applies immediately. When enabled, Sentry receives error reports: the error message and stack trace plus the SDK's standard context (app name, version and architecture; Electron, Chrome and Node versions; OS and device details such as CPU, memory, screen resolution, locale and time zone; breadcrumbs of recent app events, network requests and log lines), with your username removed from any paths. No native crash dumps are recorded or sent, and reports never include session content, prompts or API keys. Reports queued while offline are never sent after you turn reporting off. Feedback you send includes the name, email, and message you type.
+- **Crash reporting is opt-in and off by default.** Turning it on takes effect after you restart the app; turning it off applies immediately. When enabled, Sentry receives error reports: the error message and stack trace plus the SDK's standard context (app name, version and architecture; Electron, Chrome and Node versions; OS, device and GPU details such as CPU, memory, graphics card, screen resolution, locale and time zone; breadcrumbs of recent app events, network requests and log lines), with your username removed from any paths. A report is sent only when an error occurs; no usage sessions or other pings are sent. No native crash dumps are recorded or sent, and reports never include session content, prompts or API keys. Reports queued while offline are never sent after you turn reporting off. Feedback you send includes the name, email, and message you type.
 - There is no background analytics or telemetry of any kind.
 
 ---
