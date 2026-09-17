@@ -104,6 +104,70 @@ describe('createActivityAccumulator', () => {
 })
 
 /**
+ * L16: a "user message" is a prompt a person wrote. Claude Code also writes
+ * `type: 'user'` records for background task notices, sub-agent hand-backs,
+ * injected context, local slash commands and the Esc marker; counting those
+ * inflated the user message count on real history.
+ */
+describe('createActivityAccumulator — only prompts count as user messages', () => {
+  const day = '2026-09-10'
+  const at = (s: number): string => `${day}T10:00:${String(s).padStart(2, '0')}.000Z`
+  function rec(
+    uuid: string,
+    s: number,
+    fields: Record<string, unknown>,
+    content: unknown
+  ): RawRecord {
+    return {
+      type: 'user',
+      uuid,
+      timestamp: at(s),
+      message: { role: 'user', content },
+      ...fields,
+    } as unknown as RawRecord
+  }
+
+  it('counts 2 prompts among 8 user records of every kind', () => {
+    const acc = createActivityAccumulator()
+    acc.add(rec('p1', 0, { origin: { kind: 'human' } }, 'first prompt'))
+    acc.add(rec('p2', 1, {}, [{ type: 'text', text: 'prompt from an older writer' }]))
+    acc.add(
+      rec(
+        't1',
+        2,
+        { origin: { kind: 'task-notification' } },
+        '<task-notification>\n<summary>done</summary>\n</task-notification>'
+      )
+    )
+    acc.add(
+      rec(
+        'h1',
+        3,
+        { isMeta: true, origin: { kind: 'peer', from: 'a1', handback: true } },
+        'Another Claude session sent a message:\n<agent-message from="a1">\nreport\n</agent-message>'
+      )
+    )
+    acc.add(rec('m1', 4, { isMeta: true }, 'Base directory for this skill: /x'))
+    acc.add(rec('c1', 5, {}, '<command-name>/model</command-name>'))
+    acc.add(rec('i1', 6, {}, [{ type: 'text', text: '[Request interrupted by user]' }]))
+    acc.add(rec('r1', 7, {}, [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }]))
+
+    const counts = acc.counts()
+    expect(counts.userMessages).toBe(2)
+    expect(counts.total).toBe(2)
+    expect(counts.byDay.get(day)?.user).toBe(2)
+    const daySum = [...counts.byDay.values()].reduce((s, d) => s + d.user + d.assistant, 0)
+    expect(daySum).toBe(counts.total)
+  })
+
+  it('leaves no empty day bucket behind for a day with only non-prompt records', () => {
+    const acc = createActivityAccumulator()
+    acc.add(rec('m1', 0, { isMeta: true }, 'injected'))
+    expect(acc.counts().byDay.size).toBe(0)
+  })
+})
+
+/**
  * Task 5: a message with no parsable timestamp still bumped the lifetime
  * `userMessages`/`assistantResponses` totals but `bump()` silently dropped it
  * from `byDay` (it returned early for an `undefined` day) — breaking
