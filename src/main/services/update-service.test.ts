@@ -351,3 +351,47 @@ describe('installUpdate lifecycle', () => {
     })
   })
 })
+
+describe('showUpdateWindowAfterCheck', () => {
+  beforeEach(async () => {
+    vi.resetModules()
+    updaterHandlers.clear()
+    broadcast.mockClear()
+    disarmUpdateQuit.mockClear()
+    createOrShowUpdateWindow.mockClear()
+  })
+
+  it('opens the update window with the info on a successful check', async () => {
+    await withNonLinuxPlatform(async () => {
+      const svc = await import('./update-service')
+      const { autoUpdater } = await import('electron-updater')
+      svc.initUpdateService()
+      vi.mocked(autoUpdater.checkForUpdates).mockResolvedValue({
+        updateInfo: { version: '9.9.9', releaseNotes: undefined, releaseDate: undefined },
+      } as never)
+
+      await svc.showUpdateWindowAfterCheck()
+
+      expect(createOrShowUpdateWindow).toHaveBeenCalledTimes(1)
+      expect(createOrShowUpdateWindow).toHaveBeenCalledWith(
+        expect.objectContaining({ version: '9.9.9' })
+      )
+    })
+  })
+
+  it('opens the update window with (null, message) when the check throws', async () => {
+    await withNonLinuxPlatform(async () => {
+      const svc = await import('./update-service')
+      const { autoUpdater } = await import('electron-updater')
+      svc.initUpdateService()
+      vi.mocked(autoUpdater.checkForUpdates).mockRejectedValue(
+        new Error('net::ERR_INTERNET_DISCONNECTED')
+      )
+
+      await svc.showUpdateWindowAfterCheck()
+
+      expect(createOrShowUpdateWindow).toHaveBeenCalledTimes(1)
+      expect(createOrShowUpdateWindow).toHaveBeenCalledWith(null, 'net::ERR_INTERNET_DISCONNECTED')
+    })
+  })
+})

@@ -5,6 +5,7 @@ import {
   getTrayPopoverWindow,
   positionPopoverUnderTray,
 } from './window-manager'
+import { showUpdateWindowAfterCheck } from './services/update-service'
 
 let tray: Tray | null = null
 
@@ -74,10 +75,7 @@ function buildContextMenu(getMainWindow: () => BrowserWindow | null): Electron.M
     {
       label: 'Check for Updates',
       click: () => {
-        const mainWindow = getMainWindow()
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('push:check-update-request')
-        }
+        void showUpdateWindowAfterCheck()
       },
     },
     {

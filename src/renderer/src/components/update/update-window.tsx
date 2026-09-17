@@ -1,18 +1,22 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useReducer } from 'react'
 import { Download, Zap, CheckCircle, AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
-import type { UpdateInfo } from '@shared/types/project'
+import type { UpdateInfo, UpdateServiceError } from '@shared/types/project'
+import {
+  applyShowUpdate,
+  errorHeading,
+  reduceUpdateState,
+  retryAction,
+  stateFromShowUpdate,
+  type ShowUpdatePayload,
+  type UpdateEvent,
+  type UpdateState,
+} from '@shared/update-state'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import appIcon from '@renderer/assets/claudewatch-ring.svg'
-
-type DownloadState =
-  | { phase: 'idle' }
-  | { phase: 'downloading'; progress: number }
-  | { phase: 'ready' }
-  | { phase: 'error'; message: string }
 
 function UpToDate(): React.JSX.Element {
   return (
@@ -31,52 +35,51 @@ function UpToDate(): React.JSX.Element {
   )
 }
 
-function UpdateAvailable({ info }: { info: UpdateInfo }): React.JSX.Element {
-  const [dl, setDl] = useState<DownloadState>({ phase: 'idle' })
+function ErrorView({
+  state,
+  onRetry,
+}: {
+  state: Extract<UpdateState, { phase: 'error' }>
+  onRetry: () => void
+}): React.JSX.Element {
+  return (
+    <div className="flex flex-col items-center gap-5 py-4">
+      <div className="flex h-16 w-16 items-center justify-center rounded-full bg-destructive/10">
+        <AlertCircle className="h-8 w-8 text-destructive" />
+      </div>
+      <div className="text-center">
+        <p className="text-base font-semibold text-destructive">{errorHeading(state.failed)}</p>
+        <p className="text-sm text-destructive/80 mt-1">{state.message}</p>
+        {state.hint && (
+          <pre className="mt-3 max-w-full overflow-x-auto rounded-md bg-muted px-3 py-2 text-left text-xs font-mono text-muted-foreground whitespace-pre-wrap">
+            {state.hint}
+          </pre>
+        )}
+      </div>
+      <div className="flex w-full flex-col gap-2">
+        <Button className="w-full" onClick={onRetry}>
+          <RefreshCw className="h-4 w-4" />
+          Retry
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full text-muted-foreground"
+          onClick={() => window.close()}
+        >
+          Close
+        </Button>
+      </div>
+    </div>
+  )
+}
 
-  // Reflect electron-updater's download-progress events in the bar. Only bump
-  // while actively downloading so a late-arriving event can't resurrect the bar
-  // after the download finished or errored.
-  useEffect(() => {
-    return ipc.on<{ percent: number }>(CHANNELS.PUSH_UPDATE_DOWNLOAD_PROGRESS, ({ percent }) => {
-      setDl((prev) =>
-        prev.phase === 'downloading' ? { phase: 'downloading', progress: percent } : prev
-      )
-    })
-  }, [])
-
-  async function handleDownload(): Promise<void> {
-    setDl({ phase: 'downloading', progress: 0 })
-    try {
-      const result = await ipc.updates.download()
-      if (result.ok) {
-        setDl({ phase: 'ready' })
-      } else {
-        setDl({ phase: 'error', message: result.error })
-      }
-    } catch (err) {
-      setDl({ phase: 'error', message: String(err) })
-    }
-  }
-
-  async function handleInstall(): Promise<void> {
-    // The result was previously discarded, so a failed install looked exactly
-    // like a successful one: the button did nothing and said nothing. Surface
-    // it the same way handleDownload does.
-    //
-    // On success this window goes away with the app, so there is no success
-    // state to render — anything we get back here means the install did not
-    // start.
-    try {
-      const result = await ipc.updates.install()
-      if (!result.ok) {
-        setDl({ phase: 'error', message: result.error })
-      }
-    } catch (err) {
-      setDl({ phase: 'error', message: String(err) })
-    }
-  }
-
+function UpdateAvailable({
+  info,
+  onDownload,
+}: {
+  info: UpdateInfo
+  onDownload: () => void
+}): React.JSX.Element {
   return (
     <div className="flex flex-col gap-5">
       {/* Release notes */}
@@ -89,96 +92,166 @@ function UpdateAvailable({ info }: { info: UpdateInfo }): React.JSX.Element {
         </div>
       )}
 
-      {/* Actions */}
-      {dl.phase === 'idle' && (
-        <div className="flex flex-col gap-2">
-          <Button className="w-full" onClick={handleDownload}>
-            <Download className="h-4 w-4" />
-            Download &amp; Install
-          </Button>
-          <Button
-            variant="ghost"
-            className="w-full text-muted-foreground"
-            onClick={() => window.close()}
-          >
-            Later
-          </Button>
-        </div>
-      )}
-
-      {dl.phase === 'downloading' && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Downloading update…
-          </div>
-          <Progress value={dl.progress} className="h-1.5" />
-        </div>
-      )}
-
-      {dl.phase === 'ready' && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-            <CheckCircle className="h-4 w-4" />
-            Downloaded — ready to install
-          </div>
-          <Button className="w-full" onClick={handleInstall}>
-            <Zap className="h-4 w-4" />
-            Install &amp; Restart
-          </Button>
-        </div>
-      )}
-
-      {dl.phase === 'error' && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm text-destructive">
-            <AlertCircle className="h-4 w-4" />
-            {dl.message}
-          </div>
-          <Button variant="outline" className="w-full" onClick={() => setDl({ phase: 'idle' })}>
-            <RefreshCw className="h-4 w-4" />
-            Try again
-          </Button>
-        </div>
-      )}
+      <div className="flex flex-col gap-2">
+        <Button className="w-full" onClick={onDownload}>
+          <Download className="h-4 w-4" />
+          Download &amp; Install
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full text-muted-foreground"
+          onClick={() => window.close()}
+        >
+          Later
+        </Button>
+      </div>
     </div>
   )
 }
 
-function parseFromUrl(): { updateInfo: UpdateInfo | null; errorMessage: string | null } {
+function parseFromUrl(): {
+  updateInfo?: UpdateInfo | null
+  errorMessage?: string | null
+  updateError?: UpdateServiceError
+} {
   const params = new URLSearchParams(window.location.search)
-  const raw = params.get('updateInfo')
-  const errorMessage = params.get('errorMessage') ?? null
-  let updateInfo: UpdateInfo | null = null
-  if (raw) {
+  const rawInfo = params.get('updateInfo')
+  const rawError = params.get('updateError')
+  const errorMessage = params.get('errorMessage') ?? undefined
+
+  let updateInfo: UpdateInfo | null | undefined
+  if (rawInfo !== null) {
     try {
-      updateInfo = JSON.parse(raw)
+      updateInfo = JSON.parse(rawInfo)
     } catch {
       /* ignore */
     }
   }
-  return { updateInfo, errorMessage }
+
+  let updateError: UpdateServiceError | undefined
+  if (rawError) {
+    try {
+      updateError = JSON.parse(rawError)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return { updateInfo, errorMessage, updateError }
+}
+
+/**
+ * A `PUSH_SHOW_UPDATE` push (the reused-window path) carries a full payload
+ * that needs a *decision*, not just a mapping: `applyShowUpdate` keeps this
+ * window's current state untouched when it is `downloading`, `ready` or
+ * `installing` (the window is reused every time the tray runs "Check for
+ * Updates", including while a download or install is already under way — see
+ * `applyShowUpdate`'s doc comment), and otherwise defers to
+ * `stateFromShowUpdate`, whose `updateError` case sets `info` from the
+ * payload rather than from whatever this window's *current* phase happens to
+ * be (a window sitting idle can be reopened straight into `error` with the
+ * failed install's info attached). `reduceUpdateState`'s own `service-error`
+ * case instead derives `info` from the current state, which is correct for a
+ * live `PUSH_UPDATE_SERVICE_ERROR` broadcast but not for this
+ * replace-or-keep push. `hydrate` lets this window run that decision against
+ * its live state (read inside the reducer, never a stale closure) without
+ * adding a component-specific variant to the shared `UpdateEvent` union.
+ */
+type WindowEvent = UpdateEvent | { type: 'hydrate'; payload: ShowUpdatePayload }
+
+function windowReducer(state: UpdateState, event: WindowEvent): UpdateState {
+  if (event.type === 'hydrate') return applyShowUpdate(state, event.payload)
+  return reduceUpdateState(state, event)
 }
 
 export default function UpdateWindow(): React.JSX.Element {
-  const initial = parseFromUrl()
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null | undefined>(
-    initial.errorMessage ? undefined : initial.updateInfo
+  const [state, dispatch] = useReducer(windowReducer, undefined, () =>
+    stateFromShowUpdate(parseFromUrl())
   )
-  const [fetchError, setFetchError] = useState<string | null>(initial.errorMessage)
 
-  // Handle re-focus case where the window is already open and receives new data
+  // Reflect electron-updater's download-progress events in the bar.
+  useEffect(() => {
+    return ipc.on<{ percent: number }>(CHANNELS.PUSH_UPDATE_DOWNLOAD_PROGRESS, ({ percent }) => {
+      dispatch({ type: 'progress', percent })
+    })
+  }, [])
+
+  // A service-level error (most importantly: a cancelled install's password
+  // prompt, which arrives asynchronously after `install-start` already
+  // resolved the install IPC call) always wins over whatever this surface
+  // was doing.
+  useEffect(() => {
+    return ipc.on<UpdateServiceError>(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, (error) => {
+      dispatch({ type: 'service-error', error })
+    })
+  }, [])
+
+  // Handle re-focus case where the window is already open and receives new data.
   useEffect(() => {
     if (typeof window === 'undefined' || !window.claudewatch) return
-    const unsub = ipc.on<{ updateInfo: UpdateInfo | null; errorMessage?: string }>(
-      CHANNELS.PUSH_SHOW_UPDATE,
-      (payload) => {
-        setFetchError(payload.errorMessage ?? null)
-        setUpdateInfo(payload.errorMessage ? undefined : payload.updateInfo)
-      }
-    )
-    return unsub
+    return ipc.on<{
+      updateInfo: UpdateInfo | null
+      errorMessage?: string
+      updateError?: UpdateServiceError
+    }>(CHANNELS.PUSH_SHOW_UPDATE, (payload) => {
+      dispatch({ type: 'hydrate', payload })
+    })
   }, [])
+
+  async function handleCheck(): Promise<void> {
+    dispatch({ type: 'check-start' })
+    try {
+      const result = await ipc.updates.check()
+      if (result.ok) {
+        dispatch({ type: 'check-ok', info: result.data })
+      } else {
+        dispatch({ type: 'check-fail', message: result.error })
+      }
+    } catch (err) {
+      dispatch({ type: 'check-fail', message: String(err) })
+    }
+  }
+
+  async function handleDownload(): Promise<void> {
+    dispatch({ type: 'download-start' })
+    try {
+      const result = await ipc.updates.download()
+      if (result.ok) {
+        dispatch({ type: 'download-ok' })
+      } else {
+        dispatch({ type: 'download-fail', message: result.error })
+      }
+    } catch (err) {
+      dispatch({ type: 'download-fail', message: String(err) })
+    }
+  }
+
+  async function handleInstall(): Promise<void> {
+    dispatch({ type: 'install-start' })
+    try {
+      const result = await ipc.updates.install()
+      if (!result.ok) {
+        dispatch({ type: 'install-fail', message: result.error })
+      }
+      // On success this window goes away with the app — there is no success
+      // transition to make here.
+    } catch (err) {
+      dispatch({ type: 'install-fail', message: String(err) })
+    }
+  }
+
+  function handleRetry(): void {
+    if (state.phase !== 'error') return
+    const action = retryAction(state)
+    dispatch({ type: 'retry' })
+    if (action === 'download') {
+      void handleDownload()
+    } else if (action === 'check') {
+      void handleCheck()
+    }
+  }
+
+  const info = 'info' in state ? state.info : null
 
   return (
     <div className="flex flex-col min-h-screen bg-background text-foreground">
@@ -191,15 +264,15 @@ export default function UpdateWindow(): React.JSX.Element {
           <img src={appIcon} alt="ClaudeWatch" className="h-16 w-16 rounded-2xl" />
           <div className="text-center">
             <h1 className="text-lg font-bold">ClaudeWatch</h1>
-            {updateInfo != null ? (
+            {info != null ? (
               <>
                 <p className="text-sm font-medium text-primary mt-0.5">
-                  Version {updateInfo.version} available
+                  Version {info.version} available
                 </p>
-                {updateInfo.releaseDate && (
+                {info.releaseDate && (
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Released{' '}
-                    {new Date(updateInfo.releaseDate).toLocaleDateString(undefined, {
+                    {new Date(info.releaseDate).toLocaleDateString(undefined, {
                       dateStyle: 'long',
                     })}
                   </p>
@@ -211,27 +284,56 @@ export default function UpdateWindow(): React.JSX.Element {
           </div>
         </div>
 
-        {fetchError && (
-          <div className="flex flex-col items-center gap-5 py-4">
-            <div className="text-center">
-              <p className="text-base font-semibold text-destructive">Update check failed</p>
-              <p className="text-sm text-destructive/80 mt-1">{fetchError}</p>
-            </div>
-            <Button variant="outline" onClick={() => window.close()}>
-              Close
-            </Button>
-          </div>
-        )}
-
-        {!fetchError && updateInfo === undefined && (
+        {state.phase === 'checking' && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
             <Loader2 className="h-4 w-4 animate-spin" />
             Checking for updates…
           </div>
         )}
 
-        {!fetchError && updateInfo === null && <UpToDate />}
-        {!fetchError && updateInfo != null && <UpdateAvailable info={updateInfo} />}
+        {state.phase === 'up-to-date' && <UpToDate />}
+
+        {state.phase === 'available' && (
+          <UpdateAvailable info={state.info} onDownload={handleDownload} />
+        )}
+
+        {state.phase === 'downloading' && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Downloading update…
+            </div>
+            <Progress value={state.progress} className="h-1.5" />
+          </div>
+        )}
+
+        {state.phase === 'ready' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+              <CheckCircle className="h-4 w-4" />
+              Downloaded — ready to install
+            </div>
+            <Button className="w-full" onClick={handleInstall}>
+              <Zap className="h-4 w-4" />
+              Install &amp; Restart
+            </Button>
+          </div>
+        )}
+
+        {state.phase === 'installing' && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Installing…
+            </div>
+            <Button className="w-full" disabled>
+              <Zap className="h-4 w-4" />
+              Install &amp; Restart
+            </Button>
+          </div>
+        )}
+
+        {state.phase === 'error' && <ErrorView state={state} onRetry={handleRetry} />}
       </div>
     </div>
   )

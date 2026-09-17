@@ -6,11 +6,10 @@ import { captureHandlerException } from '@main/services/sentry'
 import { validate, TrayOpenDashboardSchema, TrayShowOnboardingSchema } from '@shared/ipc/schemas'
 import {
   getTrayPopoverWindow,
-  createOrShowUpdateWindow,
   createOrShowAboutWindow,
   createOrShowOnboardingWindow,
 } from '@main/window-manager'
-import { checkForUpdate } from '@main/services/update-service'
+import { showUpdateWindowAfterCheck } from '@main/services/update-service'
 import { buildTraySnapshot } from '@main/services/tray-snapshot'
 import { getOrScanProjects } from './sessions.handlers'
 import { getActivePricingTable } from '@main/services/pricing-engine'
@@ -94,13 +93,7 @@ export function registerTrayHandlers(getMainWindow: () => BrowserWindow | null):
     const popover = getTrayPopoverWindow()
     if (popover?.isVisible()) popover.hide()
 
-    try {
-      const info = await checkForUpdate()
-      createOrShowUpdateWindow(info ?? null)
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      createOrShowUpdateWindow(null, message)
-    }
+    await showUpdateWindowAfterCheck()
     return ok(undefined)
   })
 

@@ -463,6 +463,23 @@ export async function installUpdate(): Promise<void> {
   autoUpdater.quitAndInstall(false, true)
 }
 
+/**
+ * Check for an update and open (or focus) the update window with the result.
+ *
+ * Shared by the tray popover's "Show Update" IPC handler and the tray menu's
+ * "Check for Updates" item, which previously sent a dead
+ * `'push:check-update-request'` channel that nothing listened for — the menu
+ * item did nothing.
+ */
+export async function showUpdateWindowAfterCheck(): Promise<void> {
+  try {
+    const info = await checkForUpdate()
+    createOrShowUpdateWindow(info ?? null)
+  } catch (e) {
+    createOrShowUpdateWindow(null, e instanceof Error ? e.message : String(e))
+  }
+}
+
 /** macOS only: ShipIt asks for a password when the current user cannot write the bundle. */
 async function bundleWritabilityHint(): Promise<string | undefined> {
   if (process.platform !== 'darwin') return undefined

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useReducer } from 'react'
 import {
   RefreshCw,
   Download,
@@ -14,21 +14,18 @@ import { Progress } from '@renderer/components/ui/progress'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
 import { AppLinks } from '@renderer/lib/app-links'
-import type { UpdateInfo } from '@shared/types'
+import type { UpdateServiceError } from '@shared/types'
+import {
+  errorHeading,
+  initialUpdateState,
+  reduceUpdateState,
+  retryAction,
+} from '@shared/update-state'
 import appIcon from '@renderer/assets/claudewatch-ring.svg'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 
-type UpdateState =
-  | { phase: 'idle' }
-  | { phase: 'checking' }
-  | { phase: 'up-to-date' }
-  | { phase: 'available'; info: UpdateInfo }
-  | { phase: 'downloading'; progress: number }
-  | { phase: 'ready' }
-  | { phase: 'error'; message: string }
-
 export default function AboutPanel(): React.JSX.Element {
-  const [update, setUpdate] = useState<UpdateState>({ phase: 'idle' })
+  const [update, dispatch] = useReducer(reduceUpdateState, initialUpdateState)
   const [appVersion, setAppVersion] = useState<string>('…')
 
   useEffect(() => {
@@ -37,51 +34,81 @@ export default function AboutPanel(): React.JSX.Element {
     })
   }, [])
 
-  // Reflect electron-updater's download-progress events in the bar. Only bump
-  // while actively downloading so a late-arriving event can't resurrect the bar
-  // after the download finished or errored.
+  // Reflect electron-updater's download-progress events in the bar. Ruling 2:
+  // the reducer only applies this while actively downloading, so a late-
+  // arriving event can't resurrect the bar after the download finished or
+  // errored.
   useEffect(() => {
     return ipc.on<{ percent: number }>(CHANNELS.PUSH_UPDATE_DOWNLOAD_PROGRESS, ({ percent }) => {
-      setUpdate((prev) =>
-        prev.phase === 'downloading' ? { phase: 'downloading', progress: percent } : prev
-      )
+      dispatch({ type: 'progress', percent })
+    })
+  }, [])
+
+  // A service-level error — most importantly a cancelled install's password
+  // prompt, which arrives asynchronously after `install-start` already
+  // resolved the install IPC call — always wins over whatever this panel was
+  // doing (ruling 3).
+  useEffect(() => {
+    return ipc.on<UpdateServiceError>(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, (error) => {
+      dispatch({ type: 'service-error', error })
     })
   }, [])
 
   async function handleCheckUpdates(): Promise<void> {
-    setUpdate({ phase: 'checking' })
+    dispatch({ type: 'check-start' })
     try {
       const result = await ipc.updates.check()
       if (result.ok) {
-        if (result.data) {
-          setUpdate({ phase: 'available', info: result.data })
-        } else {
-          setUpdate({ phase: 'up-to-date' })
-        }
+        dispatch({ type: 'check-ok', info: result.data })
       } else {
-        setUpdate({ phase: 'error', message: result.error })
+        dispatch({ type: 'check-fail', message: result.error })
       }
     } catch (err) {
-      setUpdate({ phase: 'error', message: String(err) })
+      dispatch({ type: 'check-fail', message: String(err) })
     }
   }
 
   async function handleDownload(): Promise<void> {
-    setUpdate({ phase: 'downloading', progress: 0 })
+    dispatch({ type: 'download-start' })
     try {
       const result = await ipc.updates.download()
       if (result.ok) {
-        setUpdate({ phase: 'ready' })
+        dispatch({ type: 'download-ok' })
       } else {
-        setUpdate({ phase: 'error', message: result.error })
+        dispatch({ type: 'download-fail', message: result.error })
       }
     } catch (err) {
-      setUpdate({ phase: 'error', message: String(err) })
+      dispatch({ type: 'download-fail', message: String(err) })
     }
   }
 
   async function handleInstall(): Promise<void> {
-    await ipc.updates.install()
+    // The result was previously discarded, so a failed install looked exactly
+    // like a successful one: the button did nothing and said nothing.
+    //
+    // On success this panel goes away with the app, so there is no success
+    // state to render — anything we get back here means the install did not
+    // start.
+    dispatch({ type: 'install-start' })
+    try {
+      const result = await ipc.updates.install()
+      if (!result.ok) {
+        dispatch({ type: 'install-fail', message: result.error })
+      }
+    } catch (err) {
+      dispatch({ type: 'install-fail', message: String(err) })
+    }
+  }
+
+  function handleRetry(): void {
+    if (update.phase !== 'error') return
+    const action = retryAction(update)
+    dispatch({ type: 'retry' })
+    if (action === 'download') {
+      void handleDownload()
+    } else if (action === 'check') {
+      void handleCheckUpdates()
+    }
   }
 
   return (
@@ -179,15 +206,36 @@ export default function AboutPanel(): React.JSX.Element {
           </div>
         )}
 
+        {update.phase === 'installing' && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Installing…
+            </div>
+            <Button size="sm" disabled>
+              <Zap className="h-4 w-4" />
+              Install &amp; Restart
+            </Button>
+          </div>
+        )}
+
         {update.phase === 'error' && (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4" />
-              {update.message}
+            <div className="flex items-start gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-medium">{errorHeading(update.failed)}</p>
+                <p className="text-destructive/80">{update.message}</p>
+              </div>
             </div>
-            <Button variant="outline" size="sm" onClick={handleCheckUpdates}>
+            {update.hint && (
+              <pre className="rounded bg-muted p-2 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap overflow-x-auto">
+                {update.hint}
+              </pre>
+            )}
+            <Button variant="outline" size="sm" onClick={handleRetry}>
               <RefreshCw className="h-4 w-4" />
-              Try again
+              Retry
             </Button>
           </div>
         )}

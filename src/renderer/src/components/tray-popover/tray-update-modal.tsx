@@ -1,19 +1,23 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useReducer } from 'react'
 import { Download, Zap, CheckCircle, AlertCircle, Loader2, RefreshCw, Sparkles } from 'lucide-react'
 import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
-import type { UpdateInfo } from '@shared/types/project'
+import type { UpdateInfo, UpdateServiceError } from '@shared/types/project'
+import {
+  applyShowUpdate,
+  errorHeading,
+  initialUpdateState,
+  reduceUpdateState,
+  retryAction,
+  type ShowUpdatePayload,
+  type UpdateEvent,
+  type UpdateState,
+} from '@shared/update-state'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import { cn } from '@renderer/lib/cn'
-
-type DownloadState =
-  | { phase: 'idle' }
-  | { phase: 'downloading'; progress: number }
-  | { phase: 'ready' }
-  | { phase: 'error'; message: string }
 
 function UpToDate({ onClose }: { onClose: () => void }): React.JSX.Element {
   return (
@@ -32,44 +36,53 @@ function UpToDate({ onClose }: { onClose: () => void }): React.JSX.Element {
   )
 }
 
+function ErrorView({
+  state,
+  onRetry,
+  onClose,
+}: {
+  state: Extract<UpdateState, { phase: 'error' }>
+  onRetry: () => void
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-start gap-2 text-xs text-destructive">
+        <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+        <div>
+          <p className="font-medium">{errorHeading(state.failed)}</p>
+          <p className="text-destructive/80">{state.message}</p>
+        </div>
+      </div>
+      {state.hint && (
+        <pre className="rounded bg-muted p-2 text-[10px] font-mono text-muted-foreground whitespace-pre-wrap overflow-x-auto">
+          {state.hint}
+        </pre>
+      )}
+      <Button variant="outline" size="sm" className="w-full" onClick={onRetry}>
+        <RefreshCw className="h-3.5 w-3.5" />
+        Retry
+      </Button>
+      <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={onClose}>
+        Close
+      </Button>
+    </div>
+  )
+}
+
 function UpdateAvailable({
   info,
+  update,
+  onDownload,
+  onInstall,
   onClose,
 }: {
   info: UpdateInfo
+  update: Extract<UpdateState, { phase: 'available' | 'downloading' | 'ready' | 'installing' }>
+  onDownload: () => void
+  onInstall: () => void
   onClose: () => void
 }): React.JSX.Element {
-  const [dl, setDl] = useState<DownloadState>({ phase: 'idle' })
-
-  // Reflect electron-updater's download-progress events in the bar. Only bump
-  // while actively downloading so a late-arriving event can't resurrect the bar
-  // after the download finished or errored.
-  useEffect(() => {
-    return ipc.on<{ percent: number }>(CHANNELS.PUSH_UPDATE_DOWNLOAD_PROGRESS, ({ percent }) => {
-      setDl((prev) =>
-        prev.phase === 'downloading' ? { phase: 'downloading', progress: percent } : prev
-      )
-    })
-  }, [])
-
-  async function handleDownload(): Promise<void> {
-    setDl({ phase: 'downloading', progress: 0 })
-    try {
-      const result = await ipc.updates.download()
-      if (result.ok) {
-        setDl({ phase: 'ready' })
-      } else {
-        setDl({ phase: 'error', message: result.error })
-      }
-    } catch (err) {
-      setDl({ phase: 'error', message: String(err) })
-    }
-  }
-
-  async function handleInstall(): Promise<void> {
-    await ipc.updates.install()
-  }
-
   return (
     <div className="flex flex-col gap-4">
       {/* Version badge */}
@@ -98,77 +111,175 @@ function UpdateAvailable({
       )}
 
       {/* Actions */}
-      {dl.phase === 'idle' && (
-        <Button size="sm" className="w-full" onClick={handleDownload}>
+      {update.phase === 'available' && (
+        <Button size="sm" className="w-full" onClick={onDownload}>
           <Download className="h-4 w-4" />
           Download &amp; Install
         </Button>
       )}
 
-      {dl.phase === 'downloading' && (
+      {update.phase === 'downloading' && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
             Downloading…
           </div>
-          <Progress value={dl.progress} className="h-1.5" />
+          <Progress value={update.progress} className="h-1.5" />
         </div>
       )}
 
-      {dl.phase === 'ready' && (
+      {update.phase === 'ready' && (
         <div className="space-y-2">
           <div className="flex items-center gap-2 text-xs text-green-600 dark:text-green-400">
             <CheckCircle className="h-3.5 w-3.5" />
             Downloaded — ready to install
           </div>
-          <Button size="sm" className="w-full" onClick={handleInstall}>
+          <Button size="sm" className="w-full" onClick={onInstall}>
             <Zap className="h-4 w-4" />
             Install &amp; Restart
           </Button>
         </div>
       )}
 
-      {dl.phase === 'error' && (
+      {update.phase === 'installing' && (
         <div className="space-y-2">
-          <div className="flex items-center gap-2 text-xs text-destructive">
-            <AlertCircle className="h-3.5 w-3.5" />
-            {dl.message}
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Installing…
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            onClick={() => setDl({ phase: 'idle' })}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Try again
+          <Button size="sm" className="w-full" disabled>
+            <Zap className="h-4 w-4" />
+            Install &amp; Restart
           </Button>
         </div>
       )}
 
-      <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={onClose}>
-        Later
-      </Button>
+      {update.phase !== 'installing' && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-muted-foreground"
+          onClick={onClose}
+        >
+          Later
+        </Button>
+      )}
     </div>
   )
 }
 
+/**
+ * Same reasoning as `update-window.tsx`'s `windowReducer`: `PUSH_SHOW_UPDATE`
+ * fires every time this modal's check runs (e.g. re-opening the tray
+ * popover), including while a download or install started from this same
+ * modal is still in flight. Dispatching a plain `check-ok`/`check-fail`
+ * straight from the payload would blindly reset that in-progress state —
+ * `applyShowUpdate` keeps `downloading`/`ready`/`installing` untouched
+ * unless the payload carries an `updateError`, which always wins.
+ */
+type ModalEvent = UpdateEvent | { type: 'hydrate'; payload: ShowUpdatePayload }
+
+function modalReducer(state: UpdateState, event: ModalEvent): UpdateState {
+  if (event.type === 'hydrate') return applyShowUpdate(state, event.payload)
+  return reduceUpdateState(state, event)
+}
+
 export function TrayUpdateModal(): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
+  const [update, dispatch] = useReducer(modalReducer, initialUpdateState)
 
+  // Handle the reused-window-style push: the popover was already open and
+  // receives fresh check data (updateInfo), a plain check failure
+  // (errorMessage → always failed: 'check'), or — the path by which a
+  // cancelled install becomes visible — a structured updateError.
   useEffect(() => {
     if (typeof window === 'undefined' || !window.claudewatch) return
-    const unsub = ipc.on<UpdateInfo | null>(CHANNELS.PUSH_SHOW_UPDATE, (info) => {
-      setUpdateInfo(info)
+    const unsub = ipc.on<{
+      updateInfo: UpdateInfo | null
+      errorMessage?: string
+      updateError?: UpdateServiceError
+    }>(CHANNELS.PUSH_SHOW_UPDATE, (payload) => {
+      dispatch({ type: 'hydrate', payload })
       setOpen(true)
     })
     return unsub
   }, [])
 
+  // A service-level error — most importantly a cancelled install's password
+  // prompt, which arrives asynchronously after `install-start` already
+  // resolved the install IPC call — always wins over whatever this modal was
+  // doing (ruling 3), and must reopen the modal if it had been dismissed.
+  useEffect(() => {
+    return ipc.on<UpdateServiceError>(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, (error) => {
+      dispatch({ type: 'service-error', error })
+      setOpen(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    return ipc.on<{ percent: number }>(CHANNELS.PUSH_UPDATE_DOWNLOAD_PROGRESS, ({ percent }) => {
+      dispatch({ type: 'progress', percent })
+    })
+  }, [])
+
+  async function handleCheck(): Promise<void> {
+    dispatch({ type: 'check-start' })
+    try {
+      const result = await ipc.updates.check()
+      if (result.ok) {
+        dispatch({ type: 'check-ok', info: result.data })
+      } else {
+        dispatch({ type: 'check-fail', message: result.error })
+      }
+    } catch (err) {
+      dispatch({ type: 'check-fail', message: String(err) })
+    }
+  }
+
+  async function handleDownload(): Promise<void> {
+    dispatch({ type: 'download-start' })
+    try {
+      const result = await ipc.updates.download()
+      if (result.ok) {
+        dispatch({ type: 'download-ok' })
+      } else {
+        dispatch({ type: 'download-fail', message: result.error })
+      }
+    } catch (err) {
+      dispatch({ type: 'download-fail', message: String(err) })
+    }
+  }
+
+  async function handleInstall(): Promise<void> {
+    dispatch({ type: 'install-start' })
+    try {
+      const result = await ipc.updates.install()
+      if (!result.ok) {
+        dispatch({ type: 'install-fail', message: result.error })
+      }
+      // On success this popover goes away with the app — there is no success
+      // state to render here.
+    } catch (err) {
+      dispatch({ type: 'install-fail', message: String(err) })
+    }
+  }
+
+  function handleRetry(): void {
+    if (update.phase !== 'error') return
+    const action = retryAction(update)
+    dispatch({ type: 'retry' })
+    if (action === 'download') {
+      void handleDownload()
+    } else if (action === 'check') {
+      void handleCheck()
+    }
+  }
+
   function handleClose(): void {
     setOpen(false)
   }
+
+  const info = 'info' in update ? update.info : null
 
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
@@ -192,10 +303,23 @@ export function TrayUpdateModal(): React.JSX.Element {
             ClaudeWatch Updates
           </DialogPrimitive.Title>
 
-          {updateInfo === null ? (
-            <UpToDate onClose={handleClose} />
+          {update.phase === 'error' ? (
+            <ErrorView state={update} onRetry={handleRetry} onClose={handleClose} />
+          ) : info ? (
+            <UpdateAvailable
+              info={info}
+              update={
+                update as Extract<
+                  UpdateState,
+                  { phase: 'available' | 'downloading' | 'ready' | 'installing' }
+                >
+              }
+              onDownload={handleDownload}
+              onInstall={handleInstall}
+              onClose={handleClose}
+            />
           ) : (
-            <UpdateAvailable info={updateInfo} onClose={handleClose} />
+            <UpToDate onClose={handleClose} />
           )}
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
