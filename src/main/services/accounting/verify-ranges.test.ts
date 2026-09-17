@@ -137,6 +137,7 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
       id,
       name: id,
       path: id,
+      pathResolved: true,
       sessions: [],
       sessionCount: 0,
       localSkills: [],

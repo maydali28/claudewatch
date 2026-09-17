@@ -53,6 +53,7 @@ import {
 } from './project-scanner'
 import type { ScannedProject } from './project-scanner'
 import { configureMetadataCacheDir } from './metadata-cache'
+import { resetClaudeDirCache } from '@main/lib/claude-paths'
 
 function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -113,6 +114,7 @@ function makeProject(id: string, lastTimestamp: string): Project {
     id,
     name: id,
     path: `/${id}`,
+    pathResolved: true,
     // getValidSortedSessionForProject already sorts each project's own
     // sessions most-recent-first, so index 0 is always the project's latest.
     sessions: [makeSummary({ lastTimestamp })],
@@ -131,6 +133,7 @@ function makeProjectAt(id: string, path: string, sessions: SessionSummary[]): Pr
     id,
     name: id,
     path,
+    pathResolved: true,
     sessions,
     sessionCount: sessions.length,
     localSkills: [],
@@ -476,6 +479,9 @@ describe('mergeProjectsByResolvedPath', () => {
 describe('scanProjects — the merge is actually wired into the scan', () => {
   afterEach(() => {
     fixtureHome.path = ''
+    // getClaudeDir() caches its first resolution; without this the second
+    // test would still scan the first test's (deleted) home.
+    resetClaudeDirCache()
   })
 
   it('collapses three on-disk worktree-style directories sharing one cwd into a single scanned project', async () => {
@@ -534,6 +540,63 @@ describe('scanProjects — the merge is actually wired into the scan', () => {
       const named = projects.filter((p) => p.name === 'one-project')
       expect(named).toHaveLength(1)
       expect(named[0].sessionCount).toBe(3)
+      expect(named[0].pathResolved).toBe(true)
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
+  })
+  it('marks a project resolved from a transcript cwd as pathResolved and a decoded-only one as not', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-resolved-home-'))
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-resolved-cache-'))
+
+    try {
+      fixtureHome.path = homeRoot
+      configureMetadataCacheDir(cacheDir)
+      const projectsDir = path.join(homeRoot, '.claude', 'projects')
+
+      const writeSession = (dirName: string, cwd: string | undefined): void => {
+        const projectDir = path.join(projectsDir, dirName)
+        fs.mkdirSync(projectDir, { recursive: true })
+        const records = [
+          {
+            type: 'user',
+            uuid: `u-${dirName}`,
+            ...(cwd ? { cwd } : {}),
+            timestamp: '2026-09-10T09:59:00.000Z',
+            message: { role: 'user', content: 'hi' },
+          },
+          {
+            type: 'assistant',
+            uuid: `a-${dirName}`,
+            timestamp: '2026-09-10T10:00:00.000Z',
+            message: {
+              id: `msg-${dirName}`,
+              role: 'assistant',
+              model: 'claude-opus-5',
+              content: [{ type: 'text', text: 'hello' }],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 10, output_tokens: 5 },
+            },
+          },
+        ]
+        fs.writeFileSync(
+          path.join(projectDir, 'session.jsonl'),
+          records.map((r) => JSON.stringify(r)).join('\n') + '\n'
+        )
+      }
+
+      writeSession('-fixture-with-cwd', '/fixture/with-cwd')
+      writeSession('-fixture-decoded-only', undefined)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+      const withCwd = projects.find((p) => p.id === '-fixture-with-cwd')
+      const decodedOnly = projects.find((p) => p.id === '-fixture-decoded-only')
+
+      expect(withCwd?.path).toBe('/fixture/with-cwd')
+      expect(withCwd?.pathResolved).toBe(true)
+      expect(decodedOnly).toBeDefined()
+      expect(decodedOnly?.pathResolved).toBe(false)
     } finally {
       fs.rmSync(homeRoot, { recursive: true, force: true })
       fs.rmSync(cacheDir, { recursive: true, force: true })

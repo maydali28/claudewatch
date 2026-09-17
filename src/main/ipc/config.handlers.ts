@@ -11,7 +11,11 @@ import {
   readMcps,
   readMemoryFiles,
 } from '@main/services/config-service'
+import { resolvedProjectRoots } from '@main/services/project-roots'
 import { getOrScanProjects } from './sessions.handlers'
+
+// Defined in services so lint-service can share it without importing IPC code.
+export { resolvedProjectRoots }
 
 function validateProjectScopedRequest(payload: unknown): { projectId?: string } | undefined {
   return validate(ConfigProjectSchema, payload) as { projectId?: string } | undefined
@@ -21,7 +25,11 @@ export function registerConfigHandlers(): void {
   ipcMain.handle(CHANNELS.CONFIG_GET_FULL, async (_event, payload) => {
     try {
       const projectScope = validateProjectScopedRequest(payload)
-      const extendedConfig = await readExtendedConfig(projectScope?.projectId)
+      const projectId = projectScope?.projectId
+      const roots = await resolvedProjectRoots()
+      const extendedConfig = await readExtendedConfig(
+        projectId ? roots.filter((r) => r.id === projectId) : roots
+      )
       return ok(extendedConfig)
     } catch (e) {
       captureHandlerException(e)
@@ -53,7 +61,11 @@ export function registerConfigHandlers(): void {
   ipcMain.handle(CHANNELS.CONFIG_GET_MCPS, async (_event, payload) => {
     try {
       const projectScope = validateProjectScopedRequest(payload)
-      const mcps = await readMcps(projectScope?.projectId)
+      const projectId = projectScope?.projectId
+      const root = projectId
+        ? (await resolvedProjectRoots()).find((r) => r.id === projectId)
+        : undefined
+      const mcps = await readMcps(root)
       return ok(mcps)
     } catch (e) {
       captureHandlerException(e)
@@ -64,7 +76,11 @@ export function registerConfigHandlers(): void {
   ipcMain.handle(CHANNELS.CONFIG_GET_MEMORY, async (_event, payload) => {
     try {
       const projectScope = validateProjectScopedRequest(payload)
-      const memoryFiles = await readMemoryFiles(projectScope?.projectId)
+      const projectId = projectScope?.projectId
+      const root = projectId
+        ? (await resolvedProjectRoots()).find((r) => r.id === projectId)
+        : undefined
+      const memoryFiles = await readMemoryFiles(projectId, root)
       return ok(memoryFiles)
     } catch (e) {
       captureHandlerException(e)

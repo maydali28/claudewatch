@@ -91,8 +91,11 @@ export default function HooksPanel(): React.JSX.Element {
       />
     )
 
-  // Resolve selected rule from id format "groupId::ruleId"
-  const [groupId, ruleId] = selectedHookId.split('::')
+  // Resolve selected rule from id format "groupId::ruleId". Rule ids contain a
+  // single ':' themselves (`user:PreToolUse-0`), so split on the first '::' only.
+  const sep = selectedHookId.indexOf('::')
+  const groupId = selectedHookId.slice(0, sep)
+  const ruleId = selectedHookId.slice(sep + 2)
   const group = hooks.find((g) => g.id === groupId)
   const rule = group?.rules.find((r) => r.id === ruleId)
 

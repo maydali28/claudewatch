@@ -201,6 +201,8 @@ function mergeProjectGroup(projects: Project[]): Project {
     id: survivorId,
     name: projects[0].name,
     path: projects[0].path,
+    // A group is only ever formed from resolved members.
+    pathResolved: true,
     sessions,
     sessionCount: sessions.length,
     localSkills: [...skillsById.values()],
@@ -329,6 +331,7 @@ async function getProjectDetails(
       id: projectDirName,
       name: displayName,
       path: projectPath,
+      pathResolved: resolvedCwd !== null,
       sessions,
       sessionCount: sessions.length,
       localSkills,

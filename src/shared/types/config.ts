@@ -1,15 +1,43 @@
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
+/**
+ * Which settings file a value came from. Precedence, lowest to highest:
+ * `user` (`<claudeDir>/settings.json`) < `user-local` (`<claudeDir>/settings.local.json`)
+ * < `project` (`<root>/.claude/settings.json`) < `local` (`<root>/.claude/settings.local.json`).
+ */
+export type ConfigScope = 'user' | 'user-local' | 'project' | 'local'
+
 export interface HookCommand {
   type?: 'command'
   command: string
   timeout?: number
+  statusMessage?: string
 }
 
 export interface HookRule {
   id: string
   matcher: string
   hooks: HookCommand[]
+  scope: ConfigScope
+  /** Absolute path of the settings file the rule came from. */
+  sourcePath: string
+  projectId?: string
+  projectName?: string
+}
+
+/** A project whose real filesystem root is known (from a transcript `cwd`), never a decoded guess. */
+export interface ProjectRootRef {
+  id: string
+  name: string
+  path: string
+}
+
+/** One settings file that exists on disk, with the scope it was read as. */
+export interface SettingsLayer {
+  scope: ConfigScope
+  path: string
+  settings: RawSettings
+  project?: ProjectRootRef
 }
 
 export interface HookEventGroup {
@@ -144,4 +172,5 @@ export interface RawSettings {
   marketplaces?: MarketplaceSource[]
   profile?: ClaudeProfile
   allowedChannelPlugins?: string[]
+  plansDirectory?: string
 }
