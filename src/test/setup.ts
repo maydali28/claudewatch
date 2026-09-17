@@ -13,11 +13,18 @@
  * from it, and again before each test. Tests that need it set it themselves,
  * inside the test, which still works: this only clears what the environment
  * brought in.
+ *
+ * Except for `pnpm verify:accounting` (VERIFY_ACCOUNTING=1): that run reads
+ * real history on purpose, and the variable is how a contributor chooses which
+ * history. See `shouldClearClaudeConfigDir`.
  */
 import { beforeEach } from 'vitest'
+import { shouldClearClaudeConfigDir } from './claude-config-dir'
 
-delete process.env.CLAUDE_CONFIG_DIR
-
-beforeEach(() => {
+if (shouldClearClaudeConfigDir(process.env)) {
   delete process.env.CLAUDE_CONFIG_DIR
-})
+
+  beforeEach(() => {
+    delete process.env.CLAUDE_CONFIG_DIR
+  })
+}

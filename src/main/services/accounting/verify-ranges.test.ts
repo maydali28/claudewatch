@@ -94,7 +94,10 @@ describe.skipIf(!ENABLED)('date-range analytics against real history', () => {
   // one. Hooks of a skipped suite never run.
   let root: string
   beforeAll(() => {
-    root = freezeHistory(getProjectsDirPath())
+    const source = getProjectsDirPath()
+    // Say which history is being verified: CLAUDE_CONFIG_DIR relocates it.
+    console.log(`\n  Verifying history in ${source}`)
+    root = freezeHistory(source)
   })
 
   it('30d and 90d totals match the responses that fall in those windows', async () => {

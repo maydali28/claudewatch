@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeAll, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -154,6 +154,11 @@ function rawBillableResponseIds(filePath: string): Set<string> {
 
 describe.skipIf(!ENABLED)('ledger against real ~/.claude history', () => {
   const root = getProjectsDirPath()
+
+  // Say which history is being verified: CLAUDE_CONFIG_DIR relocates it.
+  beforeAll(() => {
+    console.log(`\n  Verifying history in ${root}`)
+  })
 
   it('ingests the whole history and reports its shape', async () => {
     const files = transcripts(root)
