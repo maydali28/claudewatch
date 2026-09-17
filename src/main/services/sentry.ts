@@ -4,6 +4,7 @@ import * as os from 'os'
 import * as Sentry from '@sentry/electron/main'
 import { createLogger } from '@main/lib/logger'
 import { AppConfig } from '@main/lib/app-config'
+import { scrubDeep, scrubEvent, scrubText } from './sentry-scrub'
 
 const log = createLogger('Sentry')
 
@@ -11,6 +12,35 @@ const DSN = AppConfig.sentryDsn || undefined
 
 let _initialised = false
 let _enabled = false
+/**
+ * Machine-identifying names collected once at init — the OS account name and
+ * the home-directory basename (these are usually the same string, but not
+ * always: a renamed account keeps its original home-directory name on
+ * macOS/Linux). Passed to every scrub call in addition to the generic path
+ * patterns, since those patterns alone can't fully redact a name that
+ * contains punctuation Claude Code's own project-folder encoding turns into
+ * a '-' — see the comment on `knownNamePatterns` in sentry-scrub.ts.
+ */
+let _knownNames: string[] = []
+
+function _computeKnownNames(): string[] {
+  const names = new Set<string>()
+  try {
+    // os.userInfo() can throw (e.g. no matching entry in the system's user
+    // database, seen in some sandboxed/CI environments) — don't let that
+    // stop Sentry from initialising.
+    const { username } = os.userInfo()
+    if (username) names.add(username)
+  } catch {
+    // fall through — we still have the home-directory basename below
+  }
+  try {
+    names.add(path.basename(os.homedir()))
+  } catch {
+    // defensive: os.homedir() failing shouldn't crash init either
+  }
+  return [...names]
+}
 
 /**
  * Read sentryEnabled from the preferences JSON file without electron-store.
@@ -35,29 +65,40 @@ function _readSentryEnabledSync(): boolean {
 function _doInit(): void {
   if (_initialised || !DSN) return
 
+  _knownNames = _computeKnownNames()
+
   Sentry.init({
     dsn: DSN,
     // Crash reports + user feedback only — no perf traces, no session replay.
     tracesSampleRate: 0,
+    // No native minidumps (memory dumps) — JavaScript exceptions only.
+    integrations: (defaults) => defaults.filter((i) => i.name !== 'SentryMinidump'),
     beforeSend(event) {
       if (!_enabled) return null // gate: drop event when user has opted out
-      // Strip home-directory paths so filenames don't leak usernames.
-      if (event.exception?.values) {
-        for (const ex of event.exception.values) {
-          if (ex.value) {
-            ex.value = ex.value.replace(/\/Users\/[^/]+/g, '/Users/[user]')
-          }
-          if (ex.stacktrace?.frames) {
-            for (const frame of ex.stacktrace.frames) {
-              if (frame.filename) {
-                frame.filename = frame.filename.replace(/\/Users\/[^/]+/g, '/Users/[user]')
-              }
-            }
-          }
-        }
-      }
-      return event
+      // Strip home-directory paths (macOS, Linux and Windows) so filenames
+      // and messages don't leak usernames.
+      return scrubEvent(event, _knownNames)
     },
+    beforeBreadcrumb: (breadcrumb) => scrubDeep(breadcrumb, _knownNames),
+  })
+
+  // @sentry/core's captureFeedback only runs the client through `beforeSend`
+  // for events with `event.type === undefined` — a feedback event has
+  // `type: 'feedback'`, so it bypasses `beforeSend` (and its scrubEvent
+  // call above) entirely. `beforeSendFeedback` is the SDK's dedicated
+  // mutate-in-place hook for this event type: the callback's return value
+  // is ignored, so scrubbing here means editing the object we're handed
+  // rather than returning a new one — the one intentional exception to
+  // "never mutate" in this module. Name and email are user-typed and sent
+  // as typed, so only message/contexts/extra/tags are scrubbed.
+  Sentry.getClient()?.on('beforeSendFeedback', (feedback) => {
+    const ctx = feedback.contexts.feedback
+    const { name, contact_email } = ctx
+    feedback.contexts = scrubDeep(feedback.contexts, _knownNames)
+    if (feedback.extra) feedback.extra = scrubDeep(feedback.extra, _knownNames)
+    if (feedback.tags) feedback.tags = scrubDeep(feedback.tags, _knownNames)
+    feedback.contexts.feedback.name = name
+    feedback.contexts.feedback.contact_email = contact_email
   })
 
   _initialised = true
@@ -128,7 +169,7 @@ export function captureHandlerException(err: unknown): void {
 
 export function captureMessage(message: string): void {
   if (!_enabled || !_initialised) return
-  Sentry.captureMessage(message)
+  Sentry.captureMessage(scrubText(message, _knownNames))
 }
 
 export interface UserFeedback {
@@ -140,9 +181,11 @@ export interface UserFeedback {
 export function captureUserFeedback(feedback: UserFeedback): void {
   if (!_enabled || !_initialised) return
   Sentry.captureFeedback({
+    // Name and email are user-typed and sent as typed — only the free-text
+    // message can contain a stray path, so only it is scrubbed.
     name: feedback.name,
     email: feedback.email,
-    message: feedback.message,
+    message: scrubText(feedback.message, _knownNames),
   })
   log.info('User feedback submitted to Sentry')
 }
