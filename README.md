@@ -29,7 +29,7 @@
 
 ---
 
-You use Claude Code every day. But do you know which sessions blew your budget? Which model is eating most of your spend? Whether your prompt cache is actually saving money? ClaudeWatch answers all of that — from your menu bar, in real time, with no accounts, no cloud sync, and no data leaving your machine.
+You use Claude Code every day. But do you know which sessions blew your budget? Which model is eating most of your spend? Whether your prompt cache is actually saving money? ClaudeWatch answers all of that — from your menu bar, in real time, with no accounts and no cloud sync. Session analysis runs on your machine; the only network traffic is the update check and, if you opt in, crash reports.
 
 ## Screenshots
 
@@ -55,7 +55,7 @@ You use Claude Code every day. But do you know which sessions blew your budget? 
 
 <p align="center">
   <img src="screenshots/pricing.png" alt="Pricing Engine" width="700" />
-  <br /><em>Pricing Engine — Anthropic API and Vertex AI cost tables</em>
+  <br /><em>Pricing — Anthropic API list rates and per-model overrides</em>
 </p>
 
 ## Table of Contents
@@ -182,9 +182,9 @@ Download the `.deb` (Debian/Ubuntu) or `.rpm` (Fedora/RHEL) from the [latest rel
 
 ClaudeWatch lives in your menu bar — always one click away, never in your way. Click the icon and you get an instant snapshot of your Claude Code activity without switching apps or opening a terminal:
 
-- **Today's cost, tokens, sessions, and projects** — four numbers that update the moment a session file changes
+- **Today's fresh tokens, sessions, and projects** — the numbers update the moment a session file changes
 - **Live active session card** — when Claude Code is working right now, you see the project, model, and live token count with a pulsing green indicator
-- **Recent sessions** — the last few sessions across all projects with relative timestamps and cost, clickable to jump directly to the full transcript
+- **Recent sessions** — the last few sessions across all projects with relative timestamps, clickable to jump directly to the full transcript
 - **Quick actions** — open the dashboard, check for updates, or quit
 
 ### Session Explorer
@@ -194,14 +194,13 @@ Every conversation Claude Code has ever had, fully accessible and searchable.
 - **Real-time updates** — sessions appear the moment Claude Code writes a new file; no refresh needed
 - **Full transcript view** — browse the complete conversation including user messages, assistant responses, thinking blocks, tool calls, file reads, and bash output
 - **In-session search** — press `Cmd+F` to find anything inside the open session; collapsed blocks auto-expand on match
-- **Global search** — full-text search across every session, every project
 - **Session detail panel** — tokens, cost, compaction count, subagent usage, thinking effort distribution, and error flags all in one place
-- **Custom tags** — label sessions by feature, client, or sprint; tags persist and are filterable
-- **Export** — save any session as **Markdown** or **JSON** with full metadata
+
+**How far back does history go?** Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default), so "All" covers roughly the last month unless you raise that setting.
 
 ### Analytics Dashboard
 
-Six purpose-built analytics tabs, each answering a different question about how you use Claude Code. Every tab shares the same date range picker (Today, 7d, 30d, 90d, All, or custom) and project filter so comparisons are always consistent.
+Six purpose-built analytics tabs, each answering a different question about how you use Claude Code. Every tab shares the same date range picker (Today, 7d, 30d, All, or custom) and project filter so comparisons are always consistent.
 
 **Overview** — The big picture. KPI cards for sessions, messages, tokens, cache hit rate, and cost. A daily token usage chart, project cost breakdown, and a sessions table sortable by activity, tokens, or cost.
 
@@ -223,6 +222,8 @@ All your Claude Code hook events in one place — no more digging through config
 
 Every custom slash command you have defined, rendered as markdown exactly as Claude Code sees it. Browse, search, and review your command library without leaving the app.
 
+**Configuration scopes.** ClaudeWatch reads user (`~/.claude`) and project (`<repo>/.claude`) scopes, including `settings.local.json`. Plugin and managed scopes are on the roadmap.
+
 ### Skills
 
 All installed skills — global and per-project — with their full definitions and metadata. ClaudeWatch validates each skill inline and surfaces issues directly next to the skill name: missing descriptions, naming convention violations, reserved words, and body length limits. A Preview / Raw toggle lets you read the skill as rendered markdown or inspect the raw source.
@@ -242,21 +243,18 @@ All CLAUDE.md and memory files that Claude Code uses for persistent context — 
 
 ### Pricing Engine
 
-Cost is estimated from the raw token counters stored in each JSONL session file. Three pricing tables are built in:
+Cost is estimated from the raw token counters stored in each JSONL session file, at Anthropic API list rates (input, output, cache read, and 5-minute / 1-hour cache writes). Per-model overrides are available in Settings → Pricing.
 
-- **Anthropic API (direct)** — standard published rates including cache creation charges
-- **Vertex AI (Global)** — same input/output rates, cache creation is free
-- **Vertex AI (Regional)** — 10% surcharge over global rates on input, output, and cache read
+The model ID is mapped to a pricing family with version-aware handling; unrecognised models are reported as unpriced rather than guessed.
 
-The model ID (e.g. `claude-opus-4-6-20250313`) is mapped to a pricing family, with version-aware handling because Opus 4.5+ and Haiku 4.5+ have different rates from their predecessors. Switching pricing provider in settings recalculates all cost estimates across the app immediately.
-
-These are estimates based on published pricing, not actual billed amounts.
+**These are estimates, not bills.** They are the API-equivalent value of your usage. On Pro, Max or Team plans nothing is charged per token, and the figure is not your remaining plan allowance. Fast mode, regional inference and web search / fetch requests are not priced; the app says how many responses used them.
 
 ### Auto-Update
 
 - macOS: DMG download with signature verification, or `brew upgrade --cask claudewatch`
+  - If macOS asks for a password when installing an update, the app bundle is not writable by your user; run `sudo chown -R "$(id -un)" /Applications/ClaudeWatch.app` once.
 - Windows: Squirrel auto-update applies silently
-- Linux: DEB / RPM manual download from releases
+- Linux: `sudo apt upgrade` via the signed APT repository, or manual `.deb` / `.rpm` download
 
 ---
 
@@ -283,7 +281,7 @@ Open `.env.local` and fill in your values. The file is gitignored — never comm
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `MAIN_VITE_SENTRY_DSN` | No | Sentry DSN for crash reports and user feedback. Leave empty to disable Sentry. Get it from your Sentry project under **Settings → Client Keys (DSN)**. |
-| `MAIN_VITE_RELEASE_SERVER_URL` | No | Base URL for the auto-updater release feed (Hazel or generic provider). Leave empty to disable update checks. |
+| `MAIN_VITE_RELEASE_SERVER_URL` | No | Base URL for the Hazel release feed used for Linux update checks. Leave empty to disable Linux update checks; macOS and Windows check via `MAIN_VITE_GITHUB_RELEASES_URL` instead. |
 | `MAIN_VITE_GITHUB_RELEASES_URL` | No | GitHub releases base URL for fetching and verifying release manifests. |
 | `MAIN_VITE_BREW_CASK_NAME` | No | Homebrew cask name used in `brew upgrade --cask <name>` on macOS. |
 | `VITE_WEBSITE_URL` | No | Project website URL shown in About panels. |
@@ -390,11 +388,13 @@ claudewatch/
 │   │   │   ├── file-watcher.ts        # chokidar wrapper
 │   │   │   ├── project-scanner.ts     # Initial directory scan
 │   │   │   ├── config-service.ts      # Config file readers
+│   │   │   ├── plans-service.ts       # Plan file discovery and parsing
 │   │   │   ├── secret-scanner.ts      # Credential detection
 │   │   │   ├── metadata-cache.ts      # Session metadata cache
 │   │   │   ├── scan-cache.ts          # Project scan cache
 │   │   │   ├── update-service.ts      # GitHub release fetcher
 │   │   │   ├── export-service.ts      # Markdown / JSON export
+│   │   │   ├── sentry-scrub.ts        # Strips PII from Sentry events before send
 │   │   │   └── sentry.ts              # Sentry init, enable/disable, capture helpers
 │   │   ├── ipc/                 # IPC request handlers (domain-split)
 │   │   ├── lib/                 # logger, p-limit, safe-path, app-config
@@ -446,16 +446,16 @@ claudewatch/
 
 | Layer | Technology |
 |-------|-----------|
-| Desktop shell | Electron 32 |
-| Build tooling | electron-vite 2, electron-forge 7 |
-| UI | React 19, TypeScript 5.6, TailwindCSS 4 |
+| Desktop shell | Electron 43 |
+| Build tooling | electron-vite 5, electron-forge 7 |
+| UI | React 19, TypeScript 6, TailwindCSS 4 |
 | Components | Radix UI primitives |
-| Charts | Recharts 2 |
+| Charts | Recharts 3 |
 | State | Zustand 5, TanStack React Query 5 |
-| Persistence | electron-store 8 |
-| File watching | chokidar 4 |
+| Persistence | electron-store 11 |
+| File watching | chokidar 5 |
 | Validation | Zod 4 |
-| Testing | Vitest 2, Testing Library |
+| Testing | Vitest 4, Testing Library |
 | Package manager | pnpm 10 |
 
 ---
@@ -477,11 +477,12 @@ pnpm format:check           # Prettier check only
 pnpm depcruise              # Dependency-cruiser check
 pnpm depcruise:graph        # Export dependency graph as SVG
 pnpm size-check             # Bundle size guard
+pnpm verify:accounting      # Real-history accounting reconciliation (opt-in, reads ~/.claude)
+pnpm smoke:preferences      # Preferences smoke test
 pnpm package                # Build + package (out/)
 pnpm make                   # Build + forge make (out/make/)
 pnpm publish                # Build + publish to GitHub releases
 pnpm changelog              # Generate changelog since last tag
-pnpm release                # Orchestrated release flow
 ```
 
 ---
@@ -506,9 +507,9 @@ Handlers live in `src/main/ipc/` and are registered at startup. The preload scri
 | Lint | `run`, `get-summary` |
 | Settings | `get`, `set` |
 | Plans | `list`, `get`, `get-projects` |
-| Updates | `check`, `download`, `install`, `brew-upgrade` |
-| Tray | `open-dashboard`, `show-about`, `show-update`, `show-onboarding` |
-| App | `quit`, `get-version` |
+| Updates | `check`, `download`, `install`, `resize-window` |
+| Tray | `get-snapshot`, `open-dashboard`, `show-about`, `show-update`, `show-onboarding` |
+| App | `quit`, `relaunch`, `get-version`, `get-paths` |
 
 **Main → Renderer (push events)**
 
@@ -516,14 +517,15 @@ Handlers live in `src/main/ipc/` and are registered at startup. The preload scri
 |-------|--------------|
 | `push:session-updated` | An existing session file changed |
 | `push:session-created` | A new session file was detected |
+| `push:session-deleted` | A session transcript was deleted from disk |
 | `push:config-changed` | A config file was modified |
-| `push:secrets-detected` | Secrets found in a session tail scan |
 | `push:update-available` | A newer release was found |
 | `push:update-service-error` | The update service surfaced an error |
 | `push:today-stats` | Today's aggregated stats changed |
 | `push:navigate-session` | Request to navigate to a specific session |
 | `push:show-update` | Open the update window |
 | `push:show-onboarding` | Open the onboarding window |
+| `push:preferences-changed` | Preferences were saved, for every renderer surface to apply |
 | `push:main-error` | Unhandled main-process error |
 
 ---
@@ -583,16 +585,15 @@ ClaudeWatch reads files from `~/.claude` on your local machine. Here is a comple
 
 | What | Where it goes | When |
 |------|--------------|------|
-| Update check | `MAIN_VITE_RELEASE_SERVER_URL` server (Hazel) | On launch and periodically — version string and platform only, no identifiers |
+| Update check | GitHub releases feed via electron-updater (macOS, Windows), or the `MAIN_VITE_RELEASE_SERVER_URL` / Hazel server (Linux) | On launch and periodically — version string and platform only, no identifiers |
 | Crash reports | Sentry | Only if you opt in under **Settings → Privacy** — stack traces only, see below |
 | User feedback | Sentry | Only if you opt in and click **Send feedback** |
 | Everything else | **Nowhere** | All processing is local |
 
 - **No session content, prompts, or responses are ever sent anywhere.**
-- **No file paths, project names, or usernames leave your machine.**
-- **Secret scanning runs entirely locally** — detected secrets are stored only in your local preferences file as masked fingerprints.
+- **Crash reports may contain file paths from stack traces.** Your home folder is replaced by `[user]` on macOS, Windows and Linux, including inside Claude's encoded project folder names, and your local account name is redacted.
 - The update check sends only your current ClaudeWatch version and platform (`darwin_arm64`, etc.).
-- **Crash reporting is opt-in and off by default.** When enabled, Sentry receives only stack traces and error messages. Home-directory paths are stripped before sending (`/Users/yourname/` → `/Users/[user]/`). No session data, API keys, or file contents are ever included.
+- **Crash reporting is opt-in and off by default.** Turning it on takes effect after you restart the app; turning it off applies immediately. When enabled, Sentry receives the error message and stack trace only — no native crash dumps are recorded or sent, no session data, no API keys. Feedback you send includes the name, email, and message you type.
 - There is no background analytics or telemetry of any kind.
 
 ---
