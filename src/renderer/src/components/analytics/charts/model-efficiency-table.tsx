@@ -34,7 +34,7 @@ export function ModelEfficiencyTable({ data }: Props): React.JSX.Element {
     { key: 'turnCount', label: 'Turns' },
     { key: 'totalOutputTokens', label: 'Output Tokens' },
     { key: 'avgOutputPerTurn', label: 'Avg/Turn' },
-    { key: 'costPerTurn', label: 'Cost/Turn' },
+    { key: 'costPerTurn', label: 'Est. cost/turn' },
     { key: 'percentOfTotalCost', label: '% Cost' },
   ]
 

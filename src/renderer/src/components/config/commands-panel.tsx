@@ -29,6 +29,9 @@ function CommandDetail({ cmd }: { cmd: CommandEntry }): React.JSX.Element {
           <p className="text-[10px] text-muted-foreground/50 mt-1">
             {(cmd.sizeBytes / 1024).toFixed(1)} KB
           </p>
+          <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate" title={cmd.filePath}>
+            {cmd.filePath}
+          </p>
         </div>
         <button
           onClick={handleCopy}

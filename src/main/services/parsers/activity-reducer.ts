@@ -1,6 +1,6 @@
 import type { RawRecord } from '@shared/types/session'
 import { toDayKeyOrUndated, UNDATED_DAY } from '@shared/utils/date-ranges'
-import { isToolResultCarrierUser, isSyntheticAssistant } from './parser-helpers'
+import { classifyUserRecord, isSyntheticAssistant } from './parser-helpers'
 import { assistantResponseId } from './response-observability'
 
 /**
@@ -112,7 +112,11 @@ export function createActivityAccumulator(): ActivityAccumulator {
       const day = toDayKeyOrUndated(raw.timestamp)
 
       if (raw.type === 'user') {
-        if (isToolResultCarrierUser(raw)) return
+        // Only a prompt a person wrote is a user message. Task notifications,
+        // sub-agent hand-backs, injected context, local commands and the Esc
+        // marker are written by Claude Code under `type: 'user'` too; see
+        // `classifyUserRecord`.
+        if (classifyUserRecord(raw) !== 'prompt') return
         userMessages++
         bump(day, 'user')
         // No `responseDay`/`moveBump` repair here, unlike the assistant branch

@@ -23,11 +23,15 @@ export class ReparseScheduler {
   /**
    * Raw file paths accumulated for a parent since its last run started. The
    * parse itself is coalesced onto the parent — one job covers the parent and
-   * every child regardless of which one changed — but a secret scan is not:
-   * it reads a delta at a per-file byte offset, so scanning only the parent
-   * would silently stop scanning subagent transcripts entirely. Cleared the
-   * moment a parent's job starts consuming it (see `execute`), and built back
-   * up from nothing for whatever triggers the trailing re-run.
+   * every child regardless of which one changed — so nothing reads this set
+   * today: the per-file secret scan that used it was removed for 1.5.x.
+   *
+   * It is kept for that scan's return with a visible alert and a toggle
+   * (roadmap #4). A secret scan cannot be coalesced the way the parse is: it
+   * reads a delta at a per-file byte offset, so scanning only the parent would
+   * silently skip every subagent transcript. Cleared the moment a parent's job
+   * starts consuming it (see `execute`), and built back up from nothing for
+   * whatever triggers the trailing re-run.
    */
   private contributors = new Map<string, Set<string>>()
   private stopped = false

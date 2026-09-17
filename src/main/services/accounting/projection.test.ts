@@ -610,3 +610,71 @@ describe('projectUsage — provenance counts through the full record pipeline', 
     expect(p.combined.reducedConfidenceResponses).toBe(2)
   })
 })
+
+/**
+ * Task 17: pricing modifiers and server-tool requests are counted, never
+ * priced. The projection must report both without any token or cost figure
+ * moving — the same entries with the counts stripped must project to the
+ * same totals.
+ */
+describe('projectUsage — pricing modifiers and server tool requests', () => {
+  it('counts pricingModifierResponses and serverToolRequests without changing any token or cost total', () => {
+    const shape = [
+      { kind: 'parent' as const, speed: 'fast', serverToolRequests: 2 },
+      { kind: 'parent' as const, inferenceGeo: 'us' },
+      { kind: 'subagent' as const, agentId: 'a1', serviceTier: 'priority', serverToolRequests: 3 },
+      // Real history's shape: no modifier, zero requests.
+      {
+        kind: 'parent' as const,
+        speed: 'standard',
+        inferenceGeo: 'not_available',
+        serviceTier: 'standard',
+        serverToolRequests: 0,
+      },
+      { kind: 'subagent' as const, agentId: 'a1', dayLocal: '2026-09-11' },
+    ]
+    const withCounts = shape.map((over, i) =>
+      entry({
+        responseId: `mod_${i}`,
+        inputTokens: 10 + i,
+        outputTokens: 20 + i,
+        cacheReadTokens: 30 + i,
+        cacheWrite5m: 4,
+        cacheWriteFlat: 4,
+        costUsd: 0.25 * (i + 1),
+        ...over,
+      })
+    )
+    const stripped = withCounts.map((e) => ({
+      ...e,
+      speed: undefined,
+      inferenceGeo: undefined,
+      serviceTier: undefined,
+      serverToolRequests: undefined,
+    }))
+
+    const p = projectUsage(withCounts)
+    const baseline = projectUsage(stripped)
+
+    expect(p.combined.pricingModifierResponses).toBe(3)
+    expect(p.combined.serverToolRequests).toBe(5)
+    expect(p.parent.pricingModifierResponses).toBe(2)
+    expect(p.parent.serverToolRequests).toBe(2)
+    const day10 = p.byDay.find((d) => d.day === '2026-09-10')!
+    expect(day10.pricingModifierResponses).toBe(3)
+    expect(day10.serverToolRequests).toBe(5)
+    expect(p.byDay.find((d) => d.day === '2026-09-11')!.pricingModifierResponses).toBe(0)
+
+    expect(baseline.combined.pricingModifierResponses).toBe(0)
+    expect(baseline.combined.serverToolRequests).toBe(0)
+    const strip = (t: typeof p.combined) => ({
+      ...t,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
+    })
+    expect(strip(p.combined)).toEqual(strip(baseline.combined))
+    expect(strip(p.parent)).toEqual(strip(baseline.parent))
+    expect(p.modelBreakdown).toEqual(baseline.modelBreakdown)
+    expect(p.byDay.map(strip)).toEqual(baseline.byDay.map(strip))
+  })
+})

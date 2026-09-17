@@ -16,6 +16,11 @@ import {
   formatTokens,
   sortSessionRows,
 } from '@shared/utils'
+import {
+  COST_ESTIMATE_LABEL,
+  COST_ESTIMATE_NOTE,
+  COST_ESTIMATE_NOTE_SHORT,
+} from '@shared/constants/copy'
 import type { SessionRowSortKey as SortKey, SessionRowSortDir as SortDir } from '@shared/utils'
 import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
@@ -119,7 +124,7 @@ function SessionsTable({ sessions }: { sessions: SessionPeriodRow[] }): React.JS
               onSort={handleSort}
             />
             <SortHeader
-              label="Cost"
+              label={COST_ESTIMATE_LABEL}
               sortKey="estimatedCost"
               active={sortKey}
               dir={sortDir}
@@ -201,6 +206,7 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
 
   const sessions = data.sessionRows
   const label = useProjectFilterLabel()
+  const provenanceNote = buildProvenanceNote(data)
 
   return (
     <div className="space-y-4">
@@ -243,11 +249,11 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
           icon={<TrendingUp className="h-4 w-4" />}
         />
         <StatCard
-          label="Total Cost"
+          label={COST_ESTIMATE_LABEL}
           value={formatCost(data.totalCost)}
           subtitle={`${formatCost(avgCostPerSession)} avg/session`}
           badge={buildCompletenessBadge(data)}
-          info={buildProvenanceNote(data)}
+          info={provenanceNote ? `${COST_ESTIMATE_NOTE}\n\n${provenanceNote}` : COST_ESTIMATE_NOTE}
           icon={<DollarSign className="h-4 w-4" />}
         />
       </div>
@@ -265,10 +271,10 @@ export function OverviewTab({ data }: Props): React.JSX.Element {
 
       {/* Two-column: projects + daily model cost */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard title="Project Costs">
+        <ChartCard title="Project Costs" description={COST_ESTIMATE_NOTE_SHORT}>
           <ProjectCostChart data={data.projectCosts} />
         </ChartCard>
-        <ChartCard title="Daily Cost by Model">
+        <ChartCard title="Daily Cost by Model" description={COST_ESTIMATE_NOTE_SHORT}>
           {/* Same treatment as `DailyUsageChart` above: this chart sorts dates
               alphabetically and plots one axis tick per day, so the
               `(undated)` sentinel would render as a stray, out-of-order tick

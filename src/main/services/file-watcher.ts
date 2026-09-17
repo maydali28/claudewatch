@@ -14,7 +14,6 @@ import {
   peekCachedSessionsForProject,
 } from '@main/ipc/sessions.handlers'
 import { invalidateCachedSummary } from './metadata-cache'
-import { scanFileDelta } from './secret-scanner'
 import { createLogger } from '@main/lib/logger'
 import { resolveSessionFileLocation, type SessionFileLocation } from './session-file-location'
 import { ReparseScheduler } from './reparse-scheduler'
@@ -26,42 +25,16 @@ import {
 
 const log = createLogger('FileWatcher')
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function buildSecretFingerprint(checkId: string, maskedValue: string): string {
-  return `${checkId}:${maskedValue}`
-}
-
-function filterNovelFindings<T extends { checkId: string; maskedValue: string }>(
-  findings: T[],
-  alertedFingerprints: Set<string>
-): T[] {
-  return findings.filter(
-    (finding) =>
-      !alertedFingerprints.has(buildSecretFingerprint(finding.checkId, finding.maskedValue))
-  )
-}
-
-function persistAlertedFingerprints(
-  existing: Set<string>,
-  novelFindings: Array<{ checkId: string; maskedValue: string }>
-): void {
-  const updated = [
-    ...existing,
-    ...novelFindings.map((f) => buildSecretFingerprint(f.checkId, f.maskedValue)),
-  ]
-  Preferences.set({ alertedSecrets: updated })
-}
-
 // ─── FileWatcher ──────────────────────────────────────────────────────────────
 
 export interface FileWatcherDeps {
   /** Fan-out to every renderer surface that displays live session data. */
   broadcast: (channel: string, payload: unknown) => void
   /**
-   * Dashboard window getter. Used only for destinations that are legitimately
-   * main-window-only (e.g. the secret-detection toast, which is a modal
-   * affordance of the dashboard and has no tray equivalent).
+   * Dashboard window getter, reserved for a future main-window-only push
+   * destination. Not currently read by FileWatcher itself — kept on the
+   * deps contract rather than threaded back through main/index.ts on and
+   * off as that need comes and goes.
    */
   getMainWindow: () => BrowserWindow | null
 }
@@ -77,15 +50,15 @@ export class FileWatcher {
    */
   private newFiles: Set<string> = new Set()
   private claudeDir: string
+  /** Derived once from `claudeDir` at construction — the one place this join happens. */
+  private projectsDir: string
   private deps: FileWatcherDeps
-  // Tracks the byte offset up to which each session file has already been scanned
-  // for secrets, so we only ever process genuinely new content.
-  private secretScanOffsets: Map<string, number> = new Map()
   constructor(claudeDir: string, deps: FileWatcherDeps) {
     this.claudeDir = claudeDir
+    this.projectsDir = path.join(claudeDir, 'projects')
     this.deps = deps
     this.scheduler = new ReparseScheduler(
-      (parentKey, contributingFiles) => this.processFileChange(parentKey, contributingFiles),
+      (parentKey) => this.processFileChange(parentKey),
       FILE_WATCHER_DEBOUNCE_MS,
       (parentKey, error) => log.error(`Failed to re-parse ${path.basename(parentKey)}:`, error)
     )
@@ -94,7 +67,7 @@ export class FileWatcher {
   start(): void {
     if (this.watcher) return
 
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const settingsFilePath = path.join(this.claudeDir, 'settings.json')
 
     // Watch the projects directory itself (not just a glob) so chokidar
@@ -104,8 +77,7 @@ export class FileWatcher {
     // awaitWriteFinish is intentionally left off the watcher and applied
     // only to settings.json (a separate watcher) — JSONL session files are
     // append-only, so partial writes are safe to read: our parser already
-    // skips lines that fail JSON.parse, and the byte-offset secret scanner
-    // only advances on successful parses. Keeping the 200ms stability
+    // skips lines that fail JSON.parse. Keeping the 200ms stability
     // threshold here was perceptible to users when streaming a fresh turn.
     this.watcher = chokidar.watch(projectsDir, {
       persistent: true,
@@ -178,16 +150,13 @@ export class FileWatcher {
    */
   private resolveParentKey(filePath: string): string {
     if (!filePath.endsWith('.jsonl')) return filePath
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const location = resolveSessionFileLocation(filePath, projectsDir)
     if (!location || !location.isSubagent) return filePath
     return path.join(projectsDir, location.projectId, `${location.sessionId}.jsonl`)
   }
 
-  private async processFileChange(
-    filePath: string,
-    contributingFiles: ReadonlySet<string>
-  ): Promise<void> {
+  private async processFileChange(filePath: string): Promise<void> {
     const isNewFile = this.newFiles.delete(filePath)
     if (filePath.endsWith('settings.json')) {
       this.deps.broadcast(CHANNELS.PUSH_CONFIG_CHANGED, { filePath })
@@ -196,24 +165,18 @@ export class FileWatcher {
 
     if (!filePath.endsWith('.jsonl')) return
 
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const location = resolveSessionFileLocation(filePath, projectsDir)
     if (!location) return
 
     // A subagent write updates the parent session; it never creates one.
-    await this.processSessionFileChange(
-      filePath,
-      location,
-      isNewFile && !location.isSubagent,
-      contributingFiles
-    )
+    await this.processSessionFileChange(filePath, location, isNewFile && !location.isSubagent)
   }
 
   private async processSessionFileChange(
     filePath: string,
     location: SessionFileLocation,
-    isNewFile: boolean,
-    contributingFiles: ReadonlySet<string>
+    isNewFile: boolean
   ): Promise<void> {
     const { projectId, sessionId } = location
 
@@ -256,16 +219,8 @@ export class FileWatcher {
       const channel = isNewFile ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
       this.deps.broadcast(channel, sessionSummary)
 
-      // The parse is coalesced onto the parent, but the scan is not: it reads
-      // a delta at a per-file byte offset, so every raw file that actually
-      // changed (the parent itself, one subagent, or several in one burst)
-      // gets its own scan. Scanning only `filePath` (the parent) here would
-      // leave subagent transcripts permanently unscanned.
-      if (!isNewFile && preferences.secretScanEnabled) {
-        for (const raw of contributingFiles) {
-          this.scanSessionFileForSecrets(raw, sessionId, projectId).catch(() => undefined)
-        }
-      }
+      // Live secret scanning was removed for 1.5.x; it returns with a visible
+      // alert and a toggle in roadmap #4.
     } catch (error) {
       log.error('Failed to re-parse session:', sessionId, error)
     }
@@ -295,7 +250,7 @@ export class FileWatcher {
    *     every session known for it must be torn down here.
    */
   private handleUnlinkDir(dirPath: string): void {
-    const projectsDir = path.join(this.claudeDir, 'projects')
+    const projectsDir = this.projectsDir
     const relative = path.relative(projectsDir, dirPath)
     if (relative === '' || relative.startsWith('..') || path.isAbsolute(relative)) return
 
@@ -315,42 +270,5 @@ export class FileWatcher {
         this.handleParentRemoved(parentPath, session.id, projectId)
       }
     }
-  }
-
-  private async scanSessionFileForSecrets(
-    filePath: string,
-    sessionId: string,
-    projectId: string
-  ): Promise<void> {
-    // Secret-detection toast is a modal affordance of the dashboard — the tray
-    // popover has no UI for it, so this one stays scoped to the main window.
-    const browserWindow = this.deps.getMainWindow()
-    if (!browserWindow) return
-
-    const fromOffset = this.secretScanOffsets.get(filePath) ?? 0
-    const { findings, newOffset } = await scanFileDelta(filePath, fromOffset)
-    this.secretScanOffsets.set(filePath, newOffset)
-
-    if (findings.length === 0) return
-
-    const preferences = Preferences.get()
-    const alertedFingerprints = new Set(preferences.alertedSecrets)
-    const novelFindings = filterNovelFindings(findings, alertedFingerprints)
-
-    if (novelFindings.length === 0) return
-
-    persistAlertedFingerprints(alertedFingerprints, novelFindings)
-
-    browserWindow.webContents.send(CHANNELS.PUSH_SECRETS_DETECTED, {
-      sessionId,
-      projectId,
-      findings: novelFindings.map((finding) => ({
-        checkId: finding.checkId,
-        severity: finding.severity,
-        patternName: finding.patternName,
-        maskedValue: finding.maskedValue,
-        lineNumber: finding.lineNumber,
-      })),
-    })
   }
 }

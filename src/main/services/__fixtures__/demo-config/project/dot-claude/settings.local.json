@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": ["Bash(pnpm test:*)", "Bash(git status)", "Read(//Users/you/Workspace/demo-app/**)"],
+    "deny": ["Read(./.env)"],
+    "ask": []
+  }
+}

@@ -17,6 +17,7 @@ import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { ERROR_SNIPPET_MAX_CHARS } from '@shared/constants/tuning'
 import { toDayKeyOrUndated, UNDATED_DAY } from '@shared/utils/date-ranges'
 import {
+  classifyUserRecord,
   getRawBlocks,
   isSyntheticAssistant,
   isToolResultCarrierUser,
@@ -267,6 +268,11 @@ export async function parseSessionFull(
 
     const usage = parseTokenUsage(raw)
 
+    // What kind of user record this is, so the transcript can tell a prompt
+    // the person wrote from a task notice or a sub-agent report.
+    const userKind = raw.type === 'user' ? classifyUserRecord(raw) : undefined
+    const originAgentId = userKind === 'agent-message' ? raw.origin?.from || undefined : undefined
+
     const record: ParsedRecord = {
       type: raw.type ?? 'system',
       uuid: raw.uuid ?? crypto.randomUUID(),
@@ -287,6 +293,8 @@ export async function parseSessionFull(
       // (the CSV export, in particular) can still recognise which records
       // share one API response without re-deriving it from raw JSONL.
       responseId,
+      userKind,
+      originAgentId,
     }
 
     const shouldExcludeFromRecords =
@@ -447,7 +455,7 @@ export async function parseSessionFull(
     }
   }
 
-  // Mirrors `metadata-parser.ts`'s `diagnostics` build in shape — same eight
+  // Mirrors `metadata-parser.ts`'s `diagnostics` build in shape — same ten
   // counts — but not for free: metadata-parser's `usage` already projects
   // parent+child entries together, so reading `usage.combined.*`/
   // `usage.conflictCount` there already IS the combined total. This parser's
@@ -474,6 +482,9 @@ export async function parseSessionFull(
       childDiagnostics.responsesWithoutCompletionSignal,
     reducedConfidenceResponses:
       usage.combined.reducedConfidenceResponses + childDiagnostics.reducedConfidenceResponses,
+    pricingModifierResponses:
+      usage.combined.pricingModifierResponses + childDiagnostics.pricingModifierResponses,
+    serverToolRequests: usage.combined.serverToolRequests + childDiagnostics.serverToolRequests,
   }
 
   let subagentInputTokens = 0

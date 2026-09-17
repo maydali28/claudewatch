@@ -12,6 +12,7 @@ import {
 import { useSettingsStore } from '@renderer/store/settings.store'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import { ANTHROPIC_PRICING, getPricingTable } from '@shared/constants/pricing'
+import { COST_ESTIMATE_NOTE } from '@shared/constants/copy'
 import type { PricingProvider, ModelFamily, ModelPricing } from '@shared/types'
 const PROVIDERS: { value: PricingProvider; label: string }[] = [
   { value: 'anthropic', label: 'Anthropic API' },
@@ -43,7 +44,8 @@ export default function PricingSettings(): React.JSX.Element {
         <div>
           <Label htmlFor="provider-select">Provider</Label>
           <p className="text-xs text-muted-foreground mb-2">
-            Select where you run Claude. This determines base token prices.
+            ClaudeWatch prices usage at Anthropic API list rates. Other providers&apos; rates are
+            not supported yet.
           </p>
           <Select
             value={prefs.pricingProvider}
@@ -60,6 +62,7 @@ export default function PricingSettings(): React.JSX.Element {
               ))}
             </SelectContent>
           </Select>
+          <p className="mt-2 text-xs text-muted-foreground">{COST_ESTIMATE_NOTE}</p>
         </div>
       </div>
 

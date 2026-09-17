@@ -47,6 +47,8 @@ function makeSummary(id: string, projectId: string, timestamp: string): SessionS
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
@@ -74,6 +76,7 @@ describe('buildBlocks — merged project blocks use the owning project, not the 
     id: 'main-dir',
     name: 'merged',
     path: '/merged',
+    pathResolved: true,
     sessions: [mainSession, worktreeSession],
     sessionCount: 2,
     localSkills: [],
@@ -103,3 +106,10 @@ describe('buildBlocks — merged project blocks use the owning project, not the 
     expect(blocks[1].colour).toBe(blocks[0].colour)
   })
 })
+
+it.todo(
+  'includes a session on a middle day of its span (recheck 2026-09-16, timeline-panel.tsx:86-90) — prerequisite for roadmap #3'
+)
+it.todo(
+  'filters and positions blocks by the local day, not the UTC date prefix (recheck 2026-09-16, timeline-panel.tsx:88-94,114-115) — prerequisite for roadmap #3'
+)

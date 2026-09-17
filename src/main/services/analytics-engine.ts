@@ -205,6 +205,8 @@ function totalsInRange(
   incompleteUsageResponses: number
   responsesWithoutCompletionSignal: number
   reducedConfidenceResponses: number
+  pricingModifierResponses: number
+  serverToolRequests: number
 } {
   let tokens = 0
   let cacheTokens = 0
@@ -214,6 +216,8 @@ function totalsInRange(
   let incompleteUsageResponses = 0
   let responsesWithoutCompletionSignal = 0
   let reducedConfidenceResponses = 0
+  let pricingModifierResponses = 0
+  let serverToolRequests = 0
   for (const s of sessions) {
     for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       tokens += d.inputTokens + d.outputTokens
@@ -224,6 +228,10 @@ function totalsInRange(
       incompleteUsageResponses += d.incompleteUsageResponses
       responsesWithoutCompletionSignal += d.responsesWithoutCompletionSignal
       reducedConfidenceResponses += d.reducedConfidenceResponses
+      // `?? 0`: a day row persisted before these two fields existed reads as
+      // "none counted", never as NaN poisoning the sum.
+      pricingModifierResponses += d.pricingModifierResponses ?? 0
+      serverToolRequests += d.serverToolRequests ?? 0
     }
   }
   return {
@@ -235,6 +243,8 @@ function totalsInRange(
     incompleteUsageResponses,
     responsesWithoutCompletionSignal,
     reducedConfidenceResponses,
+    pricingModifierResponses,
+    serverToolRequests,
   }
 }
 
@@ -462,6 +472,9 @@ function computeCacheAnalytics(
   let incompleteUsageResponses = 0
   let responsesWithoutCompletionSignal = 0
   let reducedConfidenceResponses = 0
+  // Estimate gaps, not completeness — see `CacheAnalytics.pricingModifierResponses`.
+  let pricingModifierResponses = 0
+  let serverToolRequests = 0
 
   for (const s of sessions) {
     for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
@@ -473,6 +486,10 @@ function computeCacheAnalytics(
       incompleteUsageResponses += d.incompleteUsageResponses
       responsesWithoutCompletionSignal += d.responsesWithoutCompletionSignal
       reducedConfidenceResponses += d.reducedConfidenceResponses
+      // `?? 0`: a day row persisted before these two fields existed reads as
+      // "none counted", never as NaN poisoning the sum.
+      pricingModifierResponses += d.pricingModifierResponses ?? 0
+      serverToolRequests += d.serverToolRequests ?? 0
     }
   }
 
@@ -768,6 +785,8 @@ function computeCacheAnalytics(
     incompleteUsageResponses,
     responsesWithoutCompletionSignal,
     reducedConfidenceResponses,
+    pricingModifierResponses,
+    serverToolRequests,
   }
 }
 
@@ -1344,6 +1363,8 @@ export function computeAnalytics(
   const incompleteUsageResponses = inRange.incompleteUsageResponses
   const responsesWithoutCompletionSignal = inRange.responsesWithoutCompletionSignal
   const reducedConfidenceResponses = inRange.reducedConfidenceResponses
+  const pricingModifierResponses = inRange.pricingModifierResponses
+  const serverToolRequests = inRange.serverToolRequests
 
   // Zero-fill every calendar day in a BOUNDED range — `today`/`7d`/`30d`/
   // custom — so an idle day (most visibly today, early in it) shows up as an
@@ -1485,6 +1506,8 @@ export function computeAnalytics(
     incompleteUsageResponses,
     responsesWithoutCompletionSignal,
     reducedConfidenceResponses,
+    pricingModifierResponses,
+    serverToolRequests,
     dailyUsage,
     projectCosts,
     modelUsage,

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from 'vitest'
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -53,6 +53,7 @@ import {
 } from './project-scanner'
 import type { ScannedProject } from './project-scanner'
 import { configureMetadataCacheDir } from './metadata-cache'
+import { resetClaudeDirCache } from '@main/lib/claude-paths'
 
 function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -99,6 +100,8 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},
@@ -113,6 +116,7 @@ function makeProject(id: string, lastTimestamp: string): Project {
     id,
     name: id,
     path: `/${id}`,
+    pathResolved: true,
     // getValidSortedSessionForProject already sorts each project's own
     // sessions most-recent-first, so index 0 is always the project's latest.
     sessions: [makeSummary({ lastTimestamp })],
@@ -131,6 +135,7 @@ function makeProjectAt(id: string, path: string, sessions: SessionSummary[]): Pr
     id,
     name: id,
     path,
+    pathResolved: true,
     sessions,
     sessionCount: sessions.length,
     localSkills: [],
@@ -474,8 +479,17 @@ describe('mergeProjectsByResolvedPath', () => {
  * so the redirect is real, not a stand-in for the code under test.
  */
 describe('scanProjects — the merge is actually wired into the scan', () => {
+  beforeEach(() => {
+    // These tests point `os.homedir()` at a fresh temp tree; the first
+    // `getClaudeDir()` of the file would otherwise still be cached from
+    // whatever resolved before it.
+    resetClaudeDirCache()
+  })
   afterEach(() => {
     fixtureHome.path = ''
+    // getClaudeDir() caches its first resolution; without this the second
+    // test would still scan the first test's (deleted) home.
+    resetClaudeDirCache()
   })
 
   it('collapses three on-disk worktree-style directories sharing one cwd into a single scanned project', async () => {
@@ -534,9 +548,197 @@ describe('scanProjects — the merge is actually wired into the scan', () => {
       const named = projects.filter((p) => p.name === 'one-project')
       expect(named).toHaveLength(1)
       expect(named[0].sessionCount).toBe(3)
+      expect(named[0].pathResolved).toBe(true)
     } finally {
       fs.rmSync(homeRoot, { recursive: true, force: true })
       fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
+  })
+  it('marks a project resolved from a transcript cwd as pathResolved and a decoded-only one as not', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-resolved-home-'))
+    const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-resolved-cache-'))
+
+    try {
+      fixtureHome.path = homeRoot
+      configureMetadataCacheDir(cacheDir)
+      const projectsDir = path.join(homeRoot, '.claude', 'projects')
+
+      const writeSession = (dirName: string, cwd: string | undefined): void => {
+        const projectDir = path.join(projectsDir, dirName)
+        fs.mkdirSync(projectDir, { recursive: true })
+        const records = [
+          {
+            type: 'user',
+            uuid: `u-${dirName}`,
+            ...(cwd ? { cwd } : {}),
+            timestamp: '2026-09-10T09:59:00.000Z',
+            message: { role: 'user', content: 'hi' },
+          },
+          {
+            type: 'assistant',
+            uuid: `a-${dirName}`,
+            timestamp: '2026-09-10T10:00:00.000Z',
+            message: {
+              id: `msg-${dirName}`,
+              role: 'assistant',
+              model: 'claude-opus-5',
+              content: [{ type: 'text', text: 'hello' }],
+              stop_reason: 'end_turn',
+              usage: { input_tokens: 10, output_tokens: 5 },
+            },
+          },
+        ]
+        fs.writeFileSync(
+          path.join(projectDir, 'session.jsonl'),
+          records.map((r) => JSON.stringify(r)).join('\n') + '\n'
+        )
+      }
+
+      writeSession('-fixture-with-cwd', '/fixture/with-cwd')
+      writeSession('-fixture-decoded-only', undefined)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+      const withCwd = projects.find((p) => p.id === '-fixture-with-cwd')
+      const decodedOnly = projects.find((p) => p.id === '-fixture-decoded-only')
+
+      expect(withCwd?.path).toBe('/fixture/with-cwd')
+      expect(withCwd?.pathResolved).toBe(true)
+      expect(decodedOnly).toBeDefined()
+      expect(decodedOnly?.pathResolved).toBe(false)
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    }
+  })
+
+  // `claude` run in `~` records the home directory as the project's cwd, so
+  // `<cwd>/.claude/skills` is the user skills folder: every user skill was
+  // listed again as a skill of that project. Also when the cwd reaches home
+  // through a symlink.
+  describe('a project whose root is the home directory', () => {
+    let homeRoot = ''
+    let cacheDir = ''
+
+    beforeEach(() => {
+      homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-home-skills-'))
+      cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-scanner-home-skills-cache-'))
+      fixtureHome.path = path.join(homeRoot, 'home')
+      configureMetadataCacheDir(cacheDir)
+      const skill = path.join(homeRoot, 'home', '.claude', 'skills', 'mine', 'SKILL.md')
+      fs.mkdirSync(path.dirname(skill), { recursive: true })
+      fs.writeFileSync(skill, '---\nname: mine\n---\nbody')
+    })
+    afterEach(() => {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+      fs.rmSync(cacheDir, { recursive: true, force: true })
+    })
+
+    function writeSession(dirName: string, cwd: string): void {
+      const projectDir = path.join(homeRoot, 'home', '.claude', 'projects', dirName)
+      fs.mkdirSync(projectDir, { recursive: true })
+      const records = [
+        {
+          type: 'user',
+          uuid: `u-${dirName}`,
+          cwd,
+          timestamp: '2026-09-10T09:59:00.000Z',
+          message: { role: 'user', content: 'hi' },
+        },
+      ]
+      fs.writeFileSync(
+        path.join(projectDir, 'session.jsonl'),
+        records.map((r) => JSON.stringify(r)).join('\n') + '\n'
+      )
+    }
+
+    it('does not list the user skills again as that project’s skills', async () => {
+      const home = path.join(homeRoot, 'home')
+      writeSession('-home', home)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+
+      expect(projects.find((p) => p.id === '-home')?.localSkills).toEqual([])
+    })
+
+    it('does not list them when the cwd reaches home through a symlink', async (ctx) => {
+      const linked = path.join(homeRoot, 'linked-home')
+      try {
+        fs.symlinkSync(path.join(homeRoot, 'home'), linked, 'dir')
+      } catch {
+        if (process.platform === 'win32') ctx.skip()
+        throw new Error('could not create a symlink')
+      }
+      writeSession('-linked-home', linked)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+
+      expect(projects.find((p) => p.id === '-linked-home')?.localSkills).toEqual([])
+    })
+
+    it('still lists a real project’s own skills', async () => {
+      const repo = path.join(homeRoot, 'repo')
+      const skill = path.join(repo, '.claude', 'skills', 'local', 'SKILL.md')
+      fs.mkdirSync(path.dirname(skill), { recursive: true })
+      fs.writeFileSync(skill, '---\nname: local\n---\nbody')
+      writeSession('-repo', repo)
+
+      const { projects } = await scanProjects(ANTHROPIC_PRICING)
+
+      expect(projects.find((p) => p.id === '-repo')?.localSkills.map((s) => s.id)).toEqual([
+        'local',
+      ])
+    })
+  })
+
+  /**
+   * Clean-install / empty-data guards (task-12-brief.md Step 1). A fresh
+   * profile — or `CLAUDE_CONFIG_DIR` pointed at an empty scratch directory —
+   * must render the dashboard's empty states rather than an error toast, so
+   * `scanProjects` has to resolve `{ projects: [] }` without throwing for
+   * each of these three shapes.
+   */
+  it('returns no projects, without throwing, when the Claude directory does not exist', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-home-'))
+    try {
+      fixtureHome.path = homeRoot
+      // No .claude directory created inside `homeRoot` — getClaudeDir()'s
+      // `fs.promises.access` rejects, and the catch at
+      // project-scanner.ts:48 returns `{ projects: [] }` instead of
+      // propagating the rejection.
+      await expect(scanProjects(ANTHROPIC_PRICING)).resolves.toEqual({ projects: [] })
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('returns no projects when projects/ exists but is empty', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-projects-home-'))
+    try {
+      fixtureHome.path = homeRoot
+      fs.mkdirSync(path.join(homeRoot, '.claude', 'projects'), { recursive: true })
+
+      await expect(scanProjects(ANTHROPIC_PRICING)).resolves.toEqual({ projects: [] })
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('skips a project directory that contains no .jsonl files', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'no-jsonl-home-'))
+    try {
+      fixtureHome.path = homeRoot
+      const projectDir = path.join(homeRoot, '.claude', 'projects', '-fixture-no-jsonl')
+      fs.mkdirSync(projectDir, { recursive: true })
+      // A stray non-transcript file: the directory exists and is readable,
+      // but `getValidSortedSessionForProject`'s `jsonlFiles.length === 0`
+      // guard (project-scanner.ts:353) returns `[]` sessions for it, and
+      // `scanProjects`' final `sessions.length > 0` filter (:77) then drops
+      // the whole project rather than surfacing it with zero sessions.
+      fs.writeFileSync(path.join(projectDir, 'notes.txt'), 'not a transcript')
+
+      await expect(scanProjects(ANTHROPIC_PRICING)).resolves.toEqual({ projects: [] })
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
     }
   })
 })

@@ -5,10 +5,13 @@ import { app, net } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import logPkg from 'electron-log'
 import semver from 'semver'
+import * as fs from 'fs'
+import * as path from 'path'
 const log = logPkg
 import { CHANNELS } from '@shared/ipc/channels'
-import type { UpdateInfo } from '@shared/types/project'
-import { broadcastToRenderers } from '@main/window-manager'
+import type { UpdateInfo, UpdatePhase, UpdateServiceError } from '@shared/types/project'
+import { broadcastToRenderers, createOrShowUpdateWindow } from '@main/window-manager'
+import { disarmUpdateQuit } from '@main/lib/update-quit'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 import { AppConfig } from '@main/lib/app-config'
@@ -48,6 +51,12 @@ export function parseGithubRepo(url: string): { owner: string; repo: string } | 
 let _latestInfo: UpdateInfo | null = null
 let _updateDownloaded = false
 let _autoUpdaterInitialised = false
+let _phase: UpdatePhase = 'idle'
+let _installHint: string | undefined
+
+export function getUpdatePhase(): UpdatePhase {
+  return _phase
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -178,9 +187,25 @@ export function htmlReleaseNotesToMarkdown(input: string): string {
     .trim()
 }
 
-function pushUpdateServiceError(message: string): void {
-  log.error('[UpdateService] health event:', message)
-  broadcastToRenderers(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, { message })
+function pushUpdateServiceError(error: UpdateServiceError): void {
+  log.error('[UpdateService] health event:', error)
+  broadcastToRenderers(CHANNELS.PUSH_UPDATE_SERVICE_ERROR, error)
+}
+
+function errorForPhase(err: unknown): UpdateServiceError {
+  const message = err instanceof Error ? err.message : String(err)
+  switch (_phase) {
+    case 'installing':
+      return {
+        phase: 'install',
+        message: `The update could not be installed: ${message}`,
+        hint: _installHint,
+      }
+    case 'downloading':
+      return { phase: 'download', message: `The update could not be downloaded: ${message}` }
+    default:
+      return { phase: 'check', message: `Could not check for updates: ${message}` }
+  }
 }
 
 // ─── Linux: Hazel update check ────────────────────────────────────────────────
@@ -277,9 +302,10 @@ function initAutoUpdater(): void {
     log.warn(
       '[UpdateService] MAIN_VITE_GITHUB_RELEASES_URL is missing or not a github.com URL — auto-updater disabled'
     )
-    pushUpdateServiceError(
-      'The update source is not configured for this build. Auto-updates are disabled.'
-    )
+    pushUpdateServiceError({
+      phase: 'check',
+      message: 'The update source is not configured for this build. Auto-updates are disabled.',
+    })
     return
   }
 
@@ -310,13 +336,35 @@ function initAutoUpdater(): void {
 
   autoUpdater.on('update-downloaded', () => {
     _updateDownloaded = true
+    _phase = 'downloaded'
   })
 
   autoUpdater.on('error', (err) => {
     log.error('[UpdateService] electron-updater error:', err)
-    pushUpdateServiceError(
-      'An error occurred while checking for updates. Please try again later or visit github.com/maydali28/claudewatch/releases.'
-    )
+    const report = errorForPhase(err)
+    const wasInstalling = _phase === 'installing'
+    if (wasInstalling) {
+      // A cancelled or failed install means ShipIt/Squirrel never quit the app
+      // for us — disarm the quit that `armUpdateQuit()` scheduled so the app
+      // keeps running instead of quitting a few seconds from now with nothing
+      // left to install.
+      disarmUpdateQuit()
+      // Ruling 1: a failed or cancelled install invalidates the staged update.
+      _updateDownloaded = false
+    }
+    _phase = 'idle'
+    pushUpdateServiceError(report)
+    if (wasInstalling) {
+      // A cancelled password prompt still has every window on screen: the
+      // native updater raises that panel inside `quitAndInstall`, before
+      // `before-quit-for-update` and before anything is closed. But once the
+      // handoff has begun the windows are being torn down, so a failure from
+      // there on may leave the broadcast above with no renderer to reach.
+      // Reopening the update window covers that case and is a no-op focus in
+      // the common one — see disarmUpdateQuit's onUpdateQuitDisarmed hook for
+      // the matching dashboard-window recovery.
+      createOrShowUpdateWindow(_latestInfo, undefined, report)
+    }
   })
 }
 
@@ -331,6 +379,12 @@ export function initUpdateService(): void {
 }
 
 export async function checkForUpdate(): Promise<UpdateInfo | null> {
+  // The tray popover runs a check every time it opens. If a download or an
+  // install is already under way, do not steal the phase out from under it —
+  // an 'error' event mid-check must still be attributed to that download/
+  // install, not reported as a plain check failure.
+  const trackPhase = _phase !== 'downloading' && _phase !== 'installing'
+  if (trackPhase) _phase = 'checking'
   try {
     // Linux still polls Hazel directly for the latest version — the deb/rpm
     // packages aren't served through electron-updater's generic feed.
@@ -384,16 +438,106 @@ export async function checkForUpdate(): Promise<UpdateInfo | null> {
   } catch (e) {
     log.error('[UpdateService] checkForUpdate error:', e)
     throw e
+  } finally {
+    // Only clear the phase this call set — an 'error' event handled during
+    // the check (or a download/install this check deliberately left alone)
+    // may already have moved it on.
+    if (_phase === 'checking') _phase = 'idle'
   }
 }
 
 export async function downloadUpdate(): Promise<void> {
-  await autoUpdater.downloadUpdate()
+  // A second surface (the reopened update window, or the tray popover) can
+  // still be offering "Download" while an install started elsewhere is in
+  // flight. Letting it through flipped the phase to 'downloading', which made
+  // electron-updater close the local proxy Squirrel is reading and swap the
+  // native updater underneath it; the failure that followed was then reported
+  // as a download error, so neither `disarmUpdateQuit()` nor the staged-
+  // download reset ran and the installing surface stayed on "Installing…".
+  if (_phase === 'installing') throw new Error('An install is already in progress')
+  _phase = 'downloading'
+  try {
+    await autoUpdater.downloadUpdate()
+    if (_phase === 'downloading') _phase = 'downloaded'
+  } catch (e) {
+    if (_phase === 'downloading') _phase = 'idle'
+    throw e
+  }
 }
 
-export function installUpdate(): void {
-  if (!_updateDownloaded) {
-    throw new Error('No update has been downloaded yet')
-  }
+export async function installUpdate(): Promise<void> {
+  if (_phase === 'installing') throw new Error('An install is already in progress')
+  if (!_updateDownloaded) throw new Error('No update has been downloaded yet')
+  // Claim the phase BEFORE the first await. Two near-simultaneous IPC calls
+  // (the tray popover and the update window both show "Install & Restart")
+  // otherwise both clear the guard while the first one is still awaiting the
+  // writability probe, and electron-updater is asked to hand off twice.
+  _phase = 'installing'
+  _installHint = await bundleWritabilityHint()
   autoUpdater.quitAndInstall(false, true)
+}
+
+/**
+ * Check for an update and open (or focus) the update window with the result.
+ *
+ * Shared by the tray popover's "Show Update" IPC handler and the tray menu's
+ * "Check for Updates" item, which previously sent a dead
+ * `'push:check-update-request'` channel that nothing listened for — the menu
+ * item did nothing.
+ */
+export async function showUpdateWindowAfterCheck(): Promise<void> {
+  try {
+    const info = await checkForUpdate()
+    createOrShowUpdateWindow(info ?? null)
+  } catch (e) {
+    createOrShowUpdateWindow(null, e instanceof Error ? e.message : String(e))
+  }
+}
+
+async function isWritable(target: string): Promise<boolean> {
+  try {
+    await fs.promises.access(target, fs.constants.W_OK)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * macOS only: explain, before the fact, why ShipIt is about to raise a
+ * password panel.
+ *
+ * Squirrel.Mac installs by writing the new bundle as a sibling of the current
+ * one and swapping the two, so it needs write access to the bundle *and* to
+ * the directory containing it. Checking only the bundle missed the ordinary
+ * non-admin case — a user-owned app sitting in a root-owned /Applications —
+ * where the app is perfectly writable and the prompt still appears, and where
+ * the chown advice would have changed nothing.
+ *
+ * The dependencies are injected so both branches (and the non-darwin
+ * short-circuit) are testable without touching the filesystem.
+ */
+export async function bundleWritabilityHint(
+  options: {
+    platform?: NodeJS.Platform
+    bundlePath?: string
+    canWrite?: (target: string) => Promise<boolean>
+  } = {}
+): Promise<string | undefined> {
+  const platform = options.platform ?? process.platform
+  if (platform !== 'darwin') return undefined
+  // <App>.app/Contents/MacOS/ClaudeWatch → <App>.app
+  const bundle = options.bundlePath ?? path.resolve(process.execPath, '..', '..', '..')
+  const parent = path.dirname(bundle)
+  const canWrite = options.canWrite ?? isWritable
+
+  if (!(await canWrite(bundle))) {
+    log.warn('[UpdateService] app bundle is not writable by the current user:', bundle)
+    return `macOS asks for a password because ${bundle} is not writable by your user. You can usually avoid it with: sudo chown -R "$(id -un)" "${bundle}"`
+  }
+  if (!(await canWrite(parent))) {
+    log.warn('[UpdateService] the folder holding the app is not writable:', parent)
+    return `macOS will ask for an administrator password because the folder holding the app (${parent}) is not writable by your user.`
+  }
+  return undefined
 }

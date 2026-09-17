@@ -1,10 +1,14 @@
 import React, { useState } from 'react'
-import { RefreshCw, Search, Terminal, X } from 'lucide-react'
+import { RefreshCw, Search, Terminal, X, FolderOpen } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
+import { ScopeGroup } from './scope-group'
+import { groupCommandsByScope } from './scope-groups'
 
 export default function CommandsSidebar(): React.JSX.Element {
+  const paths = useClaudePaths()
   const isLoading = useConfigStore((s) => s.isLoading)
   const commands = useConfigStore((s) => s.commands)
   const selectedCommandId = useConfigStore((s) => s.selectedCommandId)
@@ -12,11 +16,14 @@ export default function CommandsSidebar(): React.JSX.Element {
   const loadAll = useConfigStore((s) => s.loadAll)
   const [search, setSearch] = useState('')
 
+  const q = search.toLowerCase()
   const filtered = commands.filter(
     (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      (c.description ?? '').toLowerCase().includes(search.toLowerCase())
+      c.name.toLowerCase().includes(q) ||
+      (c.description ?? '').toLowerCase().includes(q) ||
+      (c.projectName ?? '').toLowerCase().includes(q)
   )
+  const groups = groupCommandsByScope(filtered)
 
   return (
     <div className="flex flex-col h-full">
@@ -63,7 +70,7 @@ export default function CommandsSidebar(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && commands.length === 0 && (
           <div className="flex flex-col gap-2 p-2">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -77,43 +84,60 @@ export default function CommandsSidebar(): React.JSX.Element {
             <Terminal className="h-6 w-6 text-muted-foreground/30 mb-2" />
             <p className="text-xs text-muted-foreground">No commands found</p>
             <p className="text-[10px] text-muted-foreground/60 mt-1">
-              Add .md files to ~/.claude/commands/
+              Add .md files to {paths.display}/commands/
             </p>
           </div>
         )}
 
-        {!isLoading && commands.length > 0 && filtered.length === 0 && search && (
+        {!isLoading && commands.length > 0 && groups.length === 0 && search && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
           </div>
         )}
 
-        {filtered.map((cmd) => (
-          <button
-            key={cmd.id}
-            onClick={() => setSelectedCommand(cmd.id)}
-            className={cn(
-              'w-full rounded-md px-2.5 py-2 text-left transition-colors',
-              selectedCommandId === cmd.id
-                ? 'bg-primary/10 ring-1 ring-primary/30'
-                : 'hover:bg-accent'
-            )}
+        {groups.map((g) => (
+          <ScopeGroup
+            key={g.key}
+            label={g.label}
+            count={g.items.length}
+            icon={
+              g.kind === 'project' ? (
+                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+              ) : undefined
+            }
           >
-            <p
-              className={cn(
-                'text-xs font-medium truncate',
-                selectedCommandId === cmd.id ? 'text-primary' : 'text-foreground'
-              )}
-            >
-              /{cmd.name}
-            </p>
-            {cmd.description && (
-              <p className="text-[10px] text-muted-foreground truncate mt-0.5">{cmd.description}</p>
-            )}
-            <p className="text-[10px] text-muted-foreground/50 mt-0.5">
-              {(cmd.sizeBytes / 1024).toFixed(1)} KB
-            </p>
-          </button>
+            {g.items.map((cmd) => (
+              <button
+                key={cmd.id}
+                onClick={() => setSelectedCommand(cmd.id)}
+                className={cn(
+                  'w-full rounded-md px-2.5 py-2 text-left transition-colors',
+                  selectedCommandId === cmd.id
+                    ? 'bg-primary/10 ring-1 ring-primary/30'
+                    : 'hover:bg-accent'
+                )}
+              >
+                <p
+                  className={cn(
+                    'text-xs font-medium truncate',
+                    selectedCommandId === cmd.id ? 'text-primary' : 'text-foreground'
+                  )}
+                >
+                  /{cmd.name}
+                </p>
+                {cmd.description && (
+                  <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                    {cmd.description}
+                  </p>
+                )}
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-[10px] text-muted-foreground/50">
+                    {(cmd.sizeBytes / 1024).toFixed(1)} KB
+                  </span>
+                </div>
+              </button>
+            ))}
+          </ScopeGroup>
         ))}
       </div>
     </div>

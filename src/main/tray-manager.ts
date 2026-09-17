@@ -5,6 +5,7 @@ import {
   getTrayPopoverWindow,
   positionPopoverUnderTray,
 } from './window-manager'
+import { showUpdateWindowAfterCheck } from './services/update-service'
 
 let tray: Tray | null = null
 
@@ -45,18 +46,22 @@ function buildTrayIcon(hasAlert = false): Electron.NativeImage {
 
 // ─── Context menu ─────────────────────────────────────────────────────────────
 
-function buildContextMenu(mainWindow: BrowserWindow): Electron.Menu {
+function buildContextMenu(getMainWindow: () => BrowserWindow | null): Electron.Menu {
   return Menu.buildFromTemplate([
     {
       label: 'Open Dashboard',
       click: () => {
-        // Read the popover through the module-level getter — the instance can
-        // be re-created at runtime, so a captured reference would go stale.
+        // Read both windows through their module-level/injected getters at
+        // click time — either instance can be destroyed and re-created at
+        // runtime (a cancelled install destroys the dashboard window, and
+        // `index.ts`'s disarm listener re-creates it — see update-quit.ts), so
+        // a reference captured when the menu was built would go stale.
         const popover = getTrayPopoverWindow()
         if (popover && !popover.isDestroyed() && popover.isVisible()) {
           popover.hide()
         }
-        if (mainWindow.isDestroyed()) return
+        const mainWindow = getMainWindow()
+        if (!mainWindow || mainWindow.isDestroyed()) return
         if (process.platform === 'darwin') {
           app.dock?.show()
         } else {
@@ -70,9 +75,7 @@ function buildContextMenu(mainWindow: BrowserWindow): Electron.Menu {
     {
       label: 'Check for Updates',
       click: () => {
-        if (!mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('push:check-update-request')
-        }
+        void showUpdateWindowAfterCheck()
       },
     },
     {
@@ -127,7 +130,7 @@ function displayIdOf(win: BrowserWindow): number {
   return screen.getDisplayNearestPoint({ x: b.x + b.width / 2, y: b.y }).id
 }
 
-export function setupTray(mainWindow: BrowserWindow): Tray {
+export function setupTray(getMainWindow: () => BrowserWindow | null): Tray {
   tray = new Tray(buildTrayIcon())
   tray.setToolTip('ClaudeWatch')
 
@@ -216,7 +219,7 @@ export function setupTray(mainWindow: BrowserWindow): Tray {
   // menu instead of (or in addition to) our popover, causing a double-popup.
   // (Linux uses setContextMenu via the platform branch further down — see
   // there for the explanation.)
-  const contextMenu = buildContextMenu(mainWindow)
+  const contextMenu = buildContextMenu(getMainWindow)
 
   tray.on('click', (_event, trayBounds) => {
     // The popover can still be destroyed by forces outside our control

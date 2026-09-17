@@ -6,6 +6,8 @@ const zero = {
   incompleteUsageResponses: 0,
   responsesWithoutCompletionSignal: 0,
   reducedConfidenceResponses: 0,
+  pricingModifierResponses: 0,
+  serverToolRequests: 0,
 }
 
 /**
@@ -23,10 +25,15 @@ const MEASURED_REAL_HISTORY = {
   incompleteUsageResponses: 0,
   responsesWithoutCompletionSignal: 8429,
   reducedConfidenceResponses: 0,
+  // Task 17 probe: every real response reports `speed: standard`,
+  // `inference_geo: not_available`, `service_tier: standard` and zero web
+  // search/fetch requests, so neither attention clause fires.
+  pricingModifierResponses: 0,
+  serverToolRequests: 0,
 }
 
-describe('buildCompletenessBadge — error-class only', () => {
-  it('returns undefined when all four counts are zero', () => {
+describe('buildCompletenessBadge — error-class and estimate-gap clauses only', () => {
+  it('returns undefined when all six counts are zero', () => {
     expect(buildCompletenessBadge(zero)).toBeUndefined()
   })
 
@@ -91,8 +98,51 @@ describe('buildCompletenessBadge — error-class only', () => {
   })
 })
 
+/**
+ * Task 17: the estimate prices every response at the list rate and never
+ * prices web search/fetch requests. Those gaps are attention-class — the
+ * number shown can differ from the real bill — so they share the badge, but
+ * always AFTER the error-class clauses and never in place of them.
+ */
+describe('buildCompletenessBadge — estimate gaps', () => {
+  it('appends the modifier and server-tool clauses after the error-class ones', () => {
+    expect(
+      buildCompletenessBadge({
+        ...zero,
+        unpricedResponses: 1,
+        incompleteUsageResponses: 2,
+        pricingModifierResponses: 3,
+        serverToolRequests: 4,
+      })
+    ).toBe(
+      'Excludes 1 unpriced response; ' +
+        '2 responses partially observed (incomplete usage); ' +
+        '3 responses used fast mode, regional inference or a non-standard service tier — not included in the estimate; ' +
+        '4 web search/fetch requests — billed per request, not included'
+    )
+  })
+
+  it('reports each gap on its own, singular and group-separated', () => {
+    expect(buildCompletenessBadge({ ...zero, pricingModifierResponses: 1 })).toBe(
+      '1 response used fast mode, regional inference or a non-standard service tier — not included in the estimate'
+    )
+    expect(buildCompletenessBadge({ ...zero, serverToolRequests: 1 })).toBe(
+      '1 web search/fetch request — billed per request, not included'
+    )
+    expect(buildCompletenessBadge({ ...zero, serverToolRequests: 12345 })).toBe(
+      '12,345 web search/fetch requests — billed per request, not included'
+    )
+  })
+
+  it('keeps them off the provenance note', () => {
+    expect(
+      buildProvenanceNote({ ...zero, pricingModifierResponses: 3, serverToolRequests: 4 })
+    ).toBeUndefined()
+  })
+})
+
 describe('buildProvenanceNote — provenance-class only', () => {
-  it('returns undefined when all four counts are zero', () => {
+  it('returns undefined when all six counts are zero', () => {
     expect(buildProvenanceNote(zero)).toBeUndefined()
   })
 
@@ -130,22 +180,26 @@ describe('buildProvenanceNote — provenance-class only', () => {
   })
 
   /**
-   * The four counts are still four distinct facts across the two surfaces —
+   * The six counts are still six distinct facts across the two surfaces —
    * nothing was collapsed into a single "data problem" summary, and no count
    * lost its own wording in the move. Every one of them is reported by
    * exactly one of the two builders.
    */
-  it('reports all four counts across the two builders, each exactly once', () => {
+  it('reports all six counts across the two builders, each exactly once', () => {
     const all = {
       unpricedResponses: 1,
       incompleteUsageResponses: 2,
       responsesWithoutCompletionSignal: 3,
       reducedConfidenceResponses: 4,
+      pricingModifierResponses: 5,
+      serverToolRequests: 6,
     }
     const combined = `${buildCompletenessBadge(all)}; ${buildProvenanceNote(all)}`
     expect(combined).toBe(
       'Excludes 1 unpriced response; ' +
         '2 responses partially observed (incomplete usage); ' +
+        '5 responses used fast mode, regional inference or a non-standard service tier — not included in the estimate; ' +
+        '6 web search/fetch requests — billed per request, not included; ' +
         '3 responses report output as the maximum observed, not a reported final count; ' +
         '4 responses identified by record uuid (identity fell back, no message.id)'
     )
