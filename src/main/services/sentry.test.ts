@@ -216,6 +216,54 @@ describe('sentry service', () => {
     })
   })
 
+  describe('setSentryEnabled', () => {
+    it('reports restartRequired: true and does not throw when Sentry.init fails (e.g. called after app ready)', async () => {
+      const { setSentryEnabled } = await import('./sentry')
+      // Mirrors @sentry/electron's real behaviour: Sentry.init() throws
+      // synchronously when called after the Electron app's 'ready' event —
+      // exactly what happens when the user flips the toggle at runtime.
+      mockInit.mockImplementationOnce(() => {
+        throw new Error(
+          "Sentry SDK should be initialized before the Electron app 'ready' event is fired"
+        )
+      })
+
+      const result = setSentryEnabled(true)
+
+      expect(result).toEqual({ restartRequired: true })
+    })
+
+    it('reports restartRequired: false when Sentry.init succeeds', async () => {
+      const { setSentryEnabled } = await import('./sentry')
+
+      const result = setSentryEnabled(true)
+
+      expect(mockInit).toHaveBeenCalledTimes(1)
+      expect(result).toEqual({ restartRequired: false })
+    })
+
+    it('reports restartRequired: false and does not re-init when already initialised', async () => {
+      mockClientWithOn()
+      const { initSentry, setSentryEnabled } = await import('./sentry')
+      initSentry(true) // already initialised
+      expect(mockInit).toHaveBeenCalledTimes(1)
+
+      const result = setSentryEnabled(true)
+
+      expect(mockInit).toHaveBeenCalledTimes(1) // _doInit no-ops once initialised
+      expect(result).toEqual({ restartRequired: false })
+      expect(mockGetClient()?.getOptions().enabled).toBe(true)
+    })
+
+    it('reports restartRequired: false for the disable path, which always applies immediately', async () => {
+      const { setSentryEnabled } = await import('./sentry')
+
+      const result = setSentryEnabled(false)
+
+      expect(result).toEqual({ restartRequired: false })
+    })
+  })
+
   describe('captureMessage', () => {
     it('scrubs home paths before forwarding to Sentry', async () => {
       const { initSentry, captureMessage } = await import('./sentry')

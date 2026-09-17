@@ -130,27 +130,49 @@ export function initSentry(enabled: boolean): void {
   _doInit()
 }
 
+export interface SetSentryEnabledResult {
+  /**
+   * True when the caller asked to enable crash reports but the SDK is still
+   * not initialised after the attempt — the renderer should tell the user a
+   * restart is needed. Always false for the disable path (that always
+   * applies immediately).
+   */
+  restartRequired: boolean
+}
+
 /** Called at runtime when the user toggles the preference. */
-export function setSentryEnabled(enabled: boolean): void {
+export function setSentryEnabled(enabled: boolean): SetSentryEnabledResult {
   _enabled = enabled
 
   if (enabled) {
-    _doInit() // idempotent — safe to call even if already initialised
+    try {
+      _doInit() // idempotent — safe to call even if already initialised
+    } catch (e) {
+      // @sentry/electron's IPC transport must be wired up before the
+      // Electron app's 'ready' event fires (it registers a custom protocol
+      // scheme). Enabling from off happens at runtime, well after ready, so
+      // Sentry.init() throws synchronously here every time — _initialised
+      // stays false. Swallow it rather than letting it bubble up as an IPC
+      // handler failure; the caller sees restartRequired instead.
+      log.warn('Sentry could not be initialised at runtime — a restart is required', e)
+    }
     // If already initialised, flip the SDK's own enabled flag back on.
     if (_initialised) {
       const client = Sentry.getClient()
       if (client) client.getOptions().enabled = true
+      log.info('Sentry enabled by user')
     }
-    log.info('Sentry enabled by user')
-  } else {
-    // Use the SDK's own enabled flag so the transport stops sending immediately,
-    // in addition to the beforeSend gate.
-    if (_initialised) {
-      const client = Sentry.getClient()
-      if (client) client.getOptions().enabled = false
-    }
-    log.info('Sentry disabled by user')
+    return { restartRequired: !_initialised }
   }
+
+  // Use the SDK's own enabled flag so the transport stops sending immediately,
+  // in addition to the beforeSend gate.
+  if (_initialised) {
+    const client = Sentry.getClient()
+    if (client) client.getOptions().enabled = false
+  }
+  log.info('Sentry disabled by user')
+  return { restartRequired: false }
 }
 
 export function captureException(err: unknown): void {
