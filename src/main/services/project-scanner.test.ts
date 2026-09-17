@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, afterEach } from 'vitest'
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
@@ -477,6 +477,12 @@ describe('mergeProjectsByResolvedPath', () => {
  * so the redirect is real, not a stand-in for the code under test.
  */
 describe('scanProjects — the merge is actually wired into the scan', () => {
+  beforeEach(() => {
+    // These tests point `os.homedir()` at a fresh temp tree; the first
+    // `getClaudeDir()` of the file would otherwise still be cached from
+    // whatever resolved before it.
+    resetClaudeDirCache()
+  })
   afterEach(() => {
     fixtureHome.path = ''
     // getClaudeDir() caches its first resolution; without this the second
