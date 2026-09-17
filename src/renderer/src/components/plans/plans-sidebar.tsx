@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { FileText, Clock, RefreshCw, Search, X, BookOpen } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
 import type { PlanSummary } from '@shared/types'
 
 interface Props {
@@ -34,6 +35,7 @@ export default function PlansSidebar({
   isLoading,
   onRefresh,
 }: Props): React.JSX.Element {
+  const paths = useClaudePaths()
   const [search, setSearch] = useState('')
   const q = search.toLowerCase()
 
@@ -102,7 +104,9 @@ export default function PlansSidebar({
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <BookOpen className="h-6 w-6 text-muted-foreground/30 mb-2" />
             <p className="text-xs text-muted-foreground">No plans found</p>
-            <p className="text-[10px] text-muted-foreground/60 mt-1 font-mono">~/.claude/plans/</p>
+            <p className="text-[10px] text-muted-foreground/60 mt-1 font-mono">
+              {paths.display}/plans/
+            </p>
           </div>
         )}
 

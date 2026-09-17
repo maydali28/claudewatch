@@ -118,6 +118,7 @@ export const api = {
     quit: () => invoke(CHANNELS.APP_QUIT),
     relaunch: () => invoke(CHANNELS.APP_RELAUNCH),
     getVersion: () => invoke(CHANNELS.APP_GET_VERSION),
+    getPaths: () => invoke(CHANNELS.APP_GET_PATHS),
   },
 
   // ─── Push event subscriptions ─────────────────────────────────────────────

@@ -3,8 +3,10 @@ import { RefreshCw, Search, Terminal, X } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
 
 export default function CommandsSidebar(): React.JSX.Element {
+  const paths = useClaudePaths()
   const isLoading = useConfigStore((s) => s.isLoading)
   const commands = useConfigStore((s) => s.commands)
   const selectedCommandId = useConfigStore((s) => s.selectedCommandId)
@@ -77,7 +79,7 @@ export default function CommandsSidebar(): React.JSX.Element {
             <Terminal className="h-6 w-6 text-muted-foreground/30 mb-2" />
             <p className="text-xs text-muted-foreground">No commands found</p>
             <p className="text-[10px] text-muted-foreground/60 mt-1">
-              Add .md files to ~/.claude/commands/
+              Add .md files to {paths.display}/commands/
             </p>
           </div>
         )}

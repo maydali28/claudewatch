@@ -8,6 +8,7 @@ import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import { cn } from '@renderer/lib/cn'
 import { ipc } from '@renderer/lib/ipc-client'
 import { useUIStore } from '@renderer/store/ui.store'
+import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
 import type { PlanSummary, PlanDetail } from '@shared/types'
 
 // React Query keys for plan data. Centralised so the refresh button can
@@ -91,6 +92,7 @@ function BodySection({ content }: { content: string }): React.JSX.Element {
 
 export default function PlansPanel(): React.JSX.Element {
   const queryClient = useQueryClient()
+  const paths = useClaudePaths()
   const plansQuery = useQuery({ queryKey: PLANS_LIST_KEY, queryFn: fetchPlansList })
   const plans = plansQuery.data ?? []
   const isLoadingList = plansQuery.isLoading
@@ -233,7 +235,7 @@ export default function PlansPanel(): React.JSX.Element {
           <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <FileText className="h-10 w-10 opacity-20" />
             <p className="text-sm">
-              No plans found in <span className="font-mono">~/.claude/plans/</span>
+              No plans found in <span className="font-mono">{paths.display}/plans/</span>
             </p>
             <p className="text-xs">
               Plans are markdown files created by Claude Code&apos;s /plan command.

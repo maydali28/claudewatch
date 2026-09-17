@@ -59,6 +59,7 @@ export const CHANNELS = {
   APP_QUIT: 'app:quit',
   APP_RELAUNCH: 'app:relaunch',
   APP_GET_VERSION: 'app:get-version',
+  APP_GET_PATHS: 'app:get-paths',
 
   // ─── Main → Renderer push events (webContents.send / ipcRenderer.on) ───────
 

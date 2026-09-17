@@ -3,11 +3,11 @@ import * as fs from 'fs/promises'
 import { createReadStream } from 'fs'
 import * as readline from 'readline'
 import * as path from 'path'
-import * as os from 'os'
 import { CHANNELS } from '@shared/ipc/channels'
 import { ok, err, toSafeError } from '@shared/ipc/contracts'
 import { captureHandlerException } from '@main/services/sentry'
 import { validate, PlansGetSchema, PlansGetProjectsSchema } from '@shared/ipc/schemas'
+import { getDefaultPlansDirPath, getProjectsDirPath } from '@main/lib/claude-paths'
 import type { PlanSummary, PlanDetail } from '@shared/types'
 
 // Scan a JSONL for a slug occurrence line-by-line and return as soon as one
@@ -34,9 +34,6 @@ async function jsonlContainsSlug(filePath: string, slug: string): Promise<boolea
   }
 }
 
-const PLANS_DIR = path.join(os.homedir(), '.claude', 'plans')
-const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects')
-
 function projectNameFromDirName(dirName: string): string {
   // Directory names are encoded paths like "-Users-foo-Workspace-my-project"
   const parts = dirName.replace(/^-/, '').split('-')
@@ -55,7 +52,7 @@ export function registerPlansHandlers(): void {
     try {
       let entries: string[]
       try {
-        entries = await fs.readdir(PLANS_DIR)
+        entries = await fs.readdir(getDefaultPlansDirPath())
       } catch {
         return ok<PlanSummary[]>([])
       }
@@ -65,7 +62,7 @@ export function registerPlansHandlers(): void {
       const summaries = await Promise.all(
         mdFiles.map(async (filename): Promise<PlanSummary | null> => {
           try {
-            const filePath = path.join(PLANS_DIR, filename)
+            const filePath = path.join(getDefaultPlansDirPath(), filename)
             const [content, stat] = await Promise.all([
               fs.readFile(filePath, 'utf-8'),
               fs.stat(filePath),
@@ -99,7 +96,7 @@ export function registerPlansHandlers(): void {
       const { slug } = validate(PlansGetProjectsSchema, raw)
       let projectDirs: string[]
       try {
-        projectDirs = await fs.readdir(PROJECTS_DIR)
+        projectDirs = await fs.readdir(getProjectsDirPath())
       } catch {
         return ok<string[]>([])
       }
@@ -108,7 +105,7 @@ export function registerPlansHandlers(): void {
 
       await Promise.all(
         projectDirs.map(async (dirName) => {
-          const dirPath = path.join(PROJECTS_DIR, dirName)
+          const dirPath = path.join(getProjectsDirPath(), dirName)
           let stat: Awaited<ReturnType<typeof fs.stat>>
           try {
             stat = await fs.stat(dirPath)
@@ -145,10 +142,10 @@ export function registerPlansHandlers(): void {
     try {
       const { filename } = validate(PlansGetSchema, raw)
       // Defence-in-depth: even though the schema rejects path separators, strip
-      // any directory component so a future schema relaxation can't escape PLANS_DIR.
+      // any directory component so a future schema relaxation can't escape the plans directory.
       const safe = path.basename(filename)
 
-      const filePath = path.join(PLANS_DIR, safe)
+      const filePath = path.join(getDefaultPlansDirPath(), safe)
       const content = await fs.readFile(filePath, 'utf-8')
       const detail: PlanDetail = {
         filename: safe,

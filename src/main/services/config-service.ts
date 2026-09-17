@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { getClaudeDir } from '@main/lib/claude-paths'
+import { getClaudeDir, getClaudeJsonPath, getMcpDebugLatestPath } from '@main/lib/claude-paths'
 import type {
   ExtendedConfig,
   HookEventGroup,
@@ -179,8 +179,7 @@ interface McpRuntimeStatus {
 }
 
 async function readMcpStatuses(): Promise<Map<string, McpRuntimeStatus>> {
-  const claudeDir = getClaudeDir()
-  const debugLatest = path.join(claudeDir, 'debug', 'latest')
+  const debugLatest = getMcpDebugLatestPath()
   const log = await readTextFile(debugLatest)
   const result = new Map<string, McpRuntimeStatus>()
   if (!log) return result
@@ -247,7 +246,7 @@ export async function readMcps(projectEncodedId?: string): Promise<McpServerEntr
   const statuses = await readMcpStatuses()
 
   // 1. Read from ~/.claude.json (primary source for global MCPs)
-  const claudeJsonPath = path.join(path.dirname(claudeDir), '.claude.json')
+  const claudeJsonPath = getClaudeJsonPath()
   const claudeJson = await readJsonFile<ClaudeJson>(claudeJsonPath)
   for (const [name, cfg] of Object.entries(claudeJson?.mcpServers ?? {})) {
     if (seen.has(name)) continue

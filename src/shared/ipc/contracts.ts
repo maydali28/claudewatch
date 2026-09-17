@@ -179,6 +179,18 @@ export interface IPCContracts {
     request: void
     response: Result<string>
   }
+  'app:get-paths': {
+    request: void
+    // Mirrors `ClaudeDirSource` from `@main/lib/claude-paths` structurally —
+    // `src/shared/` stays free of main-process imports (see
+    // .dependency-cruiser.cjs), so the union is repeated here rather than
+    // imported.
+    response: Result<{
+      claudeDir: string
+      display: string
+      source: 'env' | 'user-settings' | 'default'
+    }>
+  }
 }
 
 // Helper types for extracting request/response per channel
