@@ -78,6 +78,12 @@ export interface CommandEntry {
   description?: string
   content: string
   sizeBytes: number
+  /** Commands exist only in `user` and `project` scope — no local commands directory. */
+  scope: ConfigScope
+  /** Absolute path of the command's markdown file. */
+  filePath: string
+  projectId?: string
+  projectName?: string
 }
 
 // ─── Skills ───────────────────────────────────────────────────────────────────

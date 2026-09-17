@@ -4,6 +4,7 @@ import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
+import { hookScopeLabel } from './hook-scope-label'
 
 export default function CommandsSidebar(): React.JSX.Element {
   const paths = useClaudePaths()
@@ -112,9 +113,15 @@ export default function CommandsSidebar(): React.JSX.Element {
             {cmd.description && (
               <p className="text-[10px] text-muted-foreground truncate mt-0.5">{cmd.description}</p>
             )}
-            <p className="text-[10px] text-muted-foreground/50 mt-0.5">
-              {(cmd.sizeBytes / 1024).toFixed(1)} KB
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[10px] text-muted-foreground/50">
+                {(cmd.sizeBytes / 1024).toFixed(1)} KB
+              </span>
+              <span className="text-[10px] text-muted-foreground/50">·</span>
+              <span className="text-[10px] text-muted-foreground/50 truncate">
+                {hookScopeLabel(cmd)}
+              </span>
+            </div>
           </button>
         ))}
       </div>

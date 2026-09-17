@@ -32,6 +32,7 @@ vi.mock('@main/lib/claude-paths', async () => {
     getUserSettingsPath: () => p.join(dirs.claudeDir, 'settings.json'),
     getUserSettingsLocalPath: () => p.join(dirs.claudeDir, 'settings.local.json'),
     getMcpDebugLatestPath: () => p.join(dirs.claudeDir, 'debug', 'latest'),
+    getUserCommandsDirPath: () => p.join(dirs.claudeDir, 'commands'),
   }
 })
 
@@ -43,6 +44,7 @@ import {
   readRawSettings,
   readMcps,
   readMemoryFiles,
+  readCommands,
 } from './config-service'
 
 // The fixture keeps `.claude` spelled `dot-claude` on disk: a common global
@@ -362,5 +364,61 @@ describe('readMemoryFiles', () => {
     const unresolved = await readMemoryFiles(id)
     expect(unresolved.find((f) => f.id === 'project-claude-md')).toBeUndefined()
     expect(unresolved.find((f) => f.id === 'memory-note.md')).toBeDefined()
+  })
+})
+
+describe('readCommands', () => {
+  it('reads <root>/.claude/commands recursively with namespaced names and never ~/.claude/projects/<id>/commands', async () => {
+    copyFixture(
+      'project/dot-claude/commands/ship.md',
+      path.join(projectRoot, '.claude', 'commands', 'ship.md')
+    )
+    copyFixture(
+      'project/dot-claude/commands/git/commit.md',
+      path.join(projectRoot, '.claude', 'commands', 'git', 'commit.md')
+    )
+    const decoyPath = path.join(dirs.claudeDir, 'projects', '-tmp-demo-app', 'commands', 'decoy.md')
+    fs.mkdirSync(path.dirname(decoyPath), { recursive: true })
+    fs.writeFileSync(decoyPath, '# decoy')
+
+    const cmds = await readCommands([{ id: 'p1', name: 'demo-app', path: projectRoot }])
+    expect(cmds.map((c) => c.name).sort()).toEqual(['git:commit', 'ship'])
+    expect(cmds.every((c) => c.scope === 'project' && c.projectName === 'demo-app')).toBe(true)
+    expect(cmds.every((c) => c.projectId === 'p1')).toBe(true)
+    const ship = cmds.find((c) => c.name === 'ship')!
+    expect(ship.filePath).toBe(path.join(projectRoot, '.claude', 'commands', 'ship.md'))
+    expect(ship.id).toBe(`project:${ship.filePath}`)
+    expect(ship.description).toBe('Run the release checklist')
+  })
+
+  it('user commands come from <claudeDir>/commands with scope user', async () => {
+    const userCmdPath = path.join(dirs.claudeDir, 'commands', 'deploy.md')
+    fs.mkdirSync(path.dirname(userCmdPath), { recursive: true })
+    fs.writeFileSync(userCmdPath, '---\ndescription: Deploy the app\n---\n\nDo the deploy.')
+
+    const cmds = await readCommands([])
+    expect(cmds).toHaveLength(1)
+    expect(cmds[0]).toMatchObject({
+      name: 'deploy',
+      scope: 'user',
+      description: 'Deploy the app',
+      filePath: userCmdPath,
+      id: `user:${userCmdPath}`,
+    })
+    expect(cmds[0].projectId).toBeUndefined()
+    expect(cmds[0].projectName).toBeUndefined()
+  })
+
+  it('skips dotfiles and non-markdown files while walking the commands directory', async () => {
+    const cmdsDir = path.join(dirs.claudeDir, 'commands')
+    fs.mkdirSync(cmdsDir, { recursive: true })
+    fs.writeFileSync(path.join(cmdsDir, 'keep.md'), 'keep me')
+    fs.writeFileSync(path.join(cmdsDir, 'notes.txt'), 'ignore me')
+    fs.mkdirSync(path.join(cmdsDir, '.hidden'), { recursive: true })
+    fs.writeFileSync(path.join(cmdsDir, '.hidden', 'inside.md'), 'ignore me too')
+    fs.writeFileSync(path.join(cmdsDir, '.dotfile.md'), 'ignore me too')
+
+    const cmds = await readCommands([])
+    expect(cmds.map((c) => c.name)).toEqual(['keep'])
   })
 })

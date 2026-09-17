@@ -40,7 +40,11 @@ export function registerConfigHandlers(): void {
   ipcMain.handle(CHANNELS.CONFIG_GET_COMMANDS, async (_event, payload) => {
     try {
       const projectScope = validateProjectScopedRequest(payload)
-      const commands = await readCommands(projectScope?.projectId)
+      const projectId = projectScope?.projectId
+      const roots = await resolvedProjectRoots()
+      const commands = await readCommands(
+        projectId ? roots.filter((r) => r.id === projectId) : roots
+      )
       return ok(commands)
     } catch (e) {
       captureHandlerException(e)

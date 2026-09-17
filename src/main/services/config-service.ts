@@ -5,6 +5,7 @@ import {
   getClaudeJsonPath,
   getMcpDebugLatestPath,
   getProjectsDirPath,
+  getUserCommandsDirPath,
   getUserSettingsLocalPath,
   getUserSettingsPath,
 } from '@main/lib/claude-paths'
@@ -367,46 +368,92 @@ export async function readMcps(project?: ProjectRootRef): Promise<McpServerEntry
 
 // ─── readCommands ─────────────────────────────────────────────────────────────
 
-export async function readCommands(projectEncodedId?: string): Promise<CommandEntry[]> {
-  const claudeDir = getClaudeDir()
-  const dirs: string[] = [path.join(claudeDir, 'commands')]
+/** One `.md` file found while walking a commands directory, with its path
+ * segments relative to that directory, e.g. `git/commit.md` -> `['git', 'commit.md']`. */
+interface MarkdownFile {
+  file: string
+  rel: string[]
+}
 
-  if (projectEncodedId) {
-    dirs.push(path.join(claudeDir, 'projects', projectEncodedId, 'commands'))
+/**
+ * Recursively lists the `.md` files under `dir`, skipping dotfiles and
+ * dot-directories. A missing directory produces an empty list.
+ */
+async function walkMarkdown(dir: string, rel: string[] = []): Promise<MarkdownFile[]> {
+  let dirEntries: fs.Dirent[]
+  try {
+    dirEntries = await fs.promises.readdir(dir, { withFileTypes: true })
+  } catch {
+    return []
   }
 
+  const results: MarkdownFile[] = []
+  for (const entry of dirEntries) {
+    if (entry.name.startsWith('.')) continue
+    const entryPath = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      results.push(...(await walkMarkdown(entryPath, [...rel, entry.name])))
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      results.push({ file: entryPath, rel: [...rel, entry.name] })
+    }
+  }
+  return results
+}
+
+/**
+ * Reads every command markdown file under `dir` (recursively). The display
+ * name for a namespaced file joins its directory segments and base name with
+ * `:` (e.g. `git/commit.md` -> `git:commit`), unless the frontmatter sets an
+ * explicit `name`, which replaces that computed name entirely.
+ */
+async function readCommandsFromDir(
+  dir: string,
+  scope: 'user' | 'project',
+  project?: ProjectRootRef
+): Promise<CommandEntry[]> {
+  const files = await walkMarkdown(dir)
   const entries: CommandEntry[] = []
 
-  for (const dir of dirs) {
-    let files: string[] = []
-    try {
-      const dirEntries = await fs.promises.readdir(dir, { withFileTypes: true })
-      files = dirEntries.filter((e) => e.isFile() && e.name.endsWith('.md')).map((e) => e.name)
-    } catch {
-      continue
-    }
+  for (const { file, rel } of files) {
+    const content = await readTextFile(file)
+    if (content === null) continue
 
-    for (const file of files) {
-      const filePath = path.join(dir, file)
-      const content = await readTextFile(filePath)
-      if (content === null) continue
+    const stat = await fs.promises.stat(file).catch(() => null)
+    const sizeBytes = stat?.size ?? Buffer.byteLength(content, 'utf-8')
+    const { meta, body } = parseFrontmatter(content)
+    const baseName = rel[rel.length - 1].replace(/\.md$/, '')
+    const defaultName = [...rel.slice(0, -1), baseName].join(':')
 
-      const stat = await fs.promises.stat(filePath).catch(() => null)
-      const sizeBytes = stat?.size ?? Buffer.byteLength(content, 'utf-8')
-      const { meta, body } = parseFrontmatter(content)
-      const baseName = file.replace(/\.md$/, '')
-
-      entries.push({
-        id: `${dir}:${baseName}`,
-        name: meta['name'] ?? baseName,
-        description: meta['description'],
-        content: body.trim() || content,
-        sizeBytes,
-      })
-    }
+    entries.push({
+      id: `${scope}:${file}`,
+      name: meta['name'] ?? defaultName,
+      description: meta['description'],
+      content: body.trim() || content,
+      sizeBytes,
+      scope,
+      filePath: file,
+      projectId: project?.id,
+      projectName: project?.name,
+    })
   }
 
   return entries
+}
+
+/**
+ * User commands from `getUserCommandsDirPath()`, then each project's
+ * `<root>/.claude/commands`, recursively. Never
+ * `<claudeDir>/projects/<id>/commands` — that directory only holds
+ * transcripts and `memory/`, never commands.
+ */
+export async function readCommands(projects: ProjectRootRef[]): Promise<CommandEntry[]> {
+  const userCommands = await readCommandsFromDir(getUserCommandsDirPath(), 'user')
+  const projectCommands = await Promise.all(
+    projects.map((project) =>
+      readCommandsFromDir(path.join(project.path, '.claude', 'commands'), 'project', project)
+    )
+  )
+  return [...userCommands, ...projectCommands.flat()]
 }
 
 // ─── readSkills ───────────────────────────────────────────────────────────────
