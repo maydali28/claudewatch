@@ -235,8 +235,14 @@ export interface UserFeedback {
   message: string
 }
 
-export function captureUserFeedback(feedback: UserFeedback): void {
-  if (!_enabled || !_initialised) return
+/**
+ * Hands the feedback to Sentry. Returns false when it was not sent — crash
+ * reports are off, or they were switched on and the SDK only starts after a
+ * restart — so the caller can say so instead of reporting success for a
+ * message that went nowhere.
+ */
+export function captureUserFeedback(feedback: UserFeedback): boolean {
+  if (!_enabled || !_initialised) return false
   Sentry.captureFeedback({
     // Name and email are user-typed and sent as typed — only the free-text
     // message can contain a stray path, so only it is scrubbed.
@@ -245,4 +251,5 @@ export function captureUserFeedback(feedback: UserFeedback): void {
     message: scrubText(feedback.message, _knownNames),
   })
   log.info('User feedback submitted to Sentry')
+  return true
 }

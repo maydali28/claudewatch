@@ -313,6 +313,15 @@ describe('sentry service', () => {
       expect(options.enabled).toBe(false)
     })
 
+    it('does not hand feedback to a half-initialised client', async () => {
+      halfInitialisedClient()
+      const { setSentryEnabled, captureUserFeedback } = await import('./sentry')
+      setSentryEnabled(true)
+
+      expect(captureUserFeedback({ name: '', email: '', message: 'hi' })).toBe(false)
+      expect(mockCaptureFeedback).not.toHaveBeenCalled()
+    })
+
     it('reports restartRequired: false for the disable path, which always applies immediately', async () => {
       const { setSentryEnabled } = await import('./sentry')
 
@@ -349,7 +358,7 @@ describe('sentry service', () => {
       const { initSentry, captureUserFeedback } = await import('./sentry')
       initSentry(true)
 
-      captureUserFeedback({
+      const sent = captureUserFeedback({
         name: 'Alice /Users/not-a-path',
         email: 'alice@example.com',
         message: 'seen at /home/alice/.claude/projects/x',
@@ -360,14 +369,29 @@ describe('sentry service', () => {
         email: 'alice@example.com',
         message: 'seen at /home/[user]/.claude/projects/x',
       })
+      expect(sent).toBe(true)
     })
 
-    it('does nothing when not initialised', async () => {
+    it('does nothing, and says so, when not initialised', async () => {
       const { captureUserFeedback } = await import('./sentry')
       // initSentry() was never called in this test — _initialised stays false.
 
-      captureUserFeedback({ name: 'Alice', email: 'a@example.com', message: '/Users/a/x' })
+      const sent = captureUserFeedback({
+        name: 'Alice',
+        email: 'a@example.com',
+        message: '/Users/a/x',
+      })
 
+      expect(mockCaptureFeedback).not.toHaveBeenCalled()
+      expect(sent).toBe(false)
+    })
+
+    it('says it did not send when crash reports are off', async () => {
+      const { initSentry, setSentryEnabled, captureUserFeedback } = await import('./sentry')
+      initSentry(true)
+      setSentryEnabled(false)
+
+      expect(captureUserFeedback({ name: '', email: '', message: 'hi' })).toBe(false)
       expect(mockCaptureFeedback).not.toHaveBeenCalled()
     })
   })
