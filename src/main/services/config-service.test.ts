@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import type { RawSettings } from '@shared/types/config'
+import type { RawSettings, SettingsLayer } from '@shared/types/config'
 
 vi.mock('@main/lib/logger', () => ({
   createLogger: () => ({
@@ -143,7 +143,59 @@ describe('readSettingsLayers + parseHooks', () => {
       { scope: 'user', path: 'u', settings: { hooks: { Stop: [rule] } } },
       { scope: 'project', path: 'p', settings: { hooks: { Stop: [rule] } } },
     ])
-    expect(groups[0].rules.map((r) => r.id)).toEqual(['user:Stop-0', 'project:Stop-1'])
+    expect(groups[0].rules.map((r) => r.id)).toEqual(['user:Stop-0', 'project:Stop-0'])
+  })
+
+  it('gives two projects contributing rules for the same event distinct ids', () => {
+    const rule = { hooks: [{ command: 'x' }] }
+    const projectA: SettingsLayer = {
+      scope: 'project',
+      path: 'a/.claude/settings.json',
+      settings: { hooks: { Stop: [rule] } },
+      project: { id: 'proj-a', name: 'proj-a', path: '/a' },
+    }
+    const projectB: SettingsLayer = {
+      scope: 'project',
+      path: 'b/.claude/settings.json',
+      settings: { hooks: { Stop: [rule] } },
+      project: { id: 'proj-b', name: 'proj-b', path: '/b' },
+    }
+
+    const groups = parseHooks([projectA, projectB])
+    const ids = groups[0].rules.map((r) => r.id)
+    expect(new Set(ids).size).toBe(2)
+    expect(ids).toEqual(['project:proj-a:Stop-0', 'project:proj-b:Stop-0'])
+  })
+
+  it('keeps a project rule id stable when a user rule is added for the same event', () => {
+    const rule = { hooks: [{ command: 'x' }] }
+    const projectLayer: SettingsLayer = {
+      scope: 'project',
+      path: 'a/.claude/settings.json',
+      settings: { hooks: { Stop: [rule] } },
+      project: { id: 'proj-a', name: 'proj-a', path: '/a' },
+    }
+    const userLayer: SettingsLayer = {
+      scope: 'user',
+      path: 'u',
+      settings: { hooks: { Stop: [rule] } },
+    }
+
+    const idBefore = parseHooks([projectLayer])[0].rules[0].id
+    const idAfter = parseHooks([userLayer, projectLayer])[0].rules.find(
+      (r) => r.scope === 'project'
+    )!.id
+
+    expect(idAfter).toBe(idBefore)
+  })
+
+  it('never produces an id containing "::", the selectedHookId group/rule separator', async () => {
+    const cfg = await readExtendedConfig([demoApp()])
+    const allIds = cfg.hooks.flatMap((g) => g.rules.map((r) => r.id))
+    expect(allIds.length).toBeGreaterThan(0)
+    for (const id of allIds) {
+      expect(id).not.toContain('::')
+    }
   })
 })
 

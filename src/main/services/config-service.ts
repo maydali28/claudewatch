@@ -151,8 +151,13 @@ export function mergeSettingsLayers(layers: SettingsLayer[]): RawSettings {
 /**
  * Every hook rule from every layer, in layer order. Claude Code runs the
  * hooks of all scopes, so nothing is replaced; each rule records the scope
- * and file it came from. Ids are `${scope}:${event}-${index}` so rules from
- * two layers never collide.
+ * and file it came from. Ids are built from the scope, the project id (when
+ * the layer belongs to a project) and an index counted within that single
+ * layer's rules for that event — never across the whole event group. That
+ * keeps an id stable when another project or scope later gains a rule for
+ * the same event, and keeps two projects' rules for the same event distinct.
+ * Segments are joined so the id never contains `::` (the separator
+ * `hooks-panel.tsx` uses to split a group id from a rule id).
  */
 export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
   const byEvent = new Map<string, HookEventGroup>()
@@ -170,12 +175,17 @@ export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
         projectId: layer.project?.id,
         projectName: layer.project?.name,
       }
+      let localIndex = 0
       for (const entry of entries) {
         if (!entry || typeof entry !== 'object') continue
-        const id = `${layer.scope}:${event}-${group.rules.length}`
+        const idSegments = [layer.scope, layer.project?.id, `${event}-${localIndex}`].filter(
+          (s): s is string => s !== undefined
+        )
+        const id = idSegments.join(':')
         if ('command' in entry) {
           // Bare HookCommand — wrap in a rule with an empty matcher
           group.rules.push({ ...base, id, matcher: '', hooks: [entry as HookCommand] })
+          localIndex++
         } else if ('hooks' in entry && Array.isArray(entry.hooks)) {
           group.rules.push({
             ...base,
@@ -183,6 +193,7 @@ export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
             matcher: (entry as { matcher?: string }).matcher ?? '',
             hooks: entry.hooks as HookCommand[],
           })
+          localIndex++
         }
       }
     }

@@ -4,6 +4,7 @@ import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import type { HookEventGroup, HookRule } from '@shared/types'
+import { hookScopeLabel, hookScopeOrder } from './hook-scope-label'
 
 function hookRuleId(group: HookEventGroup, rule: HookRule): string {
   return `${group.id}::${rule.id}`
@@ -51,7 +52,7 @@ function RuleItem({
   selectedId,
   onSelect,
 }: {
-  rule: { id: string; matcher: string; commandCount: number }
+  rule: { id: string; matcher: string; commandCount: number; scopeLabel: string }
   selectedId: string | null
   onSelect: (id: string) => void
 }): React.JSX.Element {
@@ -63,13 +64,18 @@ function RuleItem({
         selectedId === rule.id ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
       )}
     >
-      <p
-        className={cn(
-          'text-xs font-medium font-mono truncate',
-          selectedId === rule.id ? 'text-primary' : 'text-foreground'
-        )}
-      >
-        {rule.matcher || '*'}
+      <p className="flex items-center gap-1.5 min-w-0">
+        <span
+          className={cn(
+            'text-xs font-medium font-mono truncate',
+            selectedId === rule.id ? 'text-primary' : 'text-foreground'
+          )}
+        >
+          {rule.matcher || '*'}
+        </span>
+        <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
+          {rule.scopeLabel}
+        </span>
       </p>
       <p className="text-[10px] text-muted-foreground mt-0.5">
         {rule.commandCount} command{rule.commandCount !== 1 ? 's' : ''}
@@ -171,17 +177,24 @@ export default function HooksSidebar(): React.JSX.Element {
 
         {filteredGroups.map((group) => (
           <CollapsibleGroup key={group.id} label={group.event} count={group.rules.length}>
-            {group.rules.map((rule) => {
-              const id = hookRuleId(group, rule)
-              return (
-                <RuleItem
-                  key={id}
-                  rule={{ id, matcher: rule.matcher, commandCount: rule.hooks.length }}
-                  selectedId={selectedHookId}
-                  onSelect={setSelectedHook}
-                />
-              )
-            })}
+            {[...group.rules]
+              .sort((a, b) => hookScopeOrder(a).localeCompare(hookScopeOrder(b)))
+              .map((rule) => {
+                const id = hookRuleId(group, rule)
+                return (
+                  <RuleItem
+                    key={id}
+                    rule={{
+                      id,
+                      matcher: rule.matcher,
+                      commandCount: rule.hooks.length,
+                      scopeLabel: hookScopeLabel(rule),
+                    }}
+                    selectedId={selectedHookId}
+                    onSelect={setSelectedHook}
+                  />
+                )
+              })}
           </CollapsibleGroup>
         ))}
       </div>

@@ -4,6 +4,7 @@ import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import type { HookEventGroup, HookRule } from '@shared/types'
+import { formatHookTimeout, hookScopeLabel } from './hook-scope-label'
 
 // ─── Hook detail ──────────────────────────────────────────────────────────────
 
@@ -17,6 +18,9 @@ function HookDetail({ group, rule }: { group: HookEventGroup; rule: HookRule }):
           <h2 className="text-sm font-semibold">{group.event}</h2>
           <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
             matcher: {rule.matcher || '*'}
+          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {hookScopeLabel(rule)} · <code className="font-mono">{rule.sourcePath}</code>
           </p>
         </div>
         <span className="text-xs text-muted-foreground shrink-0">
@@ -51,13 +55,18 @@ function HookDetail({ group, rule }: { group: HookEventGroup; rule: HookRule }):
                   {hook.timeout !== undefined && (
                     <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
                       <Clock className="h-3 w-3" />
-                      {hook.timeout}ms
+                      {formatHookTimeout(hook.timeout)}
                     </span>
                   )}
                 </div>
                 <pre className="px-3 py-2.5 text-xs font-mono text-foreground whitespace-pre-wrap break-all leading-relaxed">
                   {hook.command}
                 </pre>
+                {hook.statusMessage && (
+                  <p className="px-3 py-2 text-[10px] text-muted-foreground border-t border-border/40 bg-muted/10">
+                    {hook.statusMessage}
+                  </p>
+                )}
               </div>
             ))}
           </div>
