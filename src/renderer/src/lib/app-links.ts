@@ -6,4 +6,7 @@ export const AppLinks = {
 
   /** GitHub repository URL shown in About panels. */
   repo: import.meta.env.VITE_REPO_URL,
+
+  /** Releases page — where platforms without an in-app installer get the package. */
+  releases: `${import.meta.env.VITE_REPO_URL}/releases`,
 } as const

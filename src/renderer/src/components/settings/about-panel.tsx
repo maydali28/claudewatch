@@ -21,6 +21,7 @@ import {
   reduceUpdateState,
   retryAction,
 } from '@shared/update-state'
+import { canInstallInApp, MANUAL_UPDATE_COMMAND } from '@shared/utils/update-install-support'
 import appIcon from '@renderer/assets/claudewatch-ring.svg'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 
@@ -176,10 +177,33 @@ export default function AboutPanel(): React.JSX.Element {
                 <MarkdownRenderer content={update.info.releaseNotes} className="text-xs" />
               </div>
             )}
-            <Button size="sm" onClick={handleDownload}>
-              <Download className="h-4 w-4" />
-              Download update
-            </Button>
+            {/* Linux has no in-app installer: electron-updater is never given
+                a pending update there, so this button could only ever fail
+                with its own "Please check update first". */}
+            {canInstallInApp(ipc.platform) ? (
+              <Button size="sm" onClick={handleDownload}>
+                <Download className="h-4 w-4" />
+                Download update
+              </Button>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  Update with{' '}
+                  <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">
+                    {MANUAL_UPDATE_COMMAND}
+                  </code>
+                  , or download the new package.
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.open(AppLinks.releases, '_blank', 'noopener')}
+                >
+                  <ExternalLink className="h-4 w-4" />
+                  Open the releases page
+                </Button>
+              </div>
+            )}
           </div>
         )}
 

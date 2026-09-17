@@ -16,6 +16,16 @@ function invoke<C extends keyof IPCContracts>(
 // All methods are async and return Result<T> — never throw.
 
 export const api = {
+  /**
+   * The host platform, read here rather than fetched over IPC.
+   *
+   * The renderer needs it to decide whether an update can be installed in-app
+   * at all (see `canInstallInApp`), and a sandboxed preload already has
+   * `process.platform`. Exposing the value directly avoids an extra channel
+   * and an async hop before the update surfaces can render their actions.
+   */
+  platform: process.platform as NodeJS.Platform,
+
   // ─── Sessions ───────────────────────────────────────────────────────────────
   sessions: {
     listProjects: () => invoke(CHANNELS.SESSIONS_LIST_PROJECTS),

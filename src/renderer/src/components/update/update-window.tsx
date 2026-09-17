@@ -1,5 +1,13 @@
 import React, { useEffect, useReducer, useRef } from 'react'
-import { Download, Zap, CheckCircle, AlertCircle, Loader2, RefreshCw } from 'lucide-react'
+import {
+  Download,
+  Zap,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  RefreshCw,
+  ExternalLink,
+} from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Progress } from '@renderer/components/ui/progress'
 import { ipc } from '@renderer/lib/ipc-client'
@@ -16,6 +24,8 @@ import {
   type UpdateState,
 } from '@shared/update-state'
 import { clampUpdateWindowHeight } from '@shared/utils/update-window-size'
+import { canInstallInApp, MANUAL_UPDATE_COMMAND } from '@shared/utils/update-install-support'
+import { AppLinks } from '@renderer/lib/app-links'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import appIcon from '@renderer/assets/claudewatch-ring.svg'
 
@@ -74,11 +84,42 @@ function ErrorView({
   )
 }
 
+/**
+ * On a platform electron-updater cannot install for us (Linux), "Download"
+ * has no staged update to act on and always failed with "Please check update
+ * first". Say how the package is actually updated, and offer the releases
+ * page — `setWindowOpenHandler` turns `window.open` into a system-browser
+ * open, so this never navigates the update window.
+ */
+function ManualUpdateInstructions(): React.JSX.Element {
+  return (
+    <div className="flex flex-col gap-2">
+      <p className="text-sm text-muted-foreground">
+        Update with{' '}
+        <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs text-foreground">
+          {MANUAL_UPDATE_COMMAND}
+        </code>
+        , or download the new package.
+      </p>
+      <Button
+        variant="outline"
+        className="w-full"
+        onClick={() => window.open(AppLinks.releases, '_blank', 'noopener')}
+      >
+        <ExternalLink className="h-4 w-4" />
+        Open the releases page
+      </Button>
+    </div>
+  )
+}
+
 function UpdateAvailable({
   info,
+  canInstallHere,
   onDownload,
 }: {
   info: UpdateInfo
+  canInstallHere: boolean
   onDownload: () => void
 }): React.JSX.Element {
   return (
@@ -94,10 +135,14 @@ function UpdateAvailable({
       )}
 
       <div className="flex flex-col gap-2">
-        <Button className="w-full" onClick={onDownload}>
-          <Download className="h-4 w-4" />
-          Download &amp; Install
-        </Button>
+        {canInstallHere ? (
+          <Button className="w-full" onClick={onDownload}>
+            <Download className="h-4 w-4" />
+            Download &amp; Install
+          </Button>
+        ) : (
+          <ManualUpdateInstructions />
+        )}
         <Button
           variant="ghost"
           className="w-full text-muted-foreground"
@@ -331,7 +376,11 @@ export default function UpdateWindow(): React.JSX.Element {
         {state.phase === 'up-to-date' && <UpToDate />}
 
         {state.phase === 'available' && (
-          <UpdateAvailable info={state.info} onDownload={handleDownload} />
+          <UpdateAvailable
+            info={state.info}
+            canInstallHere={canInstallInApp(ipc.platform)}
+            onDownload={handleDownload}
+          />
         )}
 
         {state.phase === 'downloading' && (
