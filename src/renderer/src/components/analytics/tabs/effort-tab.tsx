@@ -11,6 +11,7 @@ import {
   Cell,
 } from 'recharts'
 import { formatCost } from '@shared/utils'
+import { COST_ESTIMATE_LABEL, COST_ESTIMATE_NOTE_SHORT } from '@shared/constants/copy'
 import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import { StatCard } from '@renderer/components/analytics/stat-card'
 import { ChartCard } from '@renderer/components/analytics/chart-card'
@@ -89,8 +90,8 @@ function EffortCostTable({ data }: { data: EffortAnalytics }): React.JSX.Element
             <th className="pb-1.5 text-left font-medium">Level</th>
             <th className="pb-1.5 text-right font-medium">Turns</th>
             <th className="pb-1.5 text-right font-medium">Share</th>
-            <th className="pb-1.5 text-right font-medium">Total Cost</th>
-            <th className="pb-1.5 text-right font-medium">Cost / Turn</th>
+            <th className="pb-1.5 text-right font-medium">{COST_ESTIMATE_LABEL}</th>
+            <th className="pb-1.5 text-right font-medium">Est. cost / turn</th>
           </tr>
         </thead>
         <tbody>
@@ -227,7 +228,7 @@ export function EffortTab({ data }: Props): React.JSX.Element {
           subtitle={`${(dist.high ?? 0).toLocaleString()} turns`}
         />
         <StatCard
-          label="Ultrathink Cost"
+          label="Est. ultrathink cost"
           value={formatCost(ultrathinkCost)}
           subtitle={`${totalEffortCost > 0 ? ((ultrathinkCost / totalEffortCost) * 100).toFixed(0) : 0}% of effort cost`}
         />
@@ -238,7 +239,10 @@ export function EffortTab({ data }: Props): React.JSX.Element {
         <ChartCard title="Effort Distribution" description="Turn counts by effort level">
           <EffortDonut distribution={dist} />
         </ChartCard>
-        <ChartCard title="Cost by Effort Level" description="Spend and cost-per-turn breakdown">
+        <ChartCard
+          title="Cost by Effort Level"
+          description={`Spend and cost-per-turn breakdown. ${COST_ESTIMATE_NOTE_SHORT}`}
+        >
           <EffortCostTable data={effortAnalytics} />
         </ChartCard>
       </div>

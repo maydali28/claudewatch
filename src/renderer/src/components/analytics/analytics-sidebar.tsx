@@ -4,6 +4,7 @@ import { cn } from '@renderer/lib/cn'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
 import { useSessionsStore } from '@renderer/store/sessions.store'
 import { formatCost, formatTokens } from '@shared/utils'
+import { COST_ESTIMATE_NOTE_SHORT } from '@shared/constants/copy'
 import { isProjectVisibleInRange } from './project-visibility'
 
 export default function AnalyticsSidebar(): React.JSX.Element {
@@ -108,7 +109,9 @@ export default function AnalyticsSidebar(): React.JSX.Element {
               >
                 All projects
               </span>
-              <span className="text-[10px] text-muted-foreground">{formatCost(totalCost)}</span>
+              <span className="text-[10px] text-muted-foreground" title={COST_ESTIMATE_NOTE_SHORT}>
+                {formatCost(totalCost)}
+              </span>
             </div>
             <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
               <div className="h-full w-full rounded-full bg-primary/40" />
@@ -172,7 +175,10 @@ export default function AnalyticsSidebar(): React.JSX.Element {
                 >
                   {project.name}
                 </span>
-                <span className="ml-2 shrink-0 text-[10px] text-muted-foreground">
+                <span
+                  className="ml-2 shrink-0 text-[10px] text-muted-foreground"
+                  title={COST_ESTIMATE_NOTE_SHORT}
+                >
                   {formatCost(pCost)}
                 </span>
               </div>

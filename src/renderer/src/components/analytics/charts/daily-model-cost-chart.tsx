@@ -13,6 +13,7 @@ import {
   Cell,
 } from 'recharts'
 import { formatCost } from '@shared/utils'
+import { COST_ESTIMATE_LABEL } from '@shared/constants/copy'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import type { DailyModelCost } from '@shared/types'
 import { buildDailyModelCostSeries } from './daily-model-cost-series'
@@ -68,7 +69,7 @@ export function DailyModelCostChart({ data, dateKeys }: Props): React.JSX.Elemen
           />
           <YAxis dataKey="label" type="category" tick={{ fontSize: 10 }} width={80} />
           <Tooltip
-            formatter={(v) => [formatCost(Number(v)), 'Cost']}
+            formatter={(v) => [formatCost(Number(v)), COST_ESTIMATE_LABEL]}
             contentStyle={{ fontSize: 11 }}
           />
           <Bar
