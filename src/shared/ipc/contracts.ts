@@ -120,7 +120,7 @@ export interface IPCContracts {
     response: Result<PlanSummary[]>
   }
   'plans:get': {
-    request: { filename: string }
+    request: { id: string }
     response: Result<PlanDetail>
   }
   'plans:get-projects': {

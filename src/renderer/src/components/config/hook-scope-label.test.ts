@@ -6,10 +6,6 @@ describe('hookScopeLabel', () => {
     expect(hookScopeLabel({ scope: 'user' })).toBe('user')
   })
 
-  it('labels a user-local-scope rule "user (local)"', () => {
-    expect(hookScopeLabel({ scope: 'user-local' })).toBe('user (local)')
-  })
-
   it('labels a project-scope rule "<project> · project"', () => {
     expect(hookScopeLabel({ scope: 'project', projectName: 'claudewatch' })).toBe(
       'claudewatch · project'
@@ -30,21 +26,19 @@ describe('hookScopeLabel', () => {
     expect(hookScopeLabel({ scope: 'local' })).toBe('local')
   })
 
-  it('ignores projectName for user and user-local scopes', () => {
+  it('ignores projectName for the user scope', () => {
     expect(hookScopeLabel({ scope: 'user', projectName: 'claudewatch' })).toBe('user')
-    expect(hookScopeLabel({ scope: 'user-local', projectName: 'claudewatch' })).toBe('user (local)')
   })
 })
 
 describe('hookScopeOrder', () => {
-  it('orders user before user-local before project before local', () => {
+  it('orders user before project before local', () => {
     const user = hookScopeOrder({ scope: 'user' })
-    const userLocal = hookScopeOrder({ scope: 'user-local' })
     const project = hookScopeOrder({ scope: 'project', projectName: 'a' })
     const local = hookScopeOrder({ scope: 'local', projectName: 'a' })
 
-    const ordered = [local, project, userLocal, user].sort()
-    expect(ordered).toEqual([user, userLocal, project, local])
+    const ordered = [local, project, user].sort()
+    expect(ordered).toEqual([user, project, local])
   })
 
   it('orders project-scope rules alphabetically by project name', () => {

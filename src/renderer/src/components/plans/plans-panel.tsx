@@ -9,13 +9,17 @@ import { cn } from '@renderer/lib/cn'
 import { ipc } from '@renderer/lib/ipc-client'
 import { useUIStore } from '@renderer/store/ui.store'
 import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
+import { pickSelectedPlanId } from './group-plans'
 import type { PlanSummary, PlanDetail } from '@shared/types'
 
 // React Query keys for plan data. Centralised so the refresh button can
 // invalidate everything in one call without depending on internal cache shape.
+// `PlanSummary.id` is an absolute file path — unique across directories — so
+// it is what identifies a plan for caching and fetching; the slug used to
+// look up related projects is always derived from `filename`, never `id`.
 const PLANS_LIST_KEY = ['plans', 'list'] as const
-const planDetailKey = (filename: string) => ['plans', 'detail', filename] as const
-const planProjectsKey = (filename: string) => ['plans', 'projects', filename] as const
+const planDetailKey = (id: string) => ['plans', 'detail', id] as const
+const planProjectsKey = (id: string) => ['plans', 'projects', id] as const
 
 async function fetchPlansList(): Promise<PlanSummary[]> {
   const result = await ipc.plans.list()
@@ -23,8 +27,8 @@ async function fetchPlansList(): Promise<PlanSummary[]> {
   return result.data
 }
 
-async function fetchPlanDetail(filename: string): Promise<PlanDetail> {
-  const result = await ipc.plans.get(filename)
+async function fetchPlanDetail(id: string): Promise<PlanDetail> {
+  const result = await ipc.plans.get(id)
   if (!result.ok) throw new Error(result.error)
   return result.data
 }
@@ -98,12 +102,17 @@ export default function PlansPanel(): React.JSX.Element {
   const isLoadingList = plansQuery.isLoading
   const error = plansQuery.error ? String(plansQuery.error.message ?? plansQuery.error) : null
 
-  // `userSelectedId` holds an explicit user choice; `null` means "fall back to
-  // the first plan." Deriving the effective id during render — instead of
-  // copying the default into state via an effect — keeps the source of truth
-  // in one place and removes the need for a sync effect.
+  // `userSelectedId` holds an explicit user choice; `null` (or a selection
+  // that no longer names a plan — e.g. after a refresh or a plansDirectory
+  // change removed it) falls back to the first plan in *sidebar* order via
+  // `pickSelectedPlanId`, not `plans[0]` (sorted by recency, which can point
+  // at a plan the sidebar doesn't show first). Deriving the effective id
+  // during render — instead of copying the default into state via an effect
+  // — keeps the source of truth in one place and removes the need for a
+  // sync effect.
   const [userSelectedId, setUserSelectedId] = useState<string | null>(null)
-  const selectedId = userSelectedId ?? plans[0]?.id ?? null
+  const selectedId = pickSelectedPlanId(plans, userSelectedId)
+  const selectedPlan = plans.find((p) => p.id === selectedId)
 
   const detailQuery = useQuery({
     queryKey: selectedId ? planDetailKey(selectedId) : ['plans', 'detail', null],
@@ -115,8 +124,10 @@ export default function PlansPanel(): React.JSX.Element {
 
   const projectsQuery = useQuery({
     queryKey: selectedId ? planProjectsKey(selectedId) : ['plans', 'projects', null],
-    queryFn: () => fetchPlanProjects(selectedId!),
-    enabled: !!selectedId,
+    // The slug the backend matches against transcripts comes from the
+    // filename, never from `id` (an absolute path).
+    queryFn: () => fetchPlanProjects(selectedPlan!.filename),
+    enabled: !!selectedId && !!selectedPlan,
   })
   const planProjects = projectsQuery.data ?? []
 
@@ -162,8 +173,6 @@ export default function PlansPanel(): React.JSX.Element {
     },
     [setSidebarWidth]
   )
-
-  const selectedPlan = plans.find((p) => p.id === selectedId)
 
   return (
     <div

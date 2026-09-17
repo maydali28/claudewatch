@@ -104,11 +104,6 @@ export function getUserSettingsPath(): string {
   return path.join(getClaudeDir(), 'settings.json')
 }
 
-/** Absolute path to `settings.local.json` under the effective Claude dir. */
-export function getUserSettingsLocalPath(): string {
-  return path.join(getClaudeDir(), 'settings.local.json')
-}
-
 /** Absolute path to the `plans` directory under the effective Claude dir. */
 export function getDefaultPlansDirPath(): string {
   return path.join(getClaudeDir(), 'plans')

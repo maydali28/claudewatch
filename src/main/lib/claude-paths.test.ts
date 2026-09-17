@@ -120,7 +120,6 @@ describe('claude-paths', () => {
     m.resetClaudeDirCache()
     const dir = path.join(home, 'override')
     expect(m.getUserSettingsPath()).toBe(path.join(dir, 'settings.json'))
-    expect(m.getUserSettingsLocalPath()).toBe(path.join(dir, 'settings.local.json'))
     expect(m.getDefaultPlansDirPath()).toBe(path.join(dir, 'plans'))
     expect(m.getUserCommandsDirPath()).toBe(path.join(dir, 'commands'))
     expect(m.getUserSkillsDirPath()).toBe(path.join(dir, 'skills'))

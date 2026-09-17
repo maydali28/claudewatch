@@ -30,7 +30,6 @@ vi.mock('@main/lib/claude-paths', async () => {
     getClaudeJsonPath: () => p.join(dirs.tmp, 'home', '.claude.json'),
     getProjectsDirPath: () => p.join(dirs.claudeDir, 'projects'),
     getUserSettingsPath: () => p.join(dirs.claudeDir, 'settings.json'),
-    getUserSettingsLocalPath: () => p.join(dirs.claudeDir, 'settings.local.json'),
     getMcpDebugLatestPath: () => p.join(dirs.claudeDir, 'debug', 'latest'),
     getUserCommandsDirPath: () => p.join(dirs.claudeDir, 'commands'),
   }
@@ -127,16 +126,20 @@ describe('readSettingsLayers + parseHooks', () => {
     expect(preCompact.rules[0].projectId).toBeUndefined()
   })
 
-  it('returns user and user-local layers first, and only the user layers without a project', async () => {
+  it('returns the user layer first, and only the user layer without a project', async () => {
+    // `<claudeDir>/settings.local.json` is NOT a user scope. Claude Code's
+    // scopes are managed, project-local, shared project and user; that file is
+    // just the project-local file of a project whose root is the home
+    // directory — see the home-directory suite below, which reads it exactly
+    // once, as that project's `local` layer.
     writeJson(path.join(dirs.claudeDir, 'settings.local.json'), { env: { A: '1' } })
 
     expect((await readSettingsLayers(demoApp())).map((l) => l.scope)).toEqual([
       'user',
-      'user-local',
       'project',
       'local',
     ])
-    expect((await readSettingsLayers()).map((l) => l.scope)).toEqual(['user', 'user-local'])
+    expect((await readSettingsLayers()).map((l) => l.scope)).toEqual(['user'])
   })
 
   it('gives rules from different layers ids that cannot collide', () => {
@@ -246,6 +249,37 @@ describe('mergeSettingsLayers', () => {
     ])
     expect(merged.hooks?.Stop).toEqual([{ command: 'u' }, { command: 'l' }])
     expect(merged.mcpServers).toEqual({ a: { command: 'user-a' }, b: { command: 'local-b' } })
+  })
+
+  it('ignores a permissions list that a hand-edited file made an object', () => {
+    // One project with `"permissions": {"allow": {}}` used to throw out of the
+    // spread here, and that single exception blanked the Plans view for every
+    // project and broke the lint run.
+    const broken = JSON.parse('{"permissions": {"allow": {}, "deny": "nope"}}') as RawSettings
+    const merged = mergeSettingsLayers([
+      {
+        scope: 'user',
+        path: 'u',
+        settings: { permissions: { allow: ['Bash(a)'], deny: ['Read(./.env)'] } },
+      },
+      { scope: 'project', path: 'p', settings: broken },
+    ])
+    expect(merged.permissions?.allow).toEqual(['Bash(a)'])
+    expect(merged.permissions?.deny).toEqual(['Read(./.env)'])
+  })
+
+  it('ignores env, mcpServers, permissions and hooks that are not objects', () => {
+    const broken = JSON.parse(
+      '{"env": "nope", "mcpServers": [], "permissions": "all", "hooks": 3}'
+    ) as RawSettings
+    const merged = mergeSettingsLayers([
+      { scope: 'user', path: 'u', settings: { env: { X: '1' } } },
+      { scope: 'project', path: 'p', settings: broken },
+    ])
+    expect(merged.env).toEqual({ X: '1' })
+    expect(merged.mcpServers).toBeUndefined()
+    expect(merged.permissions).toBeUndefined()
+    expect(merged.hooks).toBeUndefined()
   })
 
   it('reads the fixture local layer permissions through readRawSettings', async () => {
@@ -420,5 +454,81 @@ describe('readCommands', () => {
 
     const cmds = await readCommands([])
     expect(cmds.map((c) => c.name)).toEqual(['keep'])
+  })
+})
+
+// ─── A project whose root is the home directory ──────────────────────────────
+//
+// `claude` run in `~` produces a project whose root IS the home directory, so
+// `<root>/.claude/settings.json` and `<root>/.claude/commands` are literally
+// the user's own files. Read again as project layers they were listed twice —
+// every user hook once as "user" and once as "<name> · project", every user
+// command twice — and `readRawSettings` concatenated the user's permissions
+// and hooks with themselves.
+
+describe('a project whose root is the home directory', () => {
+  const homeProject = (): { id: string; name: string; path: string } => ({
+    id: '-tmp-home',
+    name: 'home',
+    path: path.join(dirs.tmp, 'home'),
+  })
+
+  it('does not read the user settings file a second time as a project layer', async () => {
+    const layers = await readSettingsLayers(homeProject())
+    expect(layers.map((l) => l.scope)).toEqual(['user'])
+    expect(layers.filter((l) => l.path === userSettingsPath())).toHaveLength(1)
+  })
+
+  it('reads <claudeDir>/settings.local.json exactly once, as that project’s local layer', async () => {
+    const localPath = path.join(dirs.claudeDir, 'settings.local.json')
+    writeJson(localPath, { env: { A: '1' } })
+
+    const layers = await readSettingsLayers(homeProject())
+    expect(layers.map((l) => l.scope)).toEqual(['user', 'local'])
+    expect(layers.filter((l) => l.path === localPath)).toHaveLength(1)
+  })
+
+  it('lists every user hook once, not once as user and again as project', async () => {
+    const groups = parseHooks(await readSettingsLayers(homeProject()))
+    const preCompact = groups.find((g) => g.event === 'PreCompact')!
+    expect(preCompact.rules).toHaveLength(1)
+    expect(preCompact.rules[0].scope).toBe('user')
+  })
+
+  it('does not concatenate the user permissions and hooks with themselves', async () => {
+    writeJson(userSettingsPath(), {
+      permissions: { allow: ['Bash(ls)'], deny: [] },
+      hooks: { Stop: [{ hooks: [{ type: 'command', command: 'stop.sh' }] }] },
+    })
+
+    const raw = await readRawSettings(homeProject())
+    expect(raw.permissions?.allow).toEqual(['Bash(ls)'])
+    expect(raw.hooks?.Stop).toHaveLength(1)
+  })
+
+  it('lists every user command once, not once as user and again as project', async () => {
+    const userCmdPath = path.join(dirs.claudeDir, 'commands', 'deploy.md')
+    fs.mkdirSync(path.dirname(userCmdPath), { recursive: true })
+    fs.writeFileSync(userCmdPath, '# deploy')
+
+    const cmds = await readCommands([homeProject()])
+    expect(cmds).toHaveLength(1)
+    expect(cmds[0].scope).toBe('user')
+  })
+})
+
+describe('readMemoryFiles — untrusted project id', () => {
+  it('refuses an id that walks out of the projects directory', async () => {
+    // `projectEncodedId` comes straight from the renderer.
+    await expect(readMemoryFiles('../../../etc')).rejects.toThrow(/Path traversal/)
+  })
+
+  it('still reads a normal id', async () => {
+    const memoryFile = path.join(dirs.claudeDir, 'projects', '-tmp-demo-app', 'memory', 'note.md')
+    fs.mkdirSync(path.dirname(memoryFile), { recursive: true })
+    fs.writeFileSync(memoryFile, 'remember this')
+
+    const files = await readMemoryFiles('-tmp-demo-app')
+    expect(files.find((f) => f.id === 'memory-note.md')?.path).toBe(memoryFile)
   })
 })

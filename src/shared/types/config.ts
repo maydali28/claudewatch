@@ -2,10 +2,16 @@
 
 /**
  * Which settings file a value came from. Precedence, lowest to highest:
- * `user` (`<claudeDir>/settings.json`) < `user-local` (`<claudeDir>/settings.local.json`)
- * < `project` (`<root>/.claude/settings.json`) < `local` (`<root>/.claude/settings.local.json`).
+ * `user` (`<claudeDir>/settings.json`) < `project` (`<root>/.claude/settings.json`)
+ * < `local` (`<root>/.claude/settings.local.json`).
+ *
+ * There is deliberately no `user-local`. Claude Code's scopes are managed,
+ * project-local, shared project and user; `<claudeDir>/settings.local.json` is
+ * not a fifth one. It is only the project-local file of a project whose root
+ * happens to be the home directory, and it is read as that project's `local`
+ * layer — once.
  */
-export type ConfigScope = 'user' | 'user-local' | 'project' | 'local'
+export type ConfigScope = 'user' | 'project' | 'local'
 
 export interface HookCommand {
   type?: 'command'

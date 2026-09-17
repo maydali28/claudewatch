@@ -76,7 +76,7 @@ export const api = {
   plans: {
     list: () => invoke(CHANNELS.PLANS_LIST),
 
-    get: (filename: string) => invoke(CHANNELS.PLANS_GET, { filename }),
+    get: (id: string) => invoke(CHANNELS.PLANS_GET, { id }),
 
     getProjects: (slug: string) => invoke(CHANNELS.PLANS_GET_PROJECTS, { slug }),
   },
