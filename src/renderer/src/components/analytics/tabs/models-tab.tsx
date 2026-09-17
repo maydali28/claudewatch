@@ -11,6 +11,7 @@ import {
   Cell,
 } from 'recharts'
 import { formatCost, formatTokens } from '@shared/utils'
+import { COST_ESTIMATE_LABEL, COST_ESTIMATE_NOTE_SHORT } from '@shared/constants/copy'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import { StatCard } from '@renderer/components/analytics/stat-card'
 import { ChartCard } from '@renderer/components/analytics/chart-card'
@@ -81,7 +82,7 @@ function ModelCostBars({ data }: Pick<Props, 'data'>): React.JSX.Element {
         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
         <YAxis tick={{ fontSize: 10 }} tickFormatter={(v: number) => formatCost(v)} />
         <Tooltip
-          formatter={(v) => [formatCost(Number(v)), 'Cost']}
+          formatter={(v) => [formatCost(Number(v)), COST_ESTIMATE_LABEL]}
           contentStyle={{ fontSize: 11 }}
         />
         <Bar dataKey="cost" radius={[2, 2, 0, 0]}>
@@ -144,7 +145,10 @@ export function ModelsTab({ data }: Props): React.JSX.Element {
         <ChartCard title="Turn Distribution" description="Share of total turns per model">
           <ModelDistributionChart data={data.modelUsage} />
         </ChartCard>
-        <ChartCard title="Cost by Model" description="Total spend per model family">
+        <ChartCard
+          title="Cost by Model"
+          description={`Total spend per model family. ${COST_ESTIMATE_NOTE_SHORT}`}
+        >
           <ModelCostBars data={data} />
         </ChartCard>
       </div>
@@ -155,7 +159,10 @@ export function ModelsTab({ data }: Props): React.JSX.Element {
       </ChartCard>
 
       {/* Daily cost over time */}
-      <ChartCard title="Daily Cost by Model" description="Spend trend stacked by model">
+      <ChartCard
+        title="Daily Cost by Model"
+        description={`Spend trend stacked by model. ${COST_ESTIMATE_NOTE_SHORT}`}
+      >
         {/* This chart sorts dates alphabetically and plots one axis tick per
             day, so the `(undated)` sentinel (see `AnalyticsData.undatedActivity`)
             would render as a stray, out-of-order tick rather than a real day.
@@ -178,7 +185,7 @@ export function ModelsTab({ data }: Props): React.JSX.Element {
       {/* Efficiency table */}
       <ChartCard
         title="Model Efficiency"
-        description="Cost per turn, output tokens, and share of total cost — click columns to sort"
+        description={`Cost per turn, output tokens, and share of total cost — click columns to sort. ${COST_ESTIMATE_NOTE_SHORT}`}
       >
         <ModelEfficiencyTable data={data.modelEfficiency} />
       </ChartCard>
@@ -186,7 +193,7 @@ export function ModelsTab({ data }: Props): React.JSX.Element {
       {/* What-if calculator */}
       <ChartCard
         title="What-If Calculator"
-        description="Estimate cost impact of routing work to a different model"
+        description={`Estimate cost impact of routing work to a different model. ${COST_ESTIMATE_NOTE_SHORT}`}
       >
         <WhatIfCalculator data={data.modelEfficiency} />
       </ChartCard>

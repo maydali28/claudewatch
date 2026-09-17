@@ -346,6 +346,16 @@ export interface SessionDayUsage {
    * instead. See `SessionDiagnostics.reducedConfidenceResponses`.
    */
   reducedConfidenceResponses: number
+  /**
+   * Responses on this day that used fast mode, regional inference or a
+   * non-standard service tier. See `SessionDiagnostics.pricingModifierResponses`.
+   */
+  pricingModifierResponses: number
+  /**
+   * Web search / web fetch requests on this day. See
+   * `SessionDiagnostics.serverToolRequests`.
+   */
+  serverToolRequests: number
   /** Billable API responses on this day. */
   responseCount: number
   /** Parent-transcript messages on this day. */
@@ -528,6 +538,18 @@ export interface SessionDiagnostics {
    * filter.
    */
   reducedConfidenceResponses: number
+  /**
+   * Responses whose price would differ from the list rate — fast mode,
+   * regional inference, or a non-standard service tier — see
+   * `UsageTotals.pricingModifierResponses`. Still priced at the list rate and
+   * counted everywhere; the estimate simply leaves the modifier out.
+   */
+  pricingModifierResponses: number
+  /**
+   * Web search / web fetch requests the API bills per request — see
+   * `UsageTotals.serverToolRequests`. Not priced and never part of any cost.
+   */
+  serverToolRequests: number
 }
 
 // ─── Session Metadata ─────────────────────────────────────────────────────────

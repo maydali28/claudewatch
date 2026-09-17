@@ -169,11 +169,11 @@ export function WhatIfCalculator({ data }: Props): React.JSX.Element {
       {sourceRow && result ? (
         <div className="rounded-md bg-muted p-3 space-y-2 text-xs">
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Actual cost ({srcLabel})</span>
+            <span className="text-muted-foreground">Est. cost ({srcLabel})</span>
             <span className="font-medium">{formatCost(sourceRow.totalCost)}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-muted-foreground">Projected cost ({tgtLabel})</span>
+            <span className="text-muted-foreground">Est. projected cost ({tgtLabel})</span>
             <span className="font-medium">{formatCost(result.projectedTotal)}</span>
           </div>
           <div className="flex justify-between border-t pt-2">
@@ -201,7 +201,7 @@ export function WhatIfCalculator({ data }: Props): React.JSX.Element {
           </div>
           <p className="text-muted-foreground">
             Based on {sourceRow.turnCount.toLocaleString()} turns ·{' '}
-            {formatCost(sourceRow.costPerTurn)} actual cost/turn
+            {formatCost(sourceRow.costPerTurn)} est. cost/turn
           </p>
         </div>
       ) : (

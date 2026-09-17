@@ -508,7 +508,7 @@ export default function SessionDetailsPanel({
                 />
                 {totalCost !== undefined && (
                   <StatRow
-                    label="Total cost"
+                    label="Est. total cost"
                     value={formatCost(totalCost)}
                     hint="Grand total cost: parent session + all subagents"
                   />

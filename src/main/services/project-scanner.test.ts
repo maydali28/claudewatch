@@ -100,6 +100,8 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},

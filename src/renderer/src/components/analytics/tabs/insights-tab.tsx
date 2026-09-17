@@ -23,6 +23,7 @@ import {
   CartesianGrid,
 } from 'recharts'
 import { formatCost, formatTokens } from '@shared/utils'
+import { COST_ESTIMATE_LABEL, COST_ESTIMATE_NOTE_SHORT } from '@shared/constants/copy'
 import { ChartCard } from '@renderer/components/analytics/chart-card'
 import { ProjectCostChart } from '@renderer/components/analytics/charts/project-cost-chart'
 import { WhatIfCalculator } from '@renderer/components/analytics/charts/whatif-calculator'
@@ -252,7 +253,7 @@ function ProjectBreakdownTable({ data }: Pick<Props, 'data'>): React.JSX.Element
             <th className="pb-1.5 text-left font-medium">Project</th>
             <th className="pb-1.5 text-right font-medium">Sessions</th>
             <th className="pb-1.5 text-right font-medium">Tokens</th>
-            <th className="pb-1.5 text-right font-medium">Cost</th>
+            <th className="pb-1.5 text-right font-medium">{COST_ESTIMATE_LABEL}</th>
             <th className="pb-1.5 text-right font-medium">Share</th>
           </tr>
         </thead>
@@ -414,7 +415,7 @@ function UnhealthySessionsTable({ entries }: { entries: SessionHealthEntry[] }):
           <tr className="border-b text-muted-foreground">
             <th className="pb-1.5 text-left font-medium">Session</th>
             <th className="pb-1.5 text-left font-medium">Flags</th>
-            <th className="pb-1.5 text-right font-medium">Cost</th>
+            <th className="pb-1.5 text-right font-medium">{COST_ESTIMATE_LABEL}</th>
           </tr>
         </thead>
         <tbody>
@@ -566,7 +567,7 @@ export function InsightsTab({ data }: Props): React.JSX.Element {
       {/* Project breakdown */}
       <ChartCard
         title="Project Breakdown"
-        description="Cost, token, and session breakdown per project"
+        description={`Cost, token, and session breakdown per project. ${COST_ESTIMATE_NOTE_SHORT}`}
         action={<ArrowRight className="h-4 w-4 text-muted-foreground" />}
       >
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -581,7 +582,7 @@ export function InsightsTab({ data }: Props): React.JSX.Element {
       {/* What-if model calculator */}
       <ChartCard
         title="What-If Calculator"
-        description="Estimate cost impact of switching to a different model"
+        description={`Estimate cost impact of switching to a different model. ${COST_ESTIMATE_NOTE_SHORT}`}
       >
         <WhatIfCalculator data={data.modelEfficiency} />
       </ChartCard>

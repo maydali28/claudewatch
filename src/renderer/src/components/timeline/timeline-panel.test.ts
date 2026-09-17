@@ -47,6 +47,8 @@ function makeSummary(id: string, projectId: string, timestamp: string): SessionS
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},

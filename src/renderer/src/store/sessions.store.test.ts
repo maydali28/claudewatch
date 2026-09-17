@@ -65,6 +65,8 @@ function makeParsedSession(sessionId: string, marker: number): ParsedSession {
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     },
   }
 }
@@ -126,6 +128,8 @@ function makeSummary(id: string, projectId: string, lastTimestamp: string): Sess
       incompleteUsageResponses: 0,
       responsesWithoutCompletionSignal: 0,
       reducedConfidenceResponses: 0,
+      pricingModifierResponses: 0,
+      serverToolRequests: 0,
     },
     thinkingTokens: 0,
     recordedEffortDistribution: {},

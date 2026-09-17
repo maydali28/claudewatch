@@ -1,6 +1,11 @@
 import type { ModelFamily } from '@shared/types/pricing'
 import { parseInstant } from '@shared/utils/date-ranges'
-import { cacheWriteUnknownTtl, effectiveCacheWriteTotal, type ResponseEntry } from './ledger'
+import {
+  cacheWriteUnknownTtl,
+  effectiveCacheWriteTotal,
+  hasUnsupportedPricingModifier,
+  type ResponseEntry,
+} from './ledger'
 
 /**
  * Derives everything the app displays from ledger entries.
@@ -62,6 +67,20 @@ export interface UsageTotals {
    * final or correct.
    */
   responsesWithoutCompletionSignal: number
+  /**
+   * Responses whose price would differ from the list rate: fast mode,
+   * regional inference, or a non-standard service tier — see
+   * `hasUnsupportedPricingModifier` in `ledger.ts`. They are still priced at
+   * the list rate and counted in every figure above; this count only lets
+   * the UI say the estimate leaves the modifier out.
+   */
+  pricingModifierResponses: number
+  /**
+   * Web search / web fetch requests the API bills per request — see
+   * `ResponseEntry.serverToolRequests`. Not priced here and never part of
+   * `estimatedCost`. A count of requests, not of responses.
+   */
+  serverToolRequests: number
   responseCount: number
   /**
    * A SUBSET of `outputTokens` — the model's own reported thinking spend
@@ -161,6 +180,8 @@ function emptyTotals(): UsageTotals {
     incompleteUsageResponses: 0,
     reducedConfidenceResponses: 0,
     responsesWithoutCompletionSignal: 0,
+    pricingModifierResponses: 0,
+    serverToolRequests: 0,
     responseCount: 0,
     thinkingTokens: 0,
   }
@@ -188,6 +209,9 @@ function add(totals: UsageTotals, e: ResponseEntry): void {
   if (e.usageIncomplete) totals.incompleteUsageResponses++
   if (e.reducedConfidenceId) totals.reducedConfidenceResponses++
   if (!e.hasCompletionSignal) totals.responsesWithoutCompletionSignal++
+  // Counted, never priced: neither line touches a token or cost figure.
+  if (hasUnsupportedPricingModifier(e)) totals.pricingModifierResponses++
+  totals.serverToolRequests += e.serverToolRequests ?? 0
   // Deliberately its own statement, not folded into `totals.outputTokens +=`
   // above: thinkingTokens is a subset of outputTokens, and adding it there
   // would double-count it. See `UsageTotals.thinkingTokens`.

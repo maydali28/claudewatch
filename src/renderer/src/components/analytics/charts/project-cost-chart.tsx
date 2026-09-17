@@ -10,6 +10,7 @@ import {
   LabelList,
 } from 'recharts'
 import { formatCost } from '@shared/utils'
+import { COST_ESTIMATE_LABEL } from '@shared/constants/copy'
 import type { ProjectCost } from '@shared/types'
 
 interface Props {
@@ -36,7 +37,7 @@ export function ProjectCostChart({ data }: Props): React.JSX.Element {
           tickFormatter={(v: string) => (v.length > 18 ? v.slice(-18) : v)}
         />
         <Tooltip
-          formatter={(v) => [formatCost(Number(v)), 'Cost']}
+          formatter={(v) => [formatCost(Number(v)), COST_ESTIMATE_LABEL]}
           contentStyle={{ fontSize: 11 }}
         />
         <Bar dataKey="totalCost" fill="#6366f1" radius={[0, 2, 2, 0]}>

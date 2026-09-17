@@ -80,6 +80,17 @@ export interface ResponseEntry {
   speed?: string
   inferenceGeo?: string
   /**
+   * Web search + web fetch requests from `usage.server_tool_use`. The API
+   * bills these per request, on top of tokens; this ledger does not price
+   * them, so they are counted (see `UsageTotals.serverToolRequests`) and
+   * never added to any token figure or to `costUsd`. `undefined` when no
+   * snapshot reported a valid count — a field that is absent or not a finite
+   * non-negative integer is ignored rather than read as 0. Non-additive
+   * across snapshots: the last snapshot carrying a valid count wins, like
+   * `serviceTier`/`speed`/`inferenceGeo`.
+   */
+  serverToolRequests?: number
+  /**
    * Server-side iteration usage (compaction, advisor). Captured for
    * provenance only and never added to the totals above. See the detailed
    * comment above `iterations` in `toEntry` (ledger.ts) for why: for the
@@ -258,6 +269,51 @@ interface RawUsage {
   service_tier?: string
   speed?: string
   inference_geo?: string
+  server_tool_use?: { web_search_requests?: number; web_fetch_requests?: number }
+}
+
+/**
+ * `inference_geo` values that do NOT mean a regional price applies. `global`
+ * is the documented default; `not_available` is what every response in
+ * measured history reports (76,979 usage records, see the Task 17 report),
+ * so treating it as a region would flag every response ever recorded.
+ */
+const LIST_RATE_INFERENCE_GEOS: ReadonlySet<string> = new Set(['global', 'not_available'])
+
+/**
+ * True when a response reported a pricing modifier this app does not price:
+ * fast mode, inference pinned to a region, or a service tier other than
+ * `standard`. The estimate still prices such a response at the list rate;
+ * this only lets the UI say so (`UsageTotals.pricingModifierResponses`).
+ *
+ * Only a string counts as a report. Real history carries `null` for all
+ * three fields on some responses, and an absent or null field is not
+ * evidence that a modifier was applied.
+ */
+export function hasUnsupportedPricingModifier(
+  e: Pick<ResponseEntry, 'speed' | 'inferenceGeo' | 'serviceTier'>
+): boolean {
+  if (e.speed === 'fast') return true
+  if (typeof e.inferenceGeo === 'string' && !LIST_RATE_INFERENCE_GEOS.has(e.inferenceGeo)) {
+    return true
+  }
+  return typeof e.serviceTier === 'string' && e.serviceTier !== 'standard'
+}
+
+/**
+ * Sum of the valid request counts in `usage.server_tool_use`; `undefined`
+ * when neither count is a finite non-negative integer (or the object is
+ * missing). See `ResponseEntry.serverToolRequests`.
+ */
+function serverToolRequestCount(raw: unknown): number | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined
+  const counts = raw as Record<string, unknown>
+  let total: number | undefined
+  for (const key of ['web_search_requests', 'web_fetch_requests']) {
+    const v = counts[key]
+    if (typeof v === 'number' && Number.isInteger(v) && v >= 0) total = (total ?? 0) + v
+  }
+  return total
 }
 
 interface ToEntryResult {
@@ -575,6 +631,7 @@ function toEntry(
       serviceTier: usage.service_tier,
       speed: usage.speed,
       inferenceGeo: usage.inference_geo,
+      serverToolRequests: serverToolRequestCount(usage.server_tool_use),
       iterationsRaw: usage.iterations,
       snapshotCount: 1,
       usageConflict: false,
@@ -780,6 +837,7 @@ export function createResponseAccumulator(
       existing.serviceTier = entry.serviceTier ?? existing.serviceTier
       existing.speed = entry.speed ?? existing.speed
       existing.inferenceGeo = entry.inferenceGeo ?? existing.inferenceGeo
+      existing.serverToolRequests = entry.serverToolRequests ?? existing.serverToolRequests
       existing.iterationsRaw = entry.iterationsRaw ?? existing.iterationsRaw
       // A completion signal seen on any snapshot is RECORDED for the response,
       // even if an earlier or later one carried an empty `stop_reason` —
