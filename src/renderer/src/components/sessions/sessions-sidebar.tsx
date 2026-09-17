@@ -10,7 +10,7 @@ export default function SessionsSidebar(): React.JSX.Element {
     activeSessionId,
     liveSessionIds,
     isLoadingProjects,
-    sessionError,
+    projectsError,
     loadProjects,
     loadParsedSession,
     setActiveProject,
@@ -101,14 +101,14 @@ export default function SessionsSidebar(): React.JSX.Element {
           </div>
         )}
 
-        {!isLoadingProjects && sessionError && (
+        {!isLoadingProjects && projectsError && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <p className="text-xs text-destructive font-medium">Failed to load projects</p>
-            <p className="text-[10px] text-muted-foreground mt-1 break-all">{sessionError}</p>
+            <p className="text-[10px] text-muted-foreground mt-1 break-all">{projectsError}</p>
           </div>
         )}
 
-        {!isLoadingProjects && !sessionError && projects.length === 0 && (
+        {!isLoadingProjects && !projectsError && projects.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <FolderOpen className="h-6 w-6 text-muted-foreground/30 mb-2" />
             <p className="text-xs text-muted-foreground">No projects found</p>
@@ -119,7 +119,7 @@ export default function SessionsSidebar(): React.JSX.Element {
         )}
 
         {!isLoadingProjects &&
-          !sessionError &&
+          !projectsError &&
           projects.length > 0 &&
           filteredProjects.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center">

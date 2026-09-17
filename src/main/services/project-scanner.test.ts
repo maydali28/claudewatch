@@ -687,4 +687,56 @@ describe('scanProjects — the merge is actually wired into the scan', () => {
       ])
     })
   })
+
+  /**
+   * Clean-install / empty-data guards (task-12-brief.md Step 1). A fresh
+   * profile — or `CLAUDE_CONFIG_DIR` pointed at an empty scratch directory —
+   * must render the dashboard's empty states rather than an error toast, so
+   * `scanProjects` has to resolve `{ projects: [] }` without throwing for
+   * each of these three shapes.
+   */
+  it('returns no projects, without throwing, when the Claude directory does not exist', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-home-'))
+    try {
+      fixtureHome.path = homeRoot
+      // No .claude directory created inside `homeRoot` — getClaudeDir()'s
+      // `fs.promises.access` rejects, and the catch at
+      // project-scanner.ts:48 returns `{ projects: [] }` instead of
+      // propagating the rejection.
+      await expect(scanProjects(ANTHROPIC_PRICING)).resolves.toEqual({ projects: [] })
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('returns no projects when projects/ exists but is empty', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'empty-projects-home-'))
+    try {
+      fixtureHome.path = homeRoot
+      fs.mkdirSync(path.join(homeRoot, '.claude', 'projects'), { recursive: true })
+
+      await expect(scanProjects(ANTHROPIC_PRICING)).resolves.toEqual({ projects: [] })
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('skips a project directory that contains no .jsonl files', async () => {
+    const homeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'no-jsonl-home-'))
+    try {
+      fixtureHome.path = homeRoot
+      const projectDir = path.join(homeRoot, '.claude', 'projects', '-fixture-no-jsonl')
+      fs.mkdirSync(projectDir, { recursive: true })
+      // A stray non-transcript file: the directory exists and is readable,
+      // but `getValidSortedSessionForProject`'s `jsonlFiles.length === 0`
+      // guard (project-scanner.ts:353) returns `[]` sessions for it, and
+      // `scanProjects`' final `sessions.length > 0` filter (:77) then drops
+      // the whole project rather than surfacing it with zero sessions.
+      fs.writeFileSync(path.join(projectDir, 'notes.txt'), 'not a transcript')
+
+      await expect(scanProjects(ANTHROPIC_PRICING)).resolves.toEqual({ projects: [] })
+    } finally {
+      fs.rmSync(homeRoot, { recursive: true, force: true })
+    }
+  })
 })
