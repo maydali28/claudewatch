@@ -33,6 +33,8 @@ You use Claude Code every day. But do you know which sessions blew your budget? 
 
 ## Screenshots
 
+All screenshots use synthetic demo projects and conversations, not personal session history.
+
 <p align="center">
   <img src="screenshots/menu-bar.png" alt="Menu Bar Popover" width="320" />
   <br /><em>Menu bar popover — live stats at a glance</em>
