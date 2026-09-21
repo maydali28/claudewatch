@@ -167,7 +167,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.5.1",
     "lucide-react": "^1.45.0",
-    "node-gyp": "^12.4.0",
+    "node-gyp": "^13.0.2",
     "prettier": "^3.9.6",
     "react": "^19.3.0",
     "react-day-picker": "^10.0.1",
