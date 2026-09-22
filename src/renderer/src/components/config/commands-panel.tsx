@@ -3,6 +3,7 @@ import { Terminal, Copy, Check } from 'lucide-react'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { CommandEntry } from '@shared/types'
+import MarkdownBody from '@renderer/components/shared/markdown-body'
 
 // ─── Command detail view ──────────────────────────────────────────────────────
 
@@ -46,11 +47,10 @@ function CommandDetail({ cmd }: { cmd: CommandEntry }): React.JSX.Element {
         </button>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <pre className="text-xs font-mono text-foreground whitespace-pre-wrap break-words leading-relaxed bg-muted/30 rounded-lg p-4">
-          {cmd.content}
-        </pre>
+      {/* Body: frontmatter is already stripped by the config service, so this
+          is the prompt itself — markdown, like a skill body. */}
+      <div className="flex-1 min-h-0">
+        <MarkdownBody content={cmd.content} label="Body" layout="panel" />
       </div>
     </div>
   )

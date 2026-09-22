@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, Eye, Code, FolderOpen } from 'lucide-react'
-import { ScrollArea } from '@renderer/components/ui/scroll-area'
+import { FileText, FolderOpen } from 'lucide-react'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import PlansSidebar from './plans-sidebar'
-import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
+import MarkdownBody from '@renderer/components/shared/markdown-body'
 import { cn } from '@renderer/lib/cn'
 import { ipc } from '@renderer/lib/ipc-client'
 import { useUIStore } from '@renderer/store/ui.store'
@@ -38,60 +37,6 @@ async function fetchPlanProjects(filename: string): Promise<string[]> {
   const result = await ipc.plans.getProjects(slug)
   // Non-critical — badges just don't appear on failure.
   return result.ok ? result.data : []
-}
-
-function BodySection({ content }: { content: string }): React.JSX.Element {
-  const [mode, setMode] = useState<'preview' | 'raw'>('preview')
-  const lineCount = content.split('\n').length
-
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Sub-header */}
-      <div className="flex items-center justify-between px-6 py-2 border-b border-border/40 shrink-0">
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-          Content ({lineCount} lines)
-        </p>
-        <div className="flex items-center rounded-md border border-border overflow-hidden">
-          <button
-            onClick={() => setMode('preview')}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1 text-[10px] font-medium transition-colors',
-              mode === 'preview'
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
-          >
-            <Eye className="h-3 w-3" />
-            Preview
-          </button>
-          <button
-            onClick={() => setMode('raw')}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1 text-[10px] font-medium transition-colors border-l border-border',
-              mode === 'raw'
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
-          >
-            <Code className="h-3 w-3" />
-            Raw
-          </button>
-        </div>
-      </div>
-
-      <ScrollArea className="flex-1">
-        {mode === 'preview' ? (
-          <div className="max-w-3xl mx-auto px-6 py-6">
-            <MarkdownRenderer content={content} />
-          </div>
-        ) : (
-          <pre className="max-w-3xl mx-auto px-6 py-6 text-xs font-mono text-foreground whitespace-pre-wrap break-words leading-relaxed">
-            {content}
-          </pre>
-        )}
-      </ScrollArea>
-    </div>
-  )
 }
 
 export default function PlansPanel(): React.JSX.Element {
@@ -260,7 +205,7 @@ export default function PlansPanel(): React.JSX.Element {
             ))}
           </div>
         ) : detail ? (
-          <BodySection content={detail.content} />
+          <MarkdownBody content={detail.content} label="Content" layout="panel" />
         ) : null}
       </div>
     </div>

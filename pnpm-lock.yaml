@@ -62,7 +62,7 @@ importers:
     devDependencies:
       '@commitlint/cli':
         specifier: ^21.2.2
-        version: 21.2.2(@types/node@26.6.1)(conventional-commits-parser@6.4.0)(typescript@6.0.3)
+        version: 21.2.2(@types/node@26.6.2)(conventional-commits-filter@6.0.1)(conventional-commits-parser@7.1.2)(typescript@6.0.3)
       '@commitlint/config-conventional':
         specifier: ^21.2.2
         version: 21.2.2
@@ -143,7 +143,7 @@ importers:
         version: 1.2.16(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
       '@tailwindcss/vite':
         specifier: ^4.3.3
-        version: 4.3.3(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
+        version: 4.3.3(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
       '@tanstack/react-query':
         specifier: ^5.103.1
         version: 5.103.1(react@19.3.0)
@@ -154,8 +154,8 @@ importers:
         specifier: ^14.6.7
         version: 14.6.7(@testing-library/dom@10.4.1)
       '@types/node':
-        specifier: ^26.6.1
-        version: 26.6.1
+        specifier: ^26.6.2
+        version: 26.6.2
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -176,7 +176,7 @@ importers:
         version: 8.70.0(eslint@9.39.5(jiti@2.7.0))(typescript@6.0.3)
       '@vitejs/plugin-react':
         specifier: ^5.2.0
-        version: 5.2.0(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
+        version: 5.2.0(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
       '@vitest/coverage-v8':
         specifier: ^4.1.11
         version: 4.1.11(vitest@4.1.11)
@@ -188,16 +188,16 @@ importers:
         version: 2.1.1
       commitizen:
         specifier: ^4.3.2
-        version: 4.3.2(@types/node@26.6.1)(typescript@6.0.3)
+        version: 4.3.2(@types/node@26.6.2)(typescript@6.0.3)
       conventional-changelog:
-        specifier: ^7.2.1
-        version: 7.2.1
+        specifier: ^8.1.3
+        version: 8.1.3
       conventional-changelog-conventionalcommits:
-        specifier: ^9.3.1
-        version: 9.3.1
+        specifier: ^10.4.0
+        version: 10.4.0
       cz-conventional-changelog:
         specifier: ^3.3.0
-        version: 3.3.0(@types/node@26.6.1)(typescript@6.0.3)
+        version: 3.3.0(@types/node@26.6.2)(typescript@6.0.3)
       date-fns:
         specifier: ^4.4.0
         version: 4.4.0
@@ -205,11 +205,11 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1
       electron:
-        specifier: ^44.4.1
-        version: 44.4.1
+        specifier: ^44.4.3
+        version: 44.4.3
       electron-vite:
         specifier: ^5.0.0
-        version: 5.0.0(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
+        version: 5.0.0(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
       eslint:
         specifier: ^9.39.5
         version: 9.39.5(jiti@2.7.0)
@@ -275,10 +275,10 @@ importers:
         version: 6.0.3
       vite:
         specifier: ^7.3.6
-        version: 7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
+        version: 7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
       vitest:
         specifier: ^4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.1)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
       zustand:
         specifier: ^5.0.15
         version: 5.0.15(@types/react@19.3.0)(immer@11.1.18)(react@19.3.0)(use-sync-external-store@1.7.0(react@19.3.0))
@@ -461,18 +461,6 @@ packages:
   '@commitlint/types@21.2.0':
     resolution: {integrity: sha512-7zVFCDB2reMvJH5dmbKnOQPjZEvjdJTH8jc0U/PIPU1r3/+vf5pD1HlfitV2MWsWXrvu7u39iY1lyLUPOaN0Gw==}
     engines: {node: '>=22.12.0'}
-
-  '@conventional-changelog/git-client@2.7.0':
-    resolution: {integrity: sha512-j7A8/LBEQ+3rugMzPXoKYzyUPpw/0CBQCyvtTR7Lmu4olG4yRC/Tfkq79Mr3yuPs0SUitlO2HwGP3gitMJnRFw==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      conventional-commits-filter: ^5.0.0
-      conventional-commits-parser: ^6.4.0
-    peerDependenciesMeta:
-      conventional-commits-filter:
-        optional: true
-      conventional-commits-parser:
-        optional: true
 
   '@conventional-changelog/git-client@3.1.2':
     resolution: {integrity: sha512-jZqwnJwf7nboIlAcw/mkOjVa6DexCcUOgT2oOQgkoi3z9vR8tGFkcMy2BFcYwjhL9sYcDDXkRQDayiDieCoW7A==}
@@ -2045,21 +2033,17 @@ packages:
     resolution: {integrity: sha512-AHmPIGE8yVRyywpZRhAkm/H0cHTgsQSPhFZFbaeQLcYHFE/eOP9bAMh8Nj/Apr7WMagFXYHd04tR/63BxtLgKw==}
     engines: {node: '>=18'}
 
-  '@simple-libs/child-process-utils@1.0.2':
-    resolution: {integrity: sha512-/4R8QKnd/8agJynkNdJmNw2MBxuFTRcNFnE5Sg/G+jkSsV8/UBgULMzhizWWW42p8L5H7flImV2ATi79Ove2Tw==}
-    engines: {node: '>=18'}
-
   '@simple-libs/child-process-utils@2.0.0':
     resolution: {integrity: sha512-dvNoRKLijXnD0XoJAz94pbNuB5GQgDr55UhpSPhffDkTT0Cmcqh9jSCOtwfT2d4H6MI9E7c4SgtMuJXZ6F3c6A==}
     engines: {node: '>=22'}
 
-  '@simple-libs/hosted-git-info@1.0.2':
-    resolution: {integrity: sha512-aAmGQdMH+ZinytKuA2832u0ATeOFNYNk4meBEXtB5xaPotUgggYNhq5tYU/v17wEbmTW5P9iHNqNrFyrhnqBAg==}
-    engines: {node: '>=18'}
+  '@simple-libs/hosted-git-info@2.0.0':
+    resolution: {integrity: sha512-55XwK/GYgV58PuN8lZFhI1qRxdKoMLJocXl/yM1EPqazFDmM4QWY7q6BxPCPDNKTNunj794DSD4h0H7SrqUdMg==}
+    engines: {node: '>=22'}
 
-  '@simple-libs/stream-utils@1.2.0':
-    resolution: {integrity: sha512-KxXvfapcixpz6rVEB6HPjOUZT22yN6v0vI0urQSk1L8MlEWPDFCZkhw2xmkyoTGYeFw7tWTZd7e3lVzRZRN/EA==}
-    engines: {node: '>=18'}
+  '@simple-libs/normalize-package-data@1.0.0':
+    resolution: {integrity: sha512-/EOmFBekV9tGee8gac/k+5Ox3twkypNqh5TfxA9vTkmcJkjm6f1xqrlstDNOrEhTvnYyVtU6Du2ZhY/IV1+9GA==}
+    engines: {node: '>=22'}
 
   '@simple-libs/stream-utils@2.0.0':
     resolution: {integrity: sha512-fCTuZK4QBa+39Oz9l4OGfJfz+GpwCp3AqO7Zch3to99xHPgstVsRFpeQ8LNd2o1Gv8raL2mCFwiaHh7bFSp5DQ==}
@@ -2308,11 +2292,8 @@ packages:
   '@types/node@24.13.4':
     resolution: {integrity: sha512-YJ7EqCstVTzIr0fMr7qul/977en+pQHrfmuKIo6Zr9i75Be21dr3MovcfvGtyvi2HAUrRerWps5sMO9I7WaxDw==}
 
-  '@types/node@26.6.1':
-    resolution: {integrity: sha512-VqGJBMCtdhqkBUCcBLvywI0NJ+KLuVzgNnlBUNFOQjqVxzo2lxLUNg1DSey8+u2u6ktswSAxg+s68QLzWHNOuA==}
-
-  '@types/normalize-package-data@2.4.4':
-    resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
+  '@types/node@26.6.2':
+    resolution: {integrity: sha512-X1P21scMv4zGKLYqjdGjaKa7COa0RKVYYZZN/NfvLQ1JegxFhdhpZG/Lyn8AXx6CDUavKAd11v6BvfpkDByK8g==}
 
   '@types/prismjs@1.26.6':
     resolution: {integrity: sha512-vqlvI7qlMvcCBbVe0AKAb4f97//Hy0EBTaiW8AalRnG/xAN5zOiWWyrNqNXeq8+KAuvRewjCVY1+IPxk4RdNYw==}
@@ -2636,9 +2617,6 @@ packages:
   array-buffer-byte-length@1.0.2:
     resolution: {integrity: sha512-LHE+8BuR7RYGDKvnrmcuSq3tDcKv9OFEXQt/HpbZhY7V6h0zlUXutnAD82GiFx9rdieCMjkvtcsPqBwgUl1Iiw==}
     engines: {node: '>= 0.4'}
-
-  array-ify@1.0.0:
-    resolution: {integrity: sha512-c5AMf34bKdvPhQ7tBGhqkgKNUzMr4WUs+WDtC2ZUGOUncbxKMTvqxYctiseW3+L4bA8ec+GcZ6/A/FW4m8ukng==}
 
   array-includes@3.2.0:
     resolution: {integrity: sha512-VXY5eFRarnXcYxwBjJzPmEhH55+rmP79/+ueDhi0F+TuqfHCItagIHqxeUZrmgrOPa31QTh9H85DjX3FfJ0FTg==}
@@ -2967,9 +2945,6 @@ packages:
     engines: {node: '>= 18'}
     hasBin: true
 
-  compare-func@2.0.0:
-    resolution: {integrity: sha512-zHig5N+tPWARooBnb0Zx1MFcdfpyJrfTJ3Y5L+IFvUm8rM74hHz66z0gw0x4tijh5CorKkKUCnW82R2vmpeCRA==}
-
   compare-version@0.1.2:
     resolution: {integrity: sha512-pJDh5/4wrEnXX/VWRZvruAGHkzKdr46z11OlTPN+VrATlWWhSKewNCJ1futCO5C7eJB3nPMFZA1LeYtcFboZ2A==}
     engines: {node: '>=0.10.0'}
@@ -2989,35 +2964,26 @@ packages:
     resolution: {integrity: sha512-Rriac6ZrAlVm6cy9Bz4NSp+WMHpwNXoPIYex+HjCgduAVUSbnew29DQjQw0C4g9u3HtSYzGiGY+pdBXAZo+4aA==}
     engines: {node: '>=22'}
 
-  conventional-changelog-conventionalcommits@9.3.1:
-    resolution: {integrity: sha512-dTYtpIacRpcZgrvBYvBfArMmK2xvIpv2TaxM0/ZI5CBtNUzvF2x0t15HsbRABWprS6UPmvj+PzHVjSx4qAVKyw==}
-    engines: {node: '>=18'}
+  conventional-changelog-preset-loader@6.0.1:
+    resolution: {integrity: sha512-GZ8E3RQzXQb3JFy0pKl8oeSf7ENIhvAMvJr+PlWkavZOesLHHdhkfNJ4SvW35eo1Fu2+EyVxWQ1tVvtzAG2iWg==}
+    engines: {node: '>=22'}
 
-  conventional-changelog-preset-loader@5.0.0:
-    resolution: {integrity: sha512-SetDSntXLk8Jh1NOAl1Gu5uLiCNSYenB5tm0YVeZKePRIgDW9lQImromTwLa3c/Gae298tsgOM+/CYT9XAl0NA==}
-    engines: {node: '>=18'}
-
-  conventional-changelog-writer@8.4.0:
-    resolution: {integrity: sha512-HHBFkk1EECxxmCi4CTu091iuDpQv5/OavuCUAuZmrkWpmYfyD816nom1CvtfXJ/uYfAAjavgHvXHX291tSLK8g==}
-    engines: {node: '>=18'}
+  conventional-changelog-writer@9.2.1:
+    resolution: {integrity: sha512-StlYSmW3wLedRaqohJMpP3YuWiAqtgD0/cpsai9frdDkXv7rxj0hRbpJrubPYvJxJsjplONsOobEQnPuS9UgCg==}
+    engines: {node: '>=22'}
     hasBin: true
 
-  conventional-changelog@7.2.1:
-    resolution: {integrity: sha512-smcpqCeNRCAoL586/Iql8GfVsduP1JDrr7SAzKHWM5C5voDzKhc3QtqwVWeKMhvVw4iYfAr+znz1TF4kPXVm3A==}
-    engines: {node: '>=18'}
+  conventional-changelog@8.1.3:
+    resolution: {integrity: sha512-fOMwLCxm46znJKPB08jLxl1FD8SOZOQHktlzCVhvhhVUfq0KgQSryoYXsRRHs1aRlZPR1/QK5wztnY8sBNC2AA==}
+    engines: {node: '>=22'}
     hasBin: true
 
   conventional-commit-types@3.0.0:
     resolution: {integrity: sha512-SmmCYnOniSsAa9GqWOeLqc179lfr5TRu5b4QFDkbsrJ5TZjPJx85wtOr3zn+1dbeNiXDKGPbZ72IKbPhLXh/Lg==}
 
-  conventional-commits-filter@5.0.0:
-    resolution: {integrity: sha512-tQMagCOC59EVgNZcC5zl7XqO30Wki9i9J3acbUvkaosCT6JX3EeFwJD7Qqp4MCikRnzS18WXV3BLIQ66ytu6+Q==}
-    engines: {node: '>=18'}
-
-  conventional-commits-parser@6.4.0:
-    resolution: {integrity: sha512-tvRg7FIBNlyPzjdG8wWRlPHQJJHI7DylhtRGeU9Lq+JuoPh5BKpPRX83ZdLrvXuOSu5Eo/e7SzOQhU4Hd2Miuw==}
-    engines: {node: '>=18'}
-    hasBin: true
+  conventional-commits-filter@6.0.1:
+    resolution: {integrity: sha512-cs+LadpH7Kpw0M3k8wurk+sOVVDAENA0iK4OBOrkL94j5lEVYRJ4j3zd2bhY9qgzyrPqthdcYT3axzRN7AliMg==}
+    engines: {node: '>=22'}
 
   conventional-commits-parser@7.1.2:
     resolution: {integrity: sha512-O+x4N2yH+ijvqWlIyTHsXTAP+algNWgGbjY2duCe8w2vUMvUB95cLRslCPfTMQyLAKlet3bhZTdu6ozn4M+QJQ==}
@@ -3239,10 +3205,6 @@ packages:
     resolution: {integrity: sha512-BTJ9aZYL3vCfZlZOBLy9v8TUqWGQ0pzFnygKwFZt5udj6viBoFIBviKPUoZLDCPn1FoXffv6McQFDenrm5Krfw==}
     engines: {node: '>=20'}
 
-  dot-prop@5.3.0:
-    resolution: {integrity: sha512-QM8q3zDe58hqUqjraQOmzZ1LIH9SWQJTlEKCH4kJ2oQvLZk7RbQXvtDM2XEq3fwkV9CCvvH4LA0AV+ogFsBM2Q==}
-    engines: {node: '>=8'}
-
   ds-store@0.1.6:
     resolution: {integrity: sha512-kY21M6Lz+76OS3bnCzjdsJSF7LBpLYGCVfavW8TgQD2XkcqIZ86W0y9qUDZu6fp7SIZzqosMDW2zi7zVFfv4hw==}
 
@@ -3303,8 +3265,8 @@ packages:
     resolution: {integrity: sha512-j9ETcBGJaXxAY/b6UBpR7LZfjdU4BAO+yvr4ifqHEdyuc3UNCy91PDGkWKY5UQ4coHNYfnwFggrqD6QPeFGAlg==}
     engines: {node: '>=8.0.0'}
 
-  electron@44.4.1:
-    resolution: {integrity: sha512-gXJarQ2Utfn8G6bp/IqLXvckOSCtrxPWjFqQaqm02Gf4zYn1aP+RN9PKimoLH/DMqjKLfBrNC4C4CviPv0cXnQ==}
+  electron@44.4.3:
+    resolution: {integrity: sha512-LTpSFTB40qVCXIX5xMo+cgHI/Jjkbjw7VpB26PccEbroqOn72LBukeaDwPVo1fBYzSzs0c9iPuAucFCO7Tw81Q==}
     engines: {node: '>= 22.12.0'}
     hasBin: true
 
@@ -3807,11 +3769,6 @@ packages:
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
 
-  handlebars@4.7.9:
-    resolution: {integrity: sha512-4E71E0rpOaQuJR2A3xDZ+GM1HyWYv1clR58tC8emQNeQe3RH7MAzSbat+V0wG78LQBo6m6bzSG/L4pBuCsgnUQ==}
-    engines: {node: '>=0.4.7'}
-    hasBin: true
-
   has-bigints@1.1.0:
     resolution: {integrity: sha512-R3pbpkcIqv2Pm3dUwgjclDRVmWpTJW2DcMzcIhEXEx1oh/CEMObMm3KLmRJOdvhM7o4uQBnwr8pzRK2sJWIqfg==}
     engines: {node: '>= 0.4'}
@@ -3873,10 +3830,6 @@ packages:
 
   hosted-git-info@2.8.9:
     resolution: {integrity: sha512-mxIDAb9Lsm6DoOJ7xH+5+X4y1LU/4Hi50L9C5sIswK3JzULS4bwk1FvjdBgvYR4bzT4tuUQiC15FE2f5HbLvYw==}
-
-  hosted-git-info@8.1.0:
-    resolution: {integrity: sha512-Rw/B2DNQaPBICNXEm8balFz9a6WpZrkCGpcWFpy7nCj+NyhSdqXipmfvtmWt9xGfp0wZnBxB+iVpLmQMYt47Tw==}
-    engines: {node: ^18.17.0 || >=20.5.0}
 
   html-escaper@2.0.2:
     resolution: {integrity: sha512-H2iMtd0I4Mt5eYiapRdIDjp+XzelXQ0tFE4JS7YFwFevXXMmOp9myNrUvCg0D6ws8iqkRPBfKHgbwig1SmlLfg==}
@@ -4130,10 +4083,6 @@ packages:
   is-number@7.0.0:
     resolution: {integrity: sha512-41Cifkg6e8TylSpdtTpeLVMqvSBEVzTttHvERD741+pnZ8ANv0004MRL43QKPDlK9cGvNp6NZWZUBlbGXYxxng==}
     engines: {node: '>=0.12.0'}
-
-  is-obj@2.0.0:
-    resolution: {integrity: sha512-drqDG3cbczxxEJRoOXcOjtdp1J/lyp1mNn0xaznRs8+muBhgQcrnbspox5X5fOw0HnMnbfDzvnEMEtqDEJEo8w==}
-    engines: {node: '>=8'}
 
   is-path-inside@4.0.0:
     resolution: {integrity: sha512-lJJV/5dYS+RcL8uQdBDW9c9uWFLLBNRyFhnAKXw5tVqLlKZ4RMGZKv+YQ/IA3OhD+RpbJa1LLFM1FQPGyIXvOA==}
@@ -4463,9 +4412,6 @@ packages:
   lowlight@1.20.0:
     resolution: {integrity: sha512-8Ktj+prEb1RoCPkEOrPMYUN/nCggB7qAWe3a7OpMjWQkh3l2RD5wKRQ+o8Q8YuI9RG/xs95waaI/E6ym/7NsTw==}
 
-  lru-cache@10.4.3:
-    resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
-
   lru-cache@11.5.2:
     resolution: {integrity: sha512-4pfM1Ff0x50o0tQwb5ucw/RzNyD0/YJME6IVcStalZuMWxdt3sR3huStTtxz4PUmvZfRguvDejasvQ2kifR11g==}
     engines: {node: 20 || >=22}
@@ -4564,10 +4510,6 @@ packages:
   mem@4.3.0:
     resolution: {integrity: sha512-qX2bG48pTqYRVmDB37rn/6PT7LcR8T7oAX3bf99u1Tt1nzxYfxkgqDwUwolPlXweM0XzBOBFzSx4kfp7KP1s/w==}
     engines: {node: '>=6'}
-
-  meow@13.2.0:
-    resolution: {integrity: sha512-pxQJQzB6djGPXh08dacEloMFopsOqGVRKFPYvPOt9XDZ1HasbgDZA74CJGreSU4G3Ak7EFJGoiH2auq+yXISgA==}
-    engines: {node: '>=18'}
 
   merge-stream@2.0.0:
     resolution: {integrity: sha512-abv/qOcuPfk3URPfDzmZU1LKmuw8kT+0nIHvKrKgFrwifol/doWcdA4ZqsWQ8ENrFKkd67Mfpo/LovbIUsbt3w==}
@@ -4898,10 +4840,6 @@ packages:
 
   normalize-package-data@2.5.0:
     resolution: {integrity: sha512-/5CMN3T0R4XTj4DcGaexo+roZSdSFW/0AOOTROrjxzCG1wrWXEsGbRKevjlIL+ZDE4sZlJr5ED4YW0yqmkK+eA==}
-
-  normalize-package-data@7.0.1:
-    resolution: {integrity: sha512-linxNAT6M0ebEYZOx2tO6vBEFsVgnPpv+AVjk0wJHfaUIbq31Jm3T6vvZaarnOeWDh8ShnwXuaAyM7WT3RzErA==}
-    engines: {node: ^18.17.0 || >=20.5.0}
 
   normalize-url@6.1.0:
     resolution: {integrity: sha512-DlL+XwOy3NxAQ8xuC0okPgK46iuVNAK01YN7RueYBqqFeGsBjV9XmCAzAdgt+667bCl5kPh9EqKKDwnaPG1I7A==}
@@ -5905,11 +5843,6 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  uglify-js@3.19.3:
-    resolution: {integrity: sha512-v3Xu+yuwBXisp6QYTcH4UbH+xYJXqnq2m/LtQVWKWzYc1iehYnLixoQDN9FH6/j9/oybfd6W9Ghwkl8+UMKTKQ==}
-    engines: {node: '>=0.8.0'}
-    hasBin: true
-
   uint8array-extras@1.5.0:
     resolution: {integrity: sha512-rvKSBiC5zqCCiDZ9kAOszZcDvdAHwwIKJG33Ykj43OKcWsnmcBRL09YTU4nOeHZ8Y2a7l1MgTd08SBe9A8Qj6A==}
     engines: {node: '>=18'}
@@ -6188,9 +6121,6 @@ packages:
     resolution: {integrity: sha512-BN22B5eaMMI9UMtjrGd5g5eCYPpCPDUy0FJXbYsaT5zYxjFOckS53SQDE3pWkVoWpHXVb3BrYcEN4Twa55B5cA==}
     engines: {node: '>=0.10.0'}
 
-  wordwrap@1.0.0:
-    resolution: {integrity: sha512-gvVzJFlPycKc5dZN4yPkP8w7Dc37BtP1yczEneOb4uq34pXZcvrtRTmWV8W+Ume+XCxKgbjM+nevkyFPMybd4Q==}
-
   wrap-ansi@6.2.0:
     resolution: {integrity: sha512-r6lPcBGxZXlIcymEu7InxDMhdW0KDxpLgoFLcguasxCaJ/SOIZwINatK9KY/tf+ZrlywOKU0UDj3ATXUBfxJXA==}
     engines: {node: '>=8'}
@@ -6426,13 +6356,13 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@commitlint/cli@21.2.2(@types/node@26.6.1)(conventional-commits-parser@6.4.0)(typescript@6.0.3)':
+  '@commitlint/cli@21.2.2(@types/node@26.6.2)(conventional-commits-filter@6.0.1)(conventional-commits-parser@7.1.2)(typescript@6.0.3)':
     dependencies:
       '@commitlint/config-conventional': 21.2.2
       '@commitlint/format': 21.2.2
       '@commitlint/lint': 21.2.2
-      '@commitlint/load': 21.2.2(@types/node@26.6.1)(typescript@6.0.3)
-      '@commitlint/read': 21.2.1(conventional-commits-parser@6.4.0)
+      '@commitlint/load': 21.2.2(@types/node@26.6.2)(typescript@6.0.3)
+      '@commitlint/read': 21.2.1(conventional-commits-filter@6.0.1)(conventional-commits-parser@7.1.2)
       '@commitlint/types': 21.2.0
       tinyexec: 1.3.1
       yargs: 18.1.0
@@ -6476,14 +6406,14 @@ snapshots:
       '@commitlint/rules': 21.2.2
       '@commitlint/types': 21.2.0
 
-  '@commitlint/load@21.2.2(@types/node@26.6.1)(typescript@6.0.3)':
+  '@commitlint/load@21.2.2(@types/node@26.6.2)(typescript@6.0.3)':
     dependencies:
       '@commitlint/config-validator': 21.2.0
       '@commitlint/execute-rule': 21.0.1
       '@commitlint/resolve-extends': 21.2.2
       '@commitlint/types': 21.2.0
       cosmiconfig: 9.0.2(typescript@6.0.3)
-      cosmiconfig-typescript-loader: 6.3.0(@types/node@26.6.1)(cosmiconfig@9.0.2(typescript@6.0.3))(typescript@6.0.3)
+      cosmiconfig-typescript-loader: 6.3.0(@types/node@26.6.2)(cosmiconfig@9.0.2(typescript@6.0.3))(typescript@6.0.3)
       es-toolkit: 1.52.0
       is-plain-obj: 4.1.0
       picocolors: 1.1.1
@@ -6499,11 +6429,11 @@ snapshots:
       conventional-changelog-angular: 9.4.0
       conventional-commits-parser: 7.1.2
 
-  '@commitlint/read@21.2.1(conventional-commits-parser@6.4.0)':
+  '@commitlint/read@21.2.1(conventional-commits-filter@6.0.1)(conventional-commits-parser@7.1.2)':
     dependencies:
       '@commitlint/top-level': 21.2.0
       '@commitlint/types': 21.2.0
-      '@conventional-changelog/git-client': 3.1.2(conventional-commits-parser@6.4.0)
+      '@conventional-changelog/git-client': 3.1.2(conventional-commits-filter@6.0.1)(conventional-commits-parser@7.1.2)
       tinyexec: 1.3.1
     transitivePeerDependencies:
       - conventional-commits-filter
@@ -6535,21 +6465,14 @@ snapshots:
       conventional-commits-parser: 7.1.2
       picocolors: 1.1.1
 
-  '@conventional-changelog/git-client@2.7.0(conventional-commits-parser@6.4.0)':
-    dependencies:
-      '@simple-libs/child-process-utils': 1.0.2
-      '@simple-libs/stream-utils': 1.2.0
-      semver: 7.8.5
-    optionalDependencies:
-      conventional-commits-parser: 6.4.0
-
-  '@conventional-changelog/git-client@3.1.2(conventional-commits-parser@6.4.0)':
+  '@conventional-changelog/git-client@3.1.2(conventional-commits-filter@6.0.1)(conventional-commits-parser@7.1.2)':
     dependencies:
       '@simple-libs/child-process-utils': 2.0.0
       '@simple-libs/stream-utils': 2.0.0
       semver: 7.8.5
     optionalDependencies:
-      conventional-commits-parser: 6.4.0
+      conventional-commits-filter: 6.0.1
+      conventional-commits-parser: 7.1.2
 
   '@conventional-changelog/template@1.4.0': {}
 
@@ -7293,12 +7216,12 @@ snapshots:
       '@inquirer/type': 2.0.0
       yoctocolors-cjs: 2.1.3
 
-  '@inquirer/external-editor@1.0.3(@types/node@26.6.1)':
+  '@inquirer/external-editor@1.0.3(@types/node@26.6.2)':
     dependencies:
       chardet: 2.2.0
       iconv-lite: 0.7.3
     optionalDependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
 
   '@inquirer/figures@1.0.15': {}
 
@@ -8268,17 +8191,16 @@ snapshots:
       '@sentry/conventions': 0.16.0
       '@sentry/core': 10.74.0
 
-  '@simple-libs/child-process-utils@1.0.2':
-    dependencies:
-      '@simple-libs/stream-utils': 1.2.0
-
   '@simple-libs/child-process-utils@2.0.0':
     dependencies:
       '@simple-libs/stream-utils': 2.0.0
 
-  '@simple-libs/hosted-git-info@1.0.2': {}
+  '@simple-libs/hosted-git-info@2.0.0': {}
 
-  '@simple-libs/stream-utils@1.2.0': {}
+  '@simple-libs/normalize-package-data@1.0.0':
+    dependencies:
+      '@simple-libs/hosted-git-info': 2.0.0
+      semver: 7.8.5
 
   '@simple-libs/stream-utils@2.0.0': {}
 
@@ -8353,12 +8275,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.3.3
       '@tailwindcss/oxide-win32-x64-msvc': 4.3.3
 
-  '@tailwindcss/vite@4.3.3(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))':
+  '@tailwindcss/vite@4.3.3(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))':
     dependencies:
       '@tailwindcss/node': 4.3.3
       '@tailwindcss/oxide': 4.3.3
       tailwindcss: 4.3.3
-      vite: 7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
 
   '@tanstack/query-core@5.103.1': {}
 
@@ -8401,7 +8323,7 @@ snapshots:
 
   '@types/appdmg@0.5.5':
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
     optional: true
 
   '@types/aria-query@5.0.4': {}
@@ -8431,7 +8353,7 @@ snapshots:
     dependencies:
       '@types/http-cache-semantics': 4.2.0
       '@types/keyv': 3.1.4
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
       '@types/responselike': 1.0.3
 
   '@types/chai@5.2.3':
@@ -8477,7 +8399,7 @@ snapshots:
 
   '@types/fs-extra@9.0.13':
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
     optional: true
 
   '@types/gensync@1.0.5': {}
@@ -8494,7 +8416,7 @@ snapshots:
 
   '@types/keyv@3.1.4':
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
 
   '@types/mdast@4.0.4':
     dependencies:
@@ -8504,7 +8426,7 @@ snapshots:
 
   '@types/mute-stream@0.0.4':
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
 
   '@types/node@22.20.2':
     dependencies:
@@ -8514,11 +8436,9 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
-  '@types/node@26.6.1':
+  '@types/node@26.6.2':
     dependencies:
       undici-types: 8.9.0
-
-  '@types/normalize-package-data@2.4.4': {}
 
   '@types/prismjs@1.26.6': {}
 
@@ -8536,7 +8456,7 @@ snapshots:
 
   '@types/responselike@1.0.3':
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
 
   '@types/semver@7.8.0': {}
 
@@ -8550,7 +8470,7 @@ snapshots:
 
   '@types/yauzl@2.10.3':
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
     optional: true
 
   '@typescript-eslint/eslint-plugin@8.70.0(@typescript-eslint/parser@8.70.0(eslint@9.39.5(jiti@2.7.0))(typescript@6.0.3))(eslint@9.39.5(jiti@2.7.0))(typescript@6.0.3)':
@@ -8646,7 +8566,7 @@ snapshots:
 
   '@ungap/structured-clone@1.4.0': {}
 
-  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))':
+  '@vitejs/plugin-react@5.2.0(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))':
     dependencies:
       '@babel/core': 8.0.5
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@8.0.5)
@@ -8654,7 +8574,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
 
   '@vitest/coverage-v8@4.1.11(vitest@4.1.11)':
     dependencies:
@@ -8668,7 +8588,7 @@ snapshots:
       obug: 2.2.1
       std-env: 4.2.0
       tinyrainbow: 3.1.1
-      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.1)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
+      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
 
   '@vitest/expect@4.1.11':
     dependencies:
@@ -8679,13 +8599,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.11(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))':
+  '@vitest/mocker@4.1.11(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
 
   '@vitest/pretty-format@4.1.11':
     dependencies:
@@ -8714,7 +8634,7 @@ snapshots:
       sirv: 3.0.2
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.1)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
+      vitest: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
 
   '@vitest/utils@4.1.11':
     dependencies:
@@ -8921,8 +8841,6 @@ snapshots:
     dependencies:
       call-bound: 1.0.4
       is-array-buffer: 3.0.5
-
-  array-ify@1.0.0: {}
 
   array-includes@3.2.0:
     dependencies:
@@ -9264,17 +9182,17 @@ snapshots:
 
   commander@9.5.0: {}
 
-  commitizen@4.3.2(@types/node@26.6.1)(typescript@6.0.3):
+  commitizen@4.3.2(@types/node@26.6.2)(typescript@6.0.3):
     dependencies:
       cachedir: 2.4.0
-      cz-conventional-changelog: 3.3.0(@types/node@26.6.1)(typescript@6.0.3)
+      cz-conventional-changelog: 3.3.0(@types/node@26.6.2)(typescript@6.0.3)
       dedent: 0.7.0
       detect-indent: 6.1.0
       find-node-modules: 2.1.3
       find-root: 1.1.0
       fs-extra: 9.1.0
       glob: 7.2.3
-      inquirer: 8.2.7(@types/node@26.6.1)
+      inquirer: 8.2.7(@types/node@26.6.2)
       is-utf8: 0.2.1
       lodash: 4.18.1
       minimist: 1.2.8
@@ -9283,11 +9201,6 @@ snapshots:
     transitivePeerDependencies:
       - '@types/node'
       - typescript
-
-  compare-func@2.0.0:
-    dependencies:
-      array-ify: 1.0.0
-      dot-prop: 5.3.0
 
   compare-version@0.1.2: {}
 
@@ -9313,42 +9226,31 @@ snapshots:
     dependencies:
       '@conventional-changelog/template': 1.4.0
 
-  conventional-changelog-conventionalcommits@9.3.1:
-    dependencies:
-      compare-func: 2.0.0
+  conventional-changelog-preset-loader@6.0.1: {}
 
-  conventional-changelog-preset-loader@5.0.0: {}
-
-  conventional-changelog-writer@8.4.0:
+  conventional-changelog-writer@9.2.1:
     dependencies:
-      '@simple-libs/stream-utils': 1.2.0
-      conventional-commits-filter: 5.0.0
-      handlebars: 4.7.9
-      meow: 13.2.0
+      '@conventional-changelog/template': 1.4.0
+      '@simple-libs/stream-utils': 2.0.0
+      argue-cli: 3.2.0
+      conventional-commits-filter: 6.0.1
       semver: 7.8.5
 
-  conventional-changelog@7.2.1:
+  conventional-changelog@8.1.3:
     dependencies:
-      '@conventional-changelog/git-client': 2.7.0(conventional-commits-parser@6.4.0)
-      '@simple-libs/hosted-git-info': 1.0.2
-      '@types/normalize-package-data': 2.4.4
-      conventional-changelog-preset-loader: 5.0.0
-      conventional-changelog-writer: 8.4.0
-      conventional-commits-parser: 6.4.0
+      '@conventional-changelog/git-client': 3.1.2(conventional-commits-filter@6.0.1)(conventional-commits-parser@7.1.2)
+      '@simple-libs/hosted-git-info': 2.0.0
+      '@simple-libs/normalize-package-data': 1.0.0
+      argue-cli: 3.2.0
+      conventional-changelog-preset-loader: 6.0.1
+      conventional-changelog-writer: 9.2.1
+      conventional-commits-filter: 6.0.1
+      conventional-commits-parser: 7.1.2
       fd-package-json: 2.0.0
-      meow: 13.2.0
-      normalize-package-data: 7.0.1
-    transitivePeerDependencies:
-      - conventional-commits-filter
 
   conventional-commit-types@3.0.0: {}
 
-  conventional-commits-filter@5.0.0: {}
-
-  conventional-commits-parser@6.4.0:
-    dependencies:
-      '@simple-libs/stream-utils': 1.2.0
-      meow: 13.2.0
+  conventional-commits-filter@6.0.1: {}
 
   conventional-commits-parser@7.1.2:
     dependencies:
@@ -9357,9 +9259,9 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  cosmiconfig-typescript-loader@6.3.0(@types/node@26.6.1)(cosmiconfig@9.0.2(typescript@6.0.3))(typescript@6.0.3):
+  cosmiconfig-typescript-loader@6.3.0(@types/node@26.6.2)(cosmiconfig@9.0.2(typescript@6.0.3))(typescript@6.0.3):
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
       cosmiconfig: 9.0.2(typescript@6.0.3)
       jiti: 2.6.1
       typescript: 6.0.3
@@ -9393,16 +9295,16 @@ snapshots:
 
   csstype@3.2.3: {}
 
-  cz-conventional-changelog@3.3.0(@types/node@26.6.1)(typescript@6.0.3):
+  cz-conventional-changelog@3.3.0(@types/node@26.6.2)(typescript@6.0.3):
     dependencies:
       chalk: 2.4.2
-      commitizen: 4.3.2(@types/node@26.6.1)(typescript@6.0.3)
+      commitizen: 4.3.2(@types/node@26.6.2)(typescript@6.0.3)
       conventional-commit-types: 3.0.0
       lodash.map: 4.6.0
       longest: 2.0.1
       word-wrap: 1.2.5
     optionalDependencies:
-      '@commitlint/load': 21.2.2(@types/node@26.6.1)(typescript@6.0.3)
+      '@commitlint/load': 21.2.2(@types/node@26.6.2)(typescript@6.0.3)
     transitivePeerDependencies:
       - '@types/node'
       - typescript
@@ -9575,10 +9477,6 @@ snapshots:
     dependencies:
       type-fest: 5.9.0
 
-  dot-prop@5.3.0:
-    dependencies:
-      is-obj: 2.0.0
-
   ds-store@0.1.6:
     dependencies:
       bplist-creator: 0.0.8
@@ -9671,7 +9569,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  electron-vite@5.0.0(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)):
+  electron-vite@5.0.0(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)):
     dependencies:
       '@babel/core': 8.0.5
       '@babel/plugin-transform-arrow-functions': 7.29.7(@babel/core@8.0.5)
@@ -9679,7 +9577,7 @@ snapshots:
       esbuild: 0.25.12
       magic-string: 0.30.21
       picocolors: 1.1.1
-      vite: 7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
 
   electron-winstaller@5.4.4:
     dependencies:
@@ -9695,7 +9593,7 @@ snapshots:
       - supports-color
     optional: true
 
-  electron@44.4.1:
+  electron@44.4.3:
     dependencies:
       '@electron-internal/extract-zip': 1.0.5
       '@electron/get': 5.1.0
@@ -10433,15 +10331,6 @@ snapshots:
 
   graceful-fs@4.2.11: {}
 
-  handlebars@4.7.9:
-    dependencies:
-      minimist: 1.2.8
-      neo-async: 2.6.2
-      source-map: 0.6.1
-      wordwrap: 1.0.0
-    optionalDependencies:
-      uglify-js: 3.19.3
-
   has-bigints@1.1.0: {}
 
   has-flag@3.0.0: {}
@@ -10517,10 +10406,6 @@ snapshots:
       parse-passwd: 1.0.0
 
   hosted-git-info@2.8.9: {}
-
-  hosted-git-info@8.1.0:
-    dependencies:
-      lru-cache: 10.4.3
 
   html-escaper@2.0.2: {}
 
@@ -10617,9 +10502,9 @@ snapshots:
 
   inline-style-parser@0.2.7: {}
 
-  inquirer@8.2.7(@types/node@26.6.1):
+  inquirer@8.2.7(@types/node@26.6.2):
     dependencies:
-      '@inquirer/external-editor': 1.0.3(@types/node@26.6.1)
+      '@inquirer/external-editor': 1.0.3(@types/node@26.6.2)
       ansi-escapes: 4.3.2
       chalk: 4.1.2
       cli-cursor: 3.1.0
@@ -10768,8 +10653,6 @@ snapshots:
 
   is-number@7.0.0: {}
 
-  is-obj@2.0.0: {}
-
   is-path-inside@4.0.0: {}
 
   is-plain-obj@4.1.0: {}
@@ -10860,7 +10743,7 @@ snapshots:
 
   jest-worker@27.5.1:
     dependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
       merge-stream: 2.0.0
       supports-color: 8.1.1
 
@@ -11059,8 +10942,6 @@ snapshots:
     dependencies:
       fault: 1.0.4
       highlight.js: 10.7.3
-
-  lru-cache@10.4.3: {}
 
   lru-cache@11.5.2: {}
 
@@ -11284,8 +11165,6 @@ snapshots:
       map-age-cleaner: 0.1.3
       mimic-fn: 2.1.0
       p-is-promise: 2.1.0
-
-  meow@13.2.0: {}
 
   merge-stream@2.0.0: {}
 
@@ -11660,12 +11539,6 @@ snapshots:
       hosted-git-info: 2.8.9
       resolve: 1.22.12
       semver: 5.7.2
-      validate-npm-package-license: 3.0.4
-
-  normalize-package-data@7.0.1:
-    dependencies:
-      hosted-git-info: 8.1.0
-      semver: 7.8.5
       validate-npm-package-license: 3.0.4
 
   normalize-url@6.1.0: {}
@@ -12791,9 +12664,6 @@ snapshots:
 
   typescript@6.0.3: {}
 
-  uglify-js@3.19.3:
-    optional: true
-
   uint8array-extras@1.5.0: {}
 
   unbox-primitive@1.1.0:
@@ -12931,7 +12801,7 @@ snapshots:
       d3-time: 3.1.0
       d3-timer: 3.0.1
 
-  vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1):
+  vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1):
     dependencies:
       esbuild: 0.28.2
       fdir: 6.5.0(picomatch@4.0.7)
@@ -12940,17 +12810,17 @@ snapshots:
       rollup: 4.63.2
       tinyglobby: 0.2.17
     optionalDependencies:
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
       fsevents: 2.3.3
       jiti: 2.7.0
       lightningcss: 1.32.0
       terser: 5.51.2
       yaml: 2.9.1
 
-  vitest@4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.1)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)):
+  vitest@4.1.11(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-v8@4.1.11)(@vitest/ui@4.1.11)(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
+      '@vitest/mocker': 4.1.11(vite@7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -12967,11 +12837,11 @@ snapshots:
       tinyexec: 1.3.1
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 7.3.6(@types/node@26.6.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@26.6.2)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.51.2)(yaml@2.9.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@opentelemetry/api': 1.9.1
-      '@types/node': 26.6.1
+      '@types/node': 26.6.2
       '@vitest/coverage-v8': 4.1.11(vitest@4.1.11)
       '@vitest/ui': 4.1.11(vitest@4.1.11)
     transitivePeerDependencies:
@@ -13098,8 +12968,6 @@ snapshots:
       stackback: 0.0.2
 
   word-wrap@1.2.5: {}
-
-  wordwrap@1.0.0: {}
 
   wrap-ansi@6.2.0:
     dependencies:
