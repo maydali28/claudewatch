@@ -1,3 +1,9 @@
+## 1.5.3 (2026-09-22)
+
+
+### Features
+
+* **commands:** show command bodies as markdown with a raw toggle
 ## 1.5.2 (2026-09-22)
 
 

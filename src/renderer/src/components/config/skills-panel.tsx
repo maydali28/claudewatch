@@ -1,10 +1,11 @@
 import React from 'react'
-import { Layers, CheckCircle, XCircle, Code, Eye } from 'lucide-react'
+import { Layers, CheckCircle, XCircle } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { SkillEntry } from '@shared/types'
-import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
+import MarkdownBody from '@renderer/components/shared/markdown-body'
+import { lineCount } from '@renderer/components/shared/markdown-body-rules'
 
 const KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
 
@@ -26,71 +27,13 @@ function ValidationBadge({ ok, label }: { ok: boolean; label: string }): React.J
   )
 }
 
-// ─── Body section with raw / preview toggle ───────────────────────────────────
-
-function BodySection({
-  content,
-  lineCount,
-}: {
-  content: string
-  lineCount: number
-}): React.JSX.Element {
-  const [mode, setMode] = React.useState<'preview' | 'raw'>('preview')
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-          Body ({lineCount} lines)
-        </p>
-        <div className="flex items-center rounded-md border border-border overflow-hidden">
-          <button
-            onClick={() => setMode('preview')}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1 text-[10px] font-medium transition-colors',
-              mode === 'preview'
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
-          >
-            <Eye className="h-3 w-3" />
-            Preview
-          </button>
-          <button
-            onClick={() => setMode('raw')}
-            className={cn(
-              'flex items-center gap-1 px-2 py-1 text-[10px] font-medium transition-colors border-l border-border',
-              mode === 'raw'
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent'
-            )}
-          >
-            <Code className="h-3 w-3" />
-            Raw
-          </button>
-        </div>
-      </div>
-
-      {mode === 'preview' ? (
-        <div className="rounded-lg border border-border bg-card p-5">
-          <MarkdownRenderer content={content} />
-        </div>
-      ) : (
-        <pre className="rounded-lg border border-border bg-muted/40 p-4 text-xs font-mono text-foreground whitespace-pre-wrap break-words leading-relaxed overflow-x-auto">
-          {content}
-        </pre>
-      )}
-    </div>
-  )
-}
-
 // ─── Skill detail view ────────────────────────────────────────────────────────
 
 function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
   const isValidKebab = KEBAB_RE.test(skill.name)
   const nameLen = skill.name.length
   const descLen = (skill.description ?? '').length
-  const bodyLines = skill.body.split('\n').length
+  const bodyLines = lineCount(skill.body)
   const hasReservedWords = /claude|anthropic/i.test(skill.name)
   const hasAngleBrackets = /[<>]/.test(skill.name + (skill.description ?? ''))
 
@@ -153,7 +96,7 @@ function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
         )}
 
         {/* Body */}
-        <BodySection content={skill.body} lineCount={bodyLines} />
+        <MarkdownBody content={skill.body} label="Body" layout="inline" />
       </div>
     </div>
   )
