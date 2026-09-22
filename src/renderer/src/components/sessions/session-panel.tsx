@@ -13,6 +13,7 @@ import {
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { windowAfterScroll, windowAfterAppend, scrollTopAfterPrepend } from './render-window'
 import { sessionPanelView } from './session-panel-state'
+import { groupResponses } from './assistant-response'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { format } from 'date-fns'
 import { useSessionsStore } from '@renderer/store/sessions.store'
@@ -323,11 +324,13 @@ export default function SessionPanel(): React.JSX.Element | null {
     setPrevSearchQuery(searchQuery)
     setVisibleCount(INITIAL_RENDER_BATCH)
   }
-  // Records the panel shows: the role filter, then the search filter.
-  // Memoised so the effects below can key on it.
+  // Records the panel shows: one entry per response, then the role filter,
+  // then the search filter. Grouping comes first so a search hit anywhere in
+  // a response keeps the whole response. Memoised so the effects below can
+  // key on it.
   const filteredRecords = React.useMemo(() => {
     if (!parsedSession) return []
-    const display = parsedSession.records.filter(
+    const display = groupResponses(parsedSession.records).filter(
       (r) =>
         r.isCompactionBoundary || r.role === 'user' || r.role === 'assistant' || r.role === 'system'
     )
