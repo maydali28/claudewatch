@@ -1,16 +1,16 @@
 Package: claudewatch
-Version: 1.5.1
+Version: 1.5.2
 Architecture: amd64
 Maintainer: may.mohamedali28@gmail.com
-Installed-Size: 400211
+Installed-Size: 366110
 Depends: libgtk-3-0, libnotify4, libnss3, xdg-utils, libatspi2.0-0, libdrm2, libgbm1, libxcb-dri3-0, kde-cli-tools | kde-runtime | trash-cli | libglib2.0-bin | gvfs-bin
 Recommends: pulseaudio | libasound2
 Suggests: gir1.2-gnomekeyring-1.0, libgnome-keyring0, lsb-release
-Filename: pool/main/c/claudewatch/claudewatch_1.5.1_amd64.deb
-Size: 104046444
-MD5sum: 637a93036747aff2016c78be8eaa6183
-SHA1: ddc31a6f458904b5b20be4f19e8007fa118c99a2
-SHA256: 1e80c1af40d25648e3846063737350e33960d834645fa68be6fc10e2286a5933
+Filename: pool/main/c/claudewatch/claudewatch_1.5.2_amd64.deb
+Size: 102953428
+MD5sum: dd8136ef755ec13339e1f94f37c1a4c9
+SHA1: 9b7150bda9c4db80f9f9c3024bfd02471d13d3cf
+SHA256: a312afbb04c489b1094763c1e3e21f15da2bead582ec438574a794ec66cd750b
 Section: utils
 Priority: optional
 Homepage: https://github.com/maydali28/claudewatch
