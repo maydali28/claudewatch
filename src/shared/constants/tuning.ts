@@ -53,6 +53,21 @@ export const EFFORT_MEDIUM_THINKING_CHARS = 1000
 /** Thinking-block character cap for "high" classification. Above → ultrathink. */
 export const EFFORT_HIGH_THINKING_CHARS = 5000
 
+// ─── Transcript: long message bodies ─────────────────────────────────────────
+
+/**
+ * Height at which a message body (a prompt, an answer, an opened thinking
+ * block) is clamped behind a "Show more" control. About 12–15 lines of
+ * transcript text.
+ */
+export const MESSAGE_COLLAPSE_MAX_HEIGHT_PX = 320
+
+/**
+ * Content this much over the clamp is shown in full instead: a control that
+ * reveals two more lines is noise. See `needsCollapse`.
+ */
+export const MESSAGE_COLLAPSE_SLACK_PX = 48
+
 // ─── Session parser: error message snippets ───────────────────────────────────
 
 /** Truncate captured error text to this many characters before storing. */

@@ -1,3 +1,14 @@
+## 1.5.2 (2026-09-22)
+
+
+### Features
+
+* **sessions:** collapse long messages behind a show more control
+
+### Bug Fixes
+
+* **sessions:** hide redacted thinking blocks in the transcript
+* **sessions:** show each response as one message in the transcript
 ## 1.5.1 (2026-09-17)
 
 > **User message counts drop, and cached session data is rebuilt on first
