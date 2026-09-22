@@ -49,8 +49,8 @@ function CommandDetail({ cmd }: { cmd: CommandEntry }): React.JSX.Element {
 
       {/* Body: frontmatter is already stripped by the config service, so this
           is the prompt itself — markdown, like a skill body. */}
-      <div className="flex-1 min-h-0">
-        <MarkdownBody content={cmd.content} label="Body" layout="panel" />
+      <div className="flex-1 overflow-y-auto p-6">
+        <MarkdownBody content={cmd.content} label="Body" />
       </div>
     </div>
   )
