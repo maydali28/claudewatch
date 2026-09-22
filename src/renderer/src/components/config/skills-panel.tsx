@@ -96,7 +96,7 @@ function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
         )}
 
         {/* Body */}
-        <MarkdownBody content={skill.body} label="Body" layout="inline" />
+        <MarkdownBody content={skill.body} label="Body" />
       </div>
     </div>
   )

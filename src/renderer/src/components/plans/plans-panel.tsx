@@ -205,7 +205,9 @@ export default function PlansPanel(): React.JSX.Element {
             ))}
           </div>
         ) : detail ? (
-          <MarkdownBody content={detail.content} label="Content" layout="panel" />
+          <div className="flex-1 overflow-y-auto p-6">
+            <MarkdownBody content={detail.content} label="Content" />
+          </div>
         ) : null}
       </div>
     </div>
