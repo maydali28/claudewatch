@@ -1,3 +1,9 @@
+## 1.5.4 (2026-09-22)
+
+
+### Bug Fixes
+
+* **config:** show plans and commands with the same body layout as skills
 ## 1.5.3 (2026-09-22)
 
 
