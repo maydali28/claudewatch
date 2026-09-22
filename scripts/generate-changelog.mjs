@@ -23,14 +23,67 @@ if (fromIndex !== -1 && !from) {
   process.exit(1)
 }
 
+/**
+ * Section layout — byte-for-byte what conventional-changelog 7 produced, so
+ * every section of CHANGELOG.md reads the same and extract-release-notes.mjs
+ * and the release hook keep parsing it:
+ *
+ *   ## <version> (<date>)
+ *   <blank>
+ *   <blank>
+ *   ### ⚠ BREAKING CHANGES        (only when a commit carries one)
+ *   <blank>
+ *   * **<scope>:** <note>
+ *   <blank>
+ *   ### <group>
+ *   <blank>
+ *   * **<scope>:** <subject>
+ *
+ * conventional-changelog 8 renders through template functions instead of
+ * Handlebars strings. These are the same two overrides as before (plain
+ * version in the heading, subject only on each line — commit subjects are
+ * the release notes, so no hash or compare links), plus the enclosing
+ * template: the writer trims every segment, so the second blank line after
+ * the heading cannot come from the header partial any more.
+ */
+function headerPartial({ version, title, date }) {
+  return `## ${version}${title ? ` "${title}"` : ''}${date ? ` (${date})` : ''}`
+}
+
+function commitPartial(_context, { scope, subject, header }) {
+  return `${scope ? `**${scope}:** ` : ''}${subject || header || ''}`
+}
+
+function bullets(items) {
+  return items.map((item) => `* ${item}`).join('\n')
+}
+
+function template(context) {
+  const { noteGroups = [], commitGroups = [] } = context
+  const blocks = [
+    ...noteGroups.map(
+      (group) =>
+        `### ⚠ ${group.title}\n\n${bullets(
+          group.notes.map(
+            (note) => `${note.commit?.scope ? `**${note.commit.scope}:** ` : ''}${note.text}`
+          )
+        )}`
+    ),
+    ...commitGroups.map(
+      (group) =>
+        `${group.title ? `### ${group.title}\n\n` : ''}${bullets(
+          group.commits.map((commit) => commitPartial(context, commit))
+        )}`
+    ),
+  ]
+  return `${headerPartial(context)}\n\n\n${blocks.join('\n\n')}`
+}
+
 const generator = new ConventionalChangelog()
   .readPackage()
   .readRepository()
   .loadPreset('conventionalcommits')
-  .writer({
-    headerPartial: '## {{version}}{{#if title}} "{{title}}"{{/if}}{{#if date}} ({{date}}){{/if}}\n\n',
-    commitPartial: '*{{#if scope}} **{{scope}}:**{{/if}} {{subject}}\n'
-  })
+  .writer({ template, headerPartial, commitPartial })
 
 if (regenerateAll) {
   generator.options({ releaseCount: 0 })
