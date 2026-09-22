@@ -18,9 +18,11 @@ import type {
   SubagentSummary,
 } from '@shared/types'
 import ThinkingBlock from '@renderer/components/shared/thinking-block'
+import CollapsibleText from '@renderer/components/shared/collapsible-text'
 import ToolResultBlock from '@renderer/components/shared/tool-result-block'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import { parseUserMessage, type ParsedContextTag } from './user-message-parser'
+import { isRenderableBlock } from './assistant-response'
 import {
   AGENT_MESSAGE_LABEL,
   INJECTED_CONTEXT_LABEL,
@@ -286,21 +288,26 @@ function renderBlock(
   searchQuery: string,
   idx: number
 ): React.ReactNode {
+  if (!isRenderableBlock(block)) return null
   switch (block.type) {
     case 'text':
       return (
-        <MarkdownRenderer
-          key={idx}
-          content={
-            searchQuery
-              ? block.text.replace(new RegExp(searchQuery, 'gi'), (m) => `**${m}**`)
-              : block.text
-          }
-          className="text-sm"
-        />
+        <CollapsibleText key={idx} forceOpen={textMatchesQuery(block.text, searchQuery)}>
+          <MarkdownRenderer
+            content={highlightMatches(block.text, searchQuery)}
+            className="text-sm"
+          />
+        </CollapsibleText>
       )
     case 'thinking':
-      return <ThinkingBlock key={idx} thinking={block.thinking} className="mt-2" />
+      return (
+        <ThinkingBlock
+          key={idx}
+          thinking={block.thinking}
+          forceOpen={textMatchesQuery(block.thinking, searchQuery)}
+          className="mt-2"
+        />
+      )
     case 'tool_use': {
       const result = toolResultMap[block.id]
       return (
@@ -532,10 +539,12 @@ export default function MessageBubble({
         {/* Main message bubble — only when there is actual text */}
         {mainText && (
           <div className="max-w-[75%] rounded-2xl rounded-tr-sm bg-blue-600 px-4 py-2.5 text-sm text-white shadow-sm">
-            <MarkdownRenderer
-              content={highlightMatches(mainText, searchQuery)}
-              variant="inverted"
-            />
+            <CollapsibleText variant="inverted" forceOpen={textMatchesQuery(mainText, searchQuery)}>
+              <MarkdownRenderer
+                content={highlightMatches(mainText, searchQuery)}
+                variant="inverted"
+              />
+            </CollapsibleText>
           </div>
         )}
       </div>
@@ -543,10 +552,9 @@ export default function MessageBubble({
   }
 
   if (role === 'assistant') {
-    const hasVisibleBlocks = record.contentBlocks.some(
-      (b) => b.type === 'text' || b.type === 'thinking' || b.type === 'tool_use'
-    )
-    if (!hasVisibleBlocks) return <></>
+    // A response whose only block was redacted thinking draws nothing — not
+    // even the model/effort header.
+    if (!record.contentBlocks.some(isRenderableBlock)) return <></>
 
     return (
       <div className="px-4 py-3">
