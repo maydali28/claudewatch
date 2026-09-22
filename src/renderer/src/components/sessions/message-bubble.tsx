@@ -21,6 +21,7 @@ import ThinkingBlock from '@renderer/components/shared/thinking-block'
 import ToolResultBlock from '@renderer/components/shared/tool-result-block'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
 import { parseUserMessage, type ParsedContextTag } from './user-message-parser'
+import { isRenderableBlock } from './assistant-response'
 import {
   AGENT_MESSAGE_LABEL,
   INJECTED_CONTEXT_LABEL,
@@ -286,6 +287,7 @@ function renderBlock(
   searchQuery: string,
   idx: number
 ): React.ReactNode {
+  if (!isRenderableBlock(block)) return null
   switch (block.type) {
     case 'text':
       return (
@@ -543,10 +545,9 @@ export default function MessageBubble({
   }
 
   if (role === 'assistant') {
-    const hasVisibleBlocks = record.contentBlocks.some(
-      (b) => b.type === 'text' || b.type === 'thinking' || b.type === 'tool_use'
-    )
-    if (!hasVisibleBlocks) return <></>
+    // A response whose only block was redacted thinking draws nothing — not
+    // even the model/effort header.
+    if (!record.contentBlocks.some(isRenderableBlock)) return <></>
 
     return (
       <div className="px-4 py-3">
