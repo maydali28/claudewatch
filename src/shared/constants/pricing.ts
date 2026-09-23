@@ -5,14 +5,16 @@ import type { AppPreferences } from '@shared/types/preferences'
 // Source: platform.claude.com/docs/en/about-claude/pricing
 //
 // Cache 5m write = 1.25x base input. Cache 1h write = 2x base input.
-// Cache read = 0.1x base input, EXCEPT Fable 5.1, which Anthropic prices at a
-// flat $0.25 per million regardless of the input rate.
+// Cache read = 0.1x base input, EXCEPT Fable 5.1 / Mythos 5.1 (0.025x, a flat
+// $0.25 per million) and Opus 5.5 (0.05x, $0.20 per million).
 //
 // Confirmed by the published pricing table (platform.claude.com/docs/en/
 // about-claude/pricing), not carried over as an assumption:
 //   - The 1.25x / 2x write multipliers hold for Fable 5.1 and Mythos 5.1,
 //     same as every other model here.
 //   - Mythos 5.1 shares Fable 5.1's flat $0.25 cache read rate.
+//   - Opus 5.5 is $4 / $20 with cache reads at 0.05x ($0.20), and the usual
+//     1.25x / 2x write multipliers ($5 / $8).
 
 /**
  * Bump whenever any rate below changes, or whenever `getModelFamily` starts
@@ -23,8 +25,12 @@ import type { AppPreferences } from '@shared/types/preferences'
  *
  * 2 — added fable-5-1 / mythos-5-1 / opus-5 / sonnet-5 / sonnet-3-5, corrected
  *     the Fable 5.1 cache-read rate, and stopped pricing unknown models.
+ * 3 — added opus-5-5, so sessions cached as `unknown` before it was
+ *     recognised are repriced instead of staying unpriced; dropped opus-3 /
+ *     sonnet-3-7 / sonnet-3-5 / haiku-3, which no longer appear on the
+ *     official pricing page, so their sessions now surface as unpriced.
  */
-export const PRICING_REVISION = 2
+export const PRICING_REVISION = 3
 
 export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   // ── Fable 5.1 / Mythos 5.1 — $10 input / $50 output, $0.25 cache read ────
@@ -35,6 +41,9 @@ export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   'fable-5': { input: 10.0, output: 50.0, cacheRead: 1.0, cache5m: 12.5, cache1h: 20.0 },
   'mythos-5': { input: 10.0, output: 50.0, cacheRead: 1.0, cache5m: 12.5, cache1h: 20.0 },
 
+  // ── Opus 5.5 — $4 input / $20 output, $0.20 cache read (0.05x) ───────────
+  'opus-5-5': { input: 4.0, output: 20.0, cacheRead: 0.2, cache5m: 5.0, cache1h: 8.0 },
+
   // ── Opus 5 / 4.8 / 4.7 / 4.6 / 4.5 — $5 input / $25 output ───────────────
   'opus-5': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
   'opus-4-8': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
@@ -42,29 +51,23 @@ export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   'opus-4-6': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
   'opus-4-5': { input: 5.0, output: 25.0, cacheRead: 0.5, cache5m: 6.25, cache1h: 10.0 },
 
-  // ── Opus 4.1 / 4 / 3 — $15 input / $75 output ────────────────────────────
+  // ── Opus 4.1 / 4 — $15 input / $75 output ────────────────────────────────
   'opus-4-1': { input: 15.0, output: 75.0, cacheRead: 1.5, cache5m: 18.75, cache1h: 30.0 },
   'opus-4': { input: 15.0, output: 75.0, cacheRead: 1.5, cache5m: 18.75, cache1h: 30.0 },
-  'opus-3': { input: 15.0, output: 75.0, cacheRead: 1.5, cache5m: 18.75, cache1h: 30.0 },
 
   // ── Sonnet 5 — $2 input / $10 output ─────────────────────────────────────
   'sonnet-5': { input: 2.0, output: 10.0, cacheRead: 0.2, cache5m: 2.5, cache1h: 4.0 },
 
-  // ── Sonnet 4.6 / 4.5 / 4 / 3.7 / 3.5 — $3 input / $15 output ─────────────
+  // ── Sonnet 4.6 / 4.5 / 4 — $3 input / $15 output ─────────────────────────
   'sonnet-4-6': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
   'sonnet-4-5': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
   'sonnet-4': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
-  'sonnet-3-7': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
-  'sonnet-3-5': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
 
   // ── Haiku 4.5 — $1 input / $5 output ─────────────────────────────────────
   'haiku-4-5': { input: 1.0, output: 5.0, cacheRead: 0.1, cache5m: 1.25, cache1h: 2.0 },
 
   // ── Haiku 3.5 — $0.80 input / $4 output ──────────────────────────────────
   'haiku-3-5': { input: 0.8, output: 4.0, cacheRead: 0.08, cache5m: 1.0, cache1h: 1.6 },
-
-  // ── Haiku 3 — $0.25 input / $1.25 output ─────────────────────────────────
-  'haiku-3': { input: 0.25, output: 1.25, cacheRead: 0.03, cache5m: 0.3, cache1h: 0.5 },
 
   // ── Unknown — deliberately zero; `estimateCost` refuses to price it ──────
   // Never give this a plausible fallback rate. A guessed rate is indis-

@@ -119,12 +119,12 @@ describe('pricing fingerprint invalidation', () => {
     setCachedSummary(parentPath, 2000, 900, '', FP, TZ, summary)
     expect(getCachedSummary(parentPath, 2000, 900, '', FP, TZ)).toEqual(summary)
 
-    // The overridden family (haiku-3) never appears in this session's own
+    // The overridden family (haiku-3-5) never appears in this session's own
     // entry — proving the fingerprint covers the whole table, not just the
     // families a given summary happens to use.
     const overridden: Record<ModelFamily, ModelPricing> = {
       ...ANTHROPIC_PRICING,
-      'haiku-3': { ...ANTHROPIC_PRICING['haiku-3'], output: 1234 },
+      'haiku-3-5': { ...ANTHROPIC_PRICING['haiku-3-5'], output: 1234 },
     }
     const overriddenFp = pricingFingerprint(overridden)
 
