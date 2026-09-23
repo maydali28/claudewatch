@@ -1,24 +1,24 @@
 Architectures: amd64
 Codename: stable
 Components: main
-Date: Tue, 22 Sep 2026 18:46:34 +0000
+Date: Wed, 23 Sep 2026 06:57:23 +0000
 Description: ClaudeWatch APT repository
 Label: ClaudeWatch
 Origin: ClaudeWatch
 Suite: stable
 MD5Sum:
- 98a78f446a283edac3ac7d2fbba6bfb8             1496 Release
- 6b4997e48b03cf132518078f936f2053              834 main/binary-amd64/Packages
- fede7628299e966111b02f7134e54b3a              543 main/binary-amd64/Packages.gz
+ c53f04004945131b7bfc24a34d2090e9             1496 Release
+ 7df812c3f3452c02afc1700a1d718df7              834 main/binary-amd64/Packages
+ 4dd67842bef8efc2acc999bf2e93884c              546 main/binary-amd64/Packages.gz
 SHA1:
- 41b56bdd62f2d01b13f193040ca9211e88af838e             1496 Release
- 2999fda4aab317e021cf687c734a3beaf897c45f              834 main/binary-amd64/Packages
- c9b9c07239858847c3ec8cf6f46dbd7fbc49f00c              543 main/binary-amd64/Packages.gz
+ 5b3aebfb99385b0091f5430e6c11dec99b74283b             1496 Release
+ fcdb2e70a2159db5dfdb319fe751ef73077be888              834 main/binary-amd64/Packages
+ 1678051a4c993d2521cc781bb35fd49c07c9a32b              546 main/binary-amd64/Packages.gz
 SHA256:
- c29788a175dc15fc3e9ef354c1ba47af0261f8f398a0e680c2a80a36928c1255             1496 Release
- 7ee95f80ee541386a84426cef0cbe6f55caef4cd3122eafb970b362ec1b35ca8              834 main/binary-amd64/Packages
- a94a1f029208d98fae6c3df918461eb9a517e1647d9da517434c4354c3f7cd79              543 main/binary-amd64/Packages.gz
+ 1d4fe1ef867cdfc43e1e0e5f8cb1df9b2320a613db8ff6895a26ba5d25c2999b             1496 Release
+ 90ed715d8ec8aff5f2f718001f73590d0a808c4009e09ce6a2dd2bff03e9da5e              834 main/binary-amd64/Packages
+ fea85200cd16e35c7bdc6bfdff1aff3b0736f4c977efedfedf4897174dd416af              546 main/binary-amd64/Packages.gz
 SHA512:
- 4fd9699727e563c50aa93dafa846aa22f833e7439328abff3ec60e308659e77e74f8843f9647982c3d1bf154bc85627868249cbd29ef13d7578b1e12bf804de2             1496 Release
- 58d852f16749de7d4ee51b27d80d28e3625fdab03f7244d0be6c24a26bb620f5b6d46659ce3d85e5b80469a53899ee3c5c1fea9056f8046c7e5bc3a18394fa5c              834 main/binary-amd64/Packages
- ada1162c52eed0346348fe2c339167cdc241c3f6678edaf4906aa6739da7b90534bdae07fbd642bc156cd523934278d45c2816845e2148d5f8408f0eaf6a0ae6              543 main/binary-amd64/Packages.gz
+ d5b3b781eb0c07812d8b478ea563f12c8f20c177707175d7d715202c3243197c82737e54b32eddadc0559ed8184088e94e5669de219cc27850af343658d5c431             1496 Release
+ ea671c7408f066148f90615e64d7bf4ffffed6d3ed589191229364f8863dbe78868581c6e7c8fe3bda1fdef174c6d926b26ea0fa4f4c13591c19d38242a556ba              834 main/binary-amd64/Packages
+ 1cb6a010af8543ac52d4e61ef9d76c063dc985b05503ab25b9cb04efb3e92566249c868c1b2760538eade1b6355dc39bce5ba9a288e4b91b280c1a2695dc04f0              546 main/binary-amd64/Packages.gz
