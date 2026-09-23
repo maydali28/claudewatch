@@ -13,6 +13,7 @@ describe('getModelFamily — current models', () => {
     ['claude-mythos-5-1', 'mythos-5-1'],
     ['claude-fable-5', 'fable-5'],
     ['claude-mythos-5', 'mythos-5'],
+    ['claude-opus-5-5', 'opus-5-5'],
     ['claude-opus-5', 'opus-5'],
     ['claude-sonnet-5', 'sonnet-5'],
     ['claude-opus-4-8', 'opus-4-8'],
@@ -48,6 +49,7 @@ describe('getModelFamily — dated snapshots', () => {
  */
 describe('getModelFamily — provider-decorated IDs', () => {
   const cases: Array<[string, ModelFamily]> = [
+    ['anthropic.claude-opus-5-5', 'opus-5-5'],
     ['anthropic.claude-opus-5', 'opus-5'],
     ['us.anthropic.claude-sonnet-5', 'sonnet-5'],
     ['eu.anthropic.claude-opus-4-6', 'opus-4-6'],
@@ -74,16 +76,22 @@ describe('getModelFamily — zero-minor aliases', () => {
 })
 
 describe('getModelFamily — legacy version-before-family IDs', () => {
-  const cases: Array<[string, ModelFamily]> = [
-    ['claude-3-7-sonnet-20250219', 'sonnet-3-7'],
-    ['claude-3-5-sonnet-20241022', 'sonnet-3-5'],
-    ['claude-3-5-haiku-20241022', 'haiku-3-5'],
-    ['claude-3-opus-20240229', 'opus-3'],
-    ['claude-3-haiku-20240307', 'haiku-3'],
-  ]
+  it('claude-3-5-haiku-20241022 resolves to haiku-3-5', () => {
+    expect(getModelFamily('claude-3-5-haiku-20241022')).toBe('haiku-3-5')
+  })
 
-  it.each(cases)('%s resolves to %s', (raw, expected) => {
-    expect(getModelFamily(raw)).toBe(expected)
+  /**
+   * Opus 3, Sonnet 3.7, Sonnet 3.5 and Haiku 3 were dropped from the official
+   * pricing page. Their transcripts must surface as unpriced rather than be
+   * billed at a rate that can no longer be verified against the source.
+   */
+  it.each([
+    'claude-3-7-sonnet-20250219',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-opus-20240229',
+    'claude-3-haiku-20240307',
+  ])('%s is no longer priced and resolves to unknown', (raw) => {
+    expect(getModelFamily(raw)).toBe('unknown')
   })
 })
 
@@ -100,6 +108,7 @@ describe('getModelFamily — resolving a family is idempotent', () => {
     'mythos-5-1',
     'fable-5',
     'mythos-5',
+    'opus-5-5',
     'opus-5',
     'opus-4-8',
     'opus-4-7',
@@ -107,16 +116,12 @@ describe('getModelFamily — resolving a family is idempotent', () => {
     'opus-4-5',
     'opus-4-1',
     'opus-4',
-    'opus-3',
     'sonnet-5',
     'sonnet-4-6',
     'sonnet-4-5',
     'sonnet-4',
-    'sonnet-3-7',
-    'sonnet-3-5',
     'haiku-4-5',
     'haiku-3-5',
-    'haiku-3',
     'unknown',
   ]
 

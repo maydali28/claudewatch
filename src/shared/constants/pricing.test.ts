@@ -7,6 +7,7 @@ describe('ANTHROPIC_PRICING — published input/output rates', () => {
     ['fable-5-1', 10, 50],
     ['mythos-5-1', 10, 50],
     ['fable-5', 10, 50],
+    ['opus-5-5', 4, 20],
     ['opus-5', 5, 25],
     ['opus-4-8', 5, 25],
     ['sonnet-5', 2, 10],
@@ -21,9 +22,10 @@ describe('ANTHROPIC_PRICING — published input/output rates', () => {
 })
 
 /**
- * Cache reads are 0.1x input for every model except Fable 5.1 / Mythos 5.1,
- * which Anthropic prices at a flat $0.25 per million. Applying the usual
- * multiplier there overcharges cache reads fourfold.
+ * Cache reads are 0.1x input for every model except Fable 5.1 / Mythos 5.1
+ * (0.025x, a flat $0.25 per million) and Opus 5.5 (0.05x, $0.20 per million).
+ * Applying the usual multiplier there overcharges cache reads fourfold and
+ * twofold respectively.
  */
 describe('ANTHROPIC_PRICING — cache read rates', () => {
   it('prices Fable 5.1 cache reads at the documented $0.25, not 0.1x input', () => {
@@ -40,6 +42,10 @@ describe('ANTHROPIC_PRICING — cache read rates', () => {
     expect(ANTHROPIC_PRICING['fable-5'].cacheRead).toBe(1.0)
   })
 
+  it('prices Opus 5.5 cache reads at the documented 0.05x input ($0.20), not 0.1x', () => {
+    expect(ANTHROPIC_PRICING['opus-5-5'].cacheRead).toBe(0.2)
+  })
+
   it('prices Opus 5 cache reads at 0.1x input', () => {
     expect(ANTHROPIC_PRICING['opus-5'].cacheRead).toBe(0.5)
   })
@@ -50,14 +56,18 @@ describe('ANTHROPIC_PRICING — cache read rates', () => {
 })
 
 describe('ANTHROPIC_PRICING — cache write tiers', () => {
-  it.each(['fable-5-1', 'mythos-5-1', 'fable-5', 'opus-5', 'sonnet-5'] as ModelFamily[])(
-    '%s writes cost 1.25x input for 5m and 2x input for 1h',
-    (family) => {
-      const p = ANTHROPIC_PRICING[family]
-      expect(p.cache5m).toBeCloseTo(p.input * 1.25, 10)
-      expect(p.cache1h).toBeCloseTo(p.input * 2, 10)
-    }
-  )
+  it.each([
+    'fable-5-1',
+    'mythos-5-1',
+    'fable-5',
+    'opus-5-5',
+    'opus-5',
+    'sonnet-5',
+  ] as ModelFamily[])('%s writes cost 1.25x input for 5m and 2x input for 1h', (family) => {
+    const p = ANTHROPIC_PRICING[family]
+    expect(p.cache5m).toBeCloseTo(p.input * 1.25, 10)
+    expect(p.cache1h).toBeCloseTo(p.input * 2, 10)
+  })
 })
 
 describe('estimateCost', () => {

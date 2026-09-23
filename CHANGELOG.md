@@ -1,3 +1,9 @@
+## 1.5.5 (2026-09-23)
+
+
+### Features
+
+* **pricing:** add opus 5.5 rates and drop retired claude 3 models
 ## 1.5.4 (2026-09-22)
 
 

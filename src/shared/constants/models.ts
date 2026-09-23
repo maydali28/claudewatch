@@ -19,6 +19,7 @@ const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
   'claude-mythos-5': 'mythos-5',
 
   // ── Opus ──────────────────────────────────────────────────────────────────
+  'claude-opus-5-5': 'opus-5-5',
   'claude-opus-5': 'opus-5',
   'claude-opus-4-8': 'opus-4-8',
   'claude-opus-4-7': 'opus-4-7',
@@ -41,11 +42,10 @@ const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
   'claude-sonnet-4-0': 'sonnet-4',
 
   // ── Legacy IDs, which order the version before the family ─────────────────
-  'claude-3-7-sonnet': 'sonnet-3-7',
-  'claude-3-5-sonnet': 'sonnet-3-5',
+  // Only Haiku 3.5 remains: Opus 3, Sonnet 3.7, Sonnet 3.5 and Haiku 3 have
+  // been removed from the official pricing page, so they resolve to `unknown`
+  // and surface as unpriced rather than at a rate nobody can verify.
   'claude-3-5-haiku': 'haiku-3-5',
-  'claude-3-opus': 'opus-3',
-  'claude-3-haiku': 'haiku-3',
 }
 
 // Claude Code can target Bedrock or Vertex (CLAUDE_CODE_USE_BEDROCK /
