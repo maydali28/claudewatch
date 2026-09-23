@@ -32,20 +32,20 @@ const META: Record<ModelFamily, ModelMeta> = {
     badgeClass: 'bg-fuchsia-500/10 text-fuchsia-500',
     color: '#d946ef',
   },
-  // ── Opus 5 / 4.8 / 4.7 / 4.6 / 4.5 — reds ───────────────────────────────────
+  // ── Opus 5.5 / 5 / 4.8 / 4.7 / 4.6 / 4.5 — reds ───────────────────────────
+  'opus-5-5': { label: 'Opus 5.5', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-5': { label: 'Opus 5', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-8': { label: 'Opus 4.8', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-7': { label: 'Opus 4.7', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-6': { label: 'Opus 4.6', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
   'opus-4-5': { label: 'Opus 4.5', badgeClass: 'bg-red-500/10 text-red-500', color: '#ef4444' },
-  // ── Opus 4.1 / 4 / 3 — oranges ──────────────────────────────────────────────
+  // ── Opus 4.1 / 4 — oranges ──────────────────────────────────────────────────
   'opus-4-1': {
     label: 'Opus 4.1',
     badgeClass: 'bg-orange-500/10 text-orange-500',
     color: '#f97316',
   },
   'opus-4': { label: 'Opus 4', badgeClass: 'bg-orange-500/10 text-orange-500', color: '#f97316' },
-  'opus-3': { label: 'Opus 3', badgeClass: 'bg-orange-400/10 text-orange-400', color: '#fb923c' },
   // ── Sonnet — indigos ─────────────────────────────────────────────────────────
   'sonnet-5': {
     label: 'Sonnet 5',
@@ -67,16 +67,6 @@ const META: Record<ModelFamily, ModelMeta> = {
     badgeClass: 'bg-indigo-400/10 text-indigo-400',
     color: '#818cf8',
   },
-  'sonnet-3-7': {
-    label: 'Sonnet 3.7',
-    badgeClass: 'bg-violet-400/10 text-violet-400',
-    color: '#a78bfa',
-  },
-  'sonnet-3-5': {
-    label: 'Sonnet 3.5',
-    badgeClass: 'bg-violet-400/10 text-violet-400',
-    color: '#a78bfa',
-  },
   // ── Haiku — greens / cyans ───────────────────────────────────────────────────
   'haiku-4-5': {
     label: 'Haiku 4.5',
@@ -84,7 +74,6 @@ const META: Record<ModelFamily, ModelMeta> = {
     color: '#10b981',
   },
   'haiku-3-5': { label: 'Haiku 3.5', badgeClass: 'bg-cyan-500/10 text-cyan-500', color: '#06b6d4' },
-  'haiku-3': { label: 'Haiku 3', badgeClass: 'bg-teal-500/10 text-teal-500', color: '#14b8a6' },
   // ── Fallback ─────────────────────────────────────────────────────────────────
   unknown: { label: 'Claude', badgeClass: 'bg-slate-500/10 text-slate-400', color: '#94a3b8' },
 }
