@@ -4,31 +4,31 @@ Hash: SHA512
 Architectures: amd64
 Codename: stable
 Components: main
-Date: Wed, 23 Sep 2026 06:57:23 +0000
+Date: Fri, 25 Sep 2026 08:40:10 +0000
 Description: ClaudeWatch APT repository
 Label: ClaudeWatch
 Origin: ClaudeWatch
 Suite: stable
 MD5Sum:
- c53f04004945131b7bfc24a34d2090e9             1496 Release
- 7df812c3f3452c02afc1700a1d718df7              834 main/binary-amd64/Packages
- 4dd67842bef8efc2acc999bf2e93884c              546 main/binary-amd64/Packages.gz
+ ebedeb53c57afd6908c16ac5a79f8498             1496 Release
+ 550567a1eb02e2811ac192312369b948              834 main/binary-amd64/Packages
+ f036e65335cef316f61fe516b60b0490              545 main/binary-amd64/Packages.gz
 SHA1:
- 5b3aebfb99385b0091f5430e6c11dec99b74283b             1496 Release
- fcdb2e70a2159db5dfdb319fe751ef73077be888              834 main/binary-amd64/Packages
- 1678051a4c993d2521cc781bb35fd49c07c9a32b              546 main/binary-amd64/Packages.gz
+ d3f1276df715cd951dea089e4ee1608217fe8bcc             1496 Release
+ caeff8d872e8d91be257590ae25d501f0454e8d7              834 main/binary-amd64/Packages
+ cea3446a0c863ba56cf1b413ae3a7ea5cf6ceb39              545 main/binary-amd64/Packages.gz
 SHA256:
- 1d4fe1ef867cdfc43e1e0e5f8cb1df9b2320a613db8ff6895a26ba5d25c2999b             1496 Release
- 90ed715d8ec8aff5f2f718001f73590d0a808c4009e09ce6a2dd2bff03e9da5e              834 main/binary-amd64/Packages
- fea85200cd16e35c7bdc6bfdff1aff3b0736f4c977efedfedf4897174dd416af              546 main/binary-amd64/Packages.gz
+ d7be73474709e1b04821ca2deaa91bf854c6b998aa206d943550ca9a38b64eaf             1496 Release
+ 34ffe948dbc62f5affdbc4cc67499f6da6e37f41e1b26bb40f9486781798c4f6              834 main/binary-amd64/Packages
+ 13dfa3ae0714dcbfe26a62dd0d2db69f768149391fe8924130d757f4cf240005              545 main/binary-amd64/Packages.gz
 SHA512:
- d5b3b781eb0c07812d8b478ea563f12c8f20c177707175d7d715202c3243197c82737e54b32eddadc0559ed8184088e94e5669de219cc27850af343658d5c431             1496 Release
- ea671c7408f066148f90615e64d7bf4ffffed6d3ed589191229364f8863dbe78868581c6e7c8fe3bda1fdef174c6d926b26ea0fa4f4c13591c19d38242a556ba              834 main/binary-amd64/Packages
- 1cb6a010af8543ac52d4e61ef9d76c063dc985b05503ab25b9cb04efb3e92566249c868c1b2760538eade1b6355dc39bce5ba9a288e4b91b280c1a2695dc04f0              546 main/binary-amd64/Packages.gz
+ bbb430f9e14d42036bc006d16e395220333599eb4c8288c103b230f3cefebbb22871eafb99180ed0a331cc69e4c24548ba61cbd23c3c1fa58bbeed487eae0840             1496 Release
+ dc61847752ad41e0947c6eb6bf2a7906f2b787eeb75bfb4694561f085537e4421d684cff1513df21f182d4c4023f0f5f1269205d9d8b8efbc241cc13466ba225              834 main/binary-amd64/Packages
+ 39152493a42de4a49409875eca4025be7cfbdbff4c069a30516ef35150a0137f21d6d62d66f99882e1e148113190bf30d7d3c7a9c2445ff2cf733368efd89a67              545 main/binary-amd64/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQTdbyvbYL0HoINvxHqkiBz5+3ckOgUCarN4UwAKCRCkiBz5+3ck
-Opf8AP0ThQxVpoYOVttj2LdxsfLzO4a/kWkKXTbDvUXESQ1mXgEA+qlDYUJrkk5T
-gxi6/YPE8Xw1rHVMWd7LuiNuSLvdNwA=
-=Ahgw
+iHUEARYKAB0WIQTdbyvbYL0HoINvxHqkiBz5+3ckOgUCarYzagAKCRCkiBz5+3ck
+Oj88AQDNp3q3flXPnv+a1o4d6WmaeM2Ut3dM+CZaPFrspgmf6QEA4iFsGVGzL3qW
+pJ6tSSGlY14cmHL48StFbpxNt+ZO/ws=
+=Xx1O
 -----END PGP SIGNATURE-----
