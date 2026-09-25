@@ -20,7 +20,8 @@ function getTrayIconPath(hasAlert = false): string {
   if (process.platform === 'win32') {
     return join(__dirname, `../../resources/tray/tray${suffix}.ico`)
   }
-  // Linux: PNG
+  // Linux: full-color PNG (with @2x). There is no template tinting here, and
+  // a black glyph disappears on dark panels such as Ubuntu's top bar.
   return join(__dirname, `../../resources/tray/tray${suffix}.png`)
 }
 
