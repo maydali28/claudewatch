@@ -1,5 +1,6 @@
 import type { BrowserWindow } from 'electron'
 import { app, autoUpdater as squirrelUpdater, session } from 'electron'
+import { spawn } from 'child_process'
 
 import {
   broadcastToRenderers,
@@ -18,6 +19,8 @@ import { isAppQuitting, registerUpdateQuitHandlers, onUpdateQuitDisarmed } from 
 import { rootLogger as log } from './lib/logger'
 import { CHANNELS } from '@shared/ipc/channels'
 import { initSentryEarly, initSentry, captureException } from './services/sentry'
+import { handleSquirrelEvent } from './lib/squirrel-events'
+import { setAutostart } from './services/autostart'
 
 app.setName('ClaudeWatch')
 
@@ -32,11 +35,27 @@ if (process.platform === 'darwin') {
 // next tick. Without the early `return` below, bootstrap continues and the
 // second instance briefly creates windows, watchers, and tray icons before
 // the quit fires, leading to ghost tray icons and double file-watcher events.
-const gotLock = app.requestSingleInstanceLock()
-if (!gotLock) {
-  app.quit()
-} else {
-  bootstrap()
+//
+// Squirrel.Windows hooks run first: they must neither take the lock (the
+// post-install launch would then find it held) nor boot the app inside the
+// installer — see ./lib/squirrel-events.
+const isSquirrelHook = handleSquirrelEvent({
+  platform: process.platform,
+  argv: process.argv,
+  execPath: process.execPath,
+  spawn: (command, args) => spawn(command, args, { detached: true }),
+  quit: () => app.quit(),
+  exit: (code) => app.exit(code),
+  disableAutostart: () => void setAutostart(false),
+  log,
+})
+if (!isSquirrelHook) {
+  const gotLock = app.requestSingleInstanceLock()
+  if (!gotLock) {
+    app.quit()
+  } else {
+    bootstrap()
+  }
 }
 
 let mainWindow: BrowserWindow | null = null
