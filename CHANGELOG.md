@@ -1,3 +1,14 @@
+## 1.5.6 (2026-09-25)
+
+
+### Features
+
+* **installer:** show a branded install screen and app icon on windows
+
+### Bug Fixes
+
+* **installer:** create start menu shortcuts and finish installing faster on windows
+* **tray:** show the color icon in the linux tray so it stays visible on dark panels
 ## 1.5.5 (2026-09-23)
 
 

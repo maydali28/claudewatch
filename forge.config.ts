@@ -111,6 +111,7 @@ const config: ForgeConfig = {
       /^\/coverage\//,
       /^\/homebrew\//,
       /^\/patches\//,
+      /^\/resources\/installer\//,
       /^\/screenshots\//,
       /^\/sbom-scope\//,
       /^\/\.github\//,
@@ -148,6 +149,13 @@ const config: ForgeConfig = {
     new MakerSquirrel({
       name: 'claudewatch',
       setupExe: 'ClaudeWatch-Setup.exe',
+      // Squirrel installs with no UI beyond an animated splash. Without
+      // loadingGif it shows electron-winstaller's stock green placeholder.
+      loadingGif: 'resources/installer/installing.gif',
+      // Icon of Setup.exe itself, and the one shown in Apps & features.
+      // iconUrl must be a URL; Squirrel defaults it to Electron's logo.
+      setupIcon: 'resources/icons/icon.ico',
+      iconUrl: `https://raw.githubusercontent.com/${UPDATE_REPO.owner}/${UPDATE_REPO.name}/main/resources/icons/icon.ico`,
       // Code-signing: set CSC_LINK + CSC_KEY_PASSWORD env vars in CI to sign.
       ...(process.env['CSC_LINK']
         ? {
