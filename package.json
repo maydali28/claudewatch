@@ -166,7 +166,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "husky": "^9.1.7",
     "lint-staged": "^17.5.1",
-    "lucide-react": "^1.47.0",
+    "lucide-react": "^1.48.0",
     "node-gyp": "^13.0.2",
     "prettier": "^3.9.8",
     "react": "^19.3.0",
