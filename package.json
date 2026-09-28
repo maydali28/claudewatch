@@ -174,7 +174,7 @@
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
-    "react-window": "^2.3.1",
+    "react-window": "^2.3.3",
     "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
     "rollup-plugin-visualizer": "^7.1.1",
