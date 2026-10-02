@@ -18,6 +18,9 @@ on:
       - 'ci/**'
       - 'revert/**'
 
+permissions:
+  contents: read
+
 jobs:
   ci:
     runs-on: ubuntu-latest
