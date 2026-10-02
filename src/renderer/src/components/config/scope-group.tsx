@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
+import { cn } from '@renderer/lib/cn'
 
 /**
  * A collapsible group header (chevron, optional icon, label, count) used at
@@ -14,6 +15,8 @@ export function ScopeGroup({
   defaultExpanded = true,
   title,
   paths,
+  tags,
+  muted = false,
   children,
 }: {
   label: string
@@ -24,6 +27,10 @@ export function ScopeGroup({
   title?: string
   /** Paths shown under the header, one per line, e.g. the folders the group's items live in. */
   paths?: string[]
+  /** Small tags after the label, e.g. a plugin's version, "claude.ai" or "disabled". */
+  tags?: string[]
+  /** Dims the header, e.g. for a disabled plugin. */
+  muted?: boolean
   children: React.ReactNode
 }): React.JSX.Element {
   const [expanded, setExpanded] = useState(defaultExpanded)
@@ -42,9 +49,27 @@ export function ScopeGroup({
           <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
         {icon}
-        <span className="text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider truncate flex-1">
+        <span
+          className={cn(
+            'text-[10px] font-semibold text-muted-foreground/70 uppercase tracking-wider truncate',
+            !tags?.length && 'flex-1',
+            muted && 'opacity-60'
+          )}
+        >
           {label}
         </span>
+        {tags && tags.length > 0 && (
+          <span className="flex flex-1 min-w-0 items-center gap-1 overflow-hidden">
+            {tags.map((tag) => (
+              <span
+                key={tag}
+                className="shrink-0 rounded bg-muted px-1 text-[9px] text-muted-foreground"
+              >
+                {tag}
+              </span>
+            ))}
+          </span>
+        )}
         <span className="text-[10px] text-muted-foreground/40 shrink-0">{count}</span>
       </button>
       {paths && paths.length > 0 && (
