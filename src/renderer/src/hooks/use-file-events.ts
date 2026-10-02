@@ -15,6 +15,7 @@ export function useFileEvents(): void {
   const handleSessionUpdated = useSessionsStore((s) => s.handleSessionUpdated)
   const handleSessionCreated = useSessionsStore((s) => s.handleSessionCreated)
   const handleSessionDeleted = useSessionsStore((s) => s.handleSessionDeleted)
+  const handlePricingChanged = useSessionsStore((s) => s.handlePricingChanged)
   const loadParsedSession = useSessionsStore((s) => s.loadParsedSession)
   const loadAllConfig = useConfigStore((s) => s.loadAll)
   const invalidateAnalytics = useAnalyticsStore((s) => s.invalidate)
@@ -45,6 +46,14 @@ export function useFileEvents(): void {
       }
     )
 
+    // Rates changed and main has repriced its caches: everything fetched
+    // before shows costs at the old rates.
+    const unsubPricing = ipc.on(CHANNELS.PUSH_PRICING_CHANGED, () => {
+      void handlePricingChanged()
+      invalidateAnalytics()
+      refreshAnalytics()
+    })
+
     const unsubConfig = ipc.on(CHANNELS.PUSH_CONFIG_CHANGED, () => {
       loadAllConfig()
     })
@@ -72,6 +81,7 @@ export function useFileEvents(): void {
       unsubUpdated()
       unsubCreated()
       unsubDeleted()
+      unsubPricing()
       unsubConfig()
       unsubNavigate()
       unsubMainError()
@@ -80,6 +90,7 @@ export function useFileEvents(): void {
     handleSessionUpdated,
     handleSessionCreated,
     handleSessionDeleted,
+    handlePricingChanged,
     loadParsedSession,
     loadAllConfig,
     invalidateAnalytics,
