@@ -1,3 +1,9 @@
+## 1.5.7 (2026-10-02)
+
+
+### Features
+
+* **models:** add sonnet 5.5 to the model families and pricing
 ## 1.5.6 (2026-09-25)
 
 
