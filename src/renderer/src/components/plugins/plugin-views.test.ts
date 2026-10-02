@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildPluginViews,
+  findPluginItem,
   defaultPluginTab,
   isPluginSourced,
   pluginItemSummary,
@@ -123,6 +124,25 @@ describe('buildPluginViews', () => {
       commands: [],
       hooks: [],
     })
+  })
+
+  it('finds the skill, command or hook a click selected, and nothing for a stale id', () => {
+    const sp = views.find((v) => v.source.label === 'superpowers')!
+    const seoView = views.find((v) => v.source.label === 'searchfit-seo')!
+    expect(
+      findPluginItem(sp, { kind: 'skills', id: 'plugin:superpowers@m:superpowers:brainstorming' })
+    ).toMatchObject({ kind: 'skills', item: { name: 'superpowers:brainstorming' } })
+    expect(findPluginItem(seoView, { kind: 'commands', id: seoView.commands[0].id })).toMatchObject(
+      {
+        kind: 'commands',
+        item: { name: 'searchfit-seo:seo-check' },
+      }
+    )
+    expect(
+      findPluginItem(sp, { kind: 'hooks', id: 'plugin:superpowers@m:SessionStart-0' })
+    ).toMatchObject({ kind: 'hooks', item: { event: 'SessionStart' } })
+    expect(findPluginItem(sp, { kind: 'skills', id: 'gone' })).toBeNull()
+    expect(findPluginItem(sp, null)).toBeNull()
   })
 
   it('summarises the item counts', () => {

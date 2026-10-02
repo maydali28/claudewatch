@@ -22,7 +22,8 @@ function commandSourceLabel(cmd: CommandEntry): string {
 
 // ─── Command detail view ──────────────────────────────────────────────────────
 
-function CommandDetail({ cmd }: { cmd: CommandEntry }): React.JSX.Element {
+/** One command in full; also shown from the Plugins tab. */
+export function CommandDetail({ cmd }: { cmd: CommandEntry }): React.JSX.Element {
   const [copied, setCopied] = useState(false)
 
   function handleCopy(): void {
