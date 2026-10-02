@@ -2,8 +2,11 @@ import React, { useState } from 'react'
 import { Brain, RefreshCw, Search, X, FolderOpen } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
+import { useUIStore } from '@renderer/store/ui.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { ScopeGroup } from './scope-group'
+import { SourceChips } from './source-chips'
+import { countMemoryByKind, memoryKindOf, type MemoryFilter } from './memory-filter'
 import type { ProjectClaudeMd } from '@shared/types/project'
 
 function projectClaudeMdId(entry: ProjectClaudeMd): string {
@@ -59,16 +62,24 @@ export default function MemorySidebar(): React.JSX.Element {
   const selectedMemoryId = useConfigStore((s) => s.selectedMemoryId)
   const setSelectedMemory = useConfigStore((s) => s.setSelectedMemory)
   const [search, setSearch] = useState('')
+  const kindFilter = (useUIStore((s) => s.sourceFilters.memory) ?? 'all') as MemoryFilter
+  const setSourceFilter = useUIStore((s) => s.setSourceFilter)
 
   const q = search.toLowerCase()
 
-  const filteredFiles = memoryFiles.filter(
+  const searchedFiles = memoryFiles.filter(
     (f) => f.label.toLowerCase().includes(q) || f.sublabel.toLowerCase().includes(q)
   )
-
-  const filteredProjectMds = projectClaudeMds.filter(
+  const searchedProjectMds = projectClaudeMds.filter(
     (p) => p.projectName.toLowerCase().includes(q) || 'claude.md'.includes(q)
   )
+  const counts = countMemoryByKind(searchedFiles, searchedProjectMds.length)
+
+  const filteredFiles = searchedFiles.filter(
+    (f) => kindFilter === 'all' || memoryKindOf(f) === kindFilter
+  )
+  const filteredProjectMds =
+    kindFilter === 'all' || kindFilter === 'project' ? searchedProjectMds : []
 
   const total = memoryFiles.length + projectClaudeMds.length
 
@@ -117,6 +128,20 @@ export default function MemorySidebar(): React.JSX.Element {
         </div>
       </div>
 
+      {total > 0 && (
+        <SourceChips<MemoryFilter>
+          label="Filter memory files by kind"
+          value={kindFilter}
+          onChange={(v) => setSourceFilter('memory', v)}
+          options={[
+            { value: 'all', label: 'All', count: counts.all },
+            { value: 'global', label: 'Global', count: counts.global },
+            { value: 'project', label: 'Project', count: counts.project },
+            { value: 'auto', label: 'Auto memory', count: counts.auto },
+          ]}
+        />
+      )}
+
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && total === 0 && (
           <div className="flex flex-col gap-2 p-2">
@@ -139,10 +164,11 @@ export default function MemorySidebar(): React.JSX.Element {
         {!isLoading &&
           total > 0 &&
           filteredFiles.length === 0 &&
-          filteredProjectMds.length === 0 &&
-          search && (
+          filteredProjectMds.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-center px-3">
-              <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
+              <p className="text-xs text-muted-foreground">
+                {search ? <>No matches for &quot;{search}&quot;</> : 'No memory files of this kind'}
+              </p>
             </div>
           )}
 
