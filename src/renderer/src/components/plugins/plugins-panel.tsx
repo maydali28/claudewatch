@@ -1,17 +1,43 @@
 import React, { useState } from 'react'
-import { CircleSlash, Info, Layers, Puzzle, Terminal, Webhook } from 'lucide-react'
+import {
+  ArrowLeft,
+  ChevronRight,
+  CircleSlash,
+  Info,
+  Layers,
+  Puzzle,
+  Terminal,
+  Webhook,
+} from 'lucide-react'
+import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 import { pluginTags } from '@renderer/components/config/source-group-decor'
 import { relativeDay } from '@renderer/components/config/skill-usage'
 import { inactiveReasonText } from '@renderer/components/config/hook-scope-label'
-import { buildPluginViews, defaultPluginTab, type PluginTab, type PluginView } from './plugin-views'
+import { SkillDetail } from '@renderer/components/config/skills-panel'
+import { CommandDetail } from '@renderer/components/config/commands-panel'
+import { HookDetail } from '@renderer/components/config/hooks-panel'
+import {
+  buildPluginViews,
+  defaultPluginTab,
+  findPluginItem,
+  type PluginItemRef,
+  type PluginTab,
+  type PluginView,
+} from './plugin-views'
 
 /** A plugin item's name without the `<plugin>:` prefix the other tabs show. */
 function shortName(name: string, plugin: string): string {
   return name.startsWith(`${plugin}:`) ? name.slice(plugin.length + 1) : name
 }
+
+const TABS: Array<{ value: PluginTab; label: string; icon: React.ElementType }> = [
+  { value: 'skills', label: 'Skills', icon: Layers },
+  { value: 'commands', label: 'Commands', icon: Terminal },
+  { value: 'hooks', label: 'Hooks', icon: Webhook },
+]
 
 function ItemList({
   empty,
@@ -24,11 +50,30 @@ function ItemList({
   return <ul className="rounded-lg border border-border divide-y divide-border/40">{children}</ul>
 }
 
-const TABS: Array<{ value: PluginTab; label: string; icon: React.ElementType }> = [
-  { value: 'skills', label: 'Skills', icon: Layers },
-  { value: 'commands', label: 'Commands', icon: Terminal },
-  { value: 'hooks', label: 'Hooks', icon: Webhook },
-]
+/** A row that opens the item's full view. */
+function ItemRow({
+  onOpen,
+  label,
+  children,
+}: {
+  onOpen: () => void
+  label: string
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={`Open ${label}`}
+        className="group flex w-full items-start gap-2 px-3 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:bg-accent"
+      >
+        <div className="flex-1 min-w-0">{children}</div>
+        <ChevronRight className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground/40 group-hover:text-muted-foreground" />
+      </button>
+    </li>
+  )
+}
 
 function originText(view: PluginView): string {
   const plugin = view.source.plugin
@@ -38,59 +83,94 @@ function originText(view: PluginView): string {
   return plugin.marketplace ? `From the ${plugin.marketplace} marketplace` : 'From a marketplace'
 }
 
+function PluginHeader({ view }: { view: PluginView }): React.JSX.Element {
+  const tags = pluginTags(view.source)
+  return (
+    <div className="flex items-start gap-3 px-6 py-4 border-b border-border/50 shrink-0">
+      <Puzzle className="h-5 w-5 text-violet-500 shrink-0 mt-0.5" />
+      <div className="flex-1 min-w-0">
+        <h2 className="flex items-center gap-2 text-sm font-semibold">
+          {view.source.label}
+          {tags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground"
+            >
+              {tag}
+            </span>
+          ))}
+        </h2>
+        {view.description && (
+          <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{view.description}</p>
+        )}
+        <p className="text-[10px] text-muted-foreground mt-1">
+          {originText(view)}
+          {view.author && <> · by {view.author}</>}
+          {view.homepage && (
+            <>
+              {' '}
+              ·{' '}
+              <a
+                href={view.homepage}
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2 hover:text-foreground"
+              >
+                homepage
+              </a>
+            </>
+          )}
+        </p>
+        {view.source.root && (
+          <p
+            className="text-[10px] text-muted-foreground/50 mt-0.5 truncate font-mono"
+            title={view.source.root}
+          >
+            {view.source.root}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function PluginDetail({ view }: { view: PluginView }): React.JSX.Element {
   const label = view.source.label
-  const tags = pluginTags(view.source)
   const disabled = view.source.plugin?.enabled === false && view.source.plugin.installed !== false
   const [tab, setTab] = useState<PluginTab>(() => defaultPluginTab(view))
+  const [opened, setOpened] = useState<PluginItemRef | null>(null)
+  const item = findPluginItem(view, opened)
+
+  // An item's full view, with a way back to the tab it was opened from.
+  if (item) {
+    const tabLabel = TABS.find((t) => t.value === item.kind)?.label ?? ''
+    return (
+      <div className="flex flex-col h-full overflow-hidden">
+        <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 shrink-0 text-xs">
+          <button
+            type="button"
+            onClick={() => setOpened(null)}
+            className="flex items-center gap-1.5 rounded px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <ArrowLeft className="h-3.5 w-3.5" />
+            <Puzzle className="h-3.5 w-3.5 text-violet-500" />
+            {label}
+          </button>
+          <span className="text-muted-foreground/50">/</span>
+          <span className="text-muted-foreground">{tabLabel}</span>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          {item.kind === 'skills' && <SkillDetail skill={item.item} />}
+          {item.kind === 'commands' && <CommandDetail cmd={item.item} />}
+          {item.kind === 'hooks' && <HookDetail event={item.item.event} rule={item.item.rule} />}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex items-start gap-3 px-6 py-4 border-b border-border/50 shrink-0">
-        <Puzzle className="h-5 w-5 text-violet-500 shrink-0 mt-0.5" />
-        <div className="flex-1 min-w-0">
-          <h2 className="flex items-center gap-2 text-sm font-semibold">
-            {label}
-            {tags.map((tag) => (
-              <span
-                key={tag}
-                className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground"
-              >
-                {tag}
-              </span>
-            ))}
-          </h2>
-          {view.description && (
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{view.description}</p>
-          )}
-          <p className="text-[10px] text-muted-foreground mt-1">
-            {originText(view)}
-            {view.author && <> · by {view.author}</>}
-            {view.homepage && (
-              <>
-                {' '}
-                ·{' '}
-                <a
-                  href={view.homepage}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="underline underline-offset-2 hover:text-foreground"
-                >
-                  homepage
-                </a>
-              </>
-            )}
-          </p>
-          {view.source.root && (
-            <p
-              className="text-[10px] text-muted-foreground/50 mt-0.5 truncate font-mono"
-              title={view.source.root}
-            >
-              {view.source.root}
-            </p>
-          )}
-        </div>
-      </div>
+      <PluginHeader view={view} />
 
       <Tabs
         value={tab}
@@ -104,24 +184,33 @@ function PluginDetail({ view }: { view: PluginView }): React.JSX.Element {
               Disabled in your settings: Claude Code loads none of its skills, commands or hooks.
             </div>
           )}
-          <TabsList>
-            {TABS.map(({ value, label: tabLabel, icon: Icon }) => {
-              const count = view[value].length
-              return (
-                <TabsTrigger key={value} value={value} disabled={count === 0} className="gap-1.5">
-                  <Icon className="h-3.5 w-3.5" />
-                  {tabLabel}
-                  <span className="tabular-nums text-muted-foreground">{count}</span>
-                </TabsTrigger>
-              )
-            })}
-          </TabsList>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] text-muted-foreground/70">
+              Select an item to see it in full.
+            </p>
+            <TabsList>
+              {TABS.map(({ value, label: tabLabel, icon: Icon }) => {
+                const count = view[value].length
+                return (
+                  <TabsTrigger key={value} value={value} disabled={count === 0} className="gap-1.5">
+                    <Icon className="h-3.5 w-3.5" />
+                    {tabLabel}
+                    <span className="tabular-nums text-muted-foreground">{count}</span>
+                  </TabsTrigger>
+                )
+              })}
+            </TabsList>
+          </div>
         </div>
 
         <TabsContent value="skills" className="flex-1 overflow-y-auto px-6 pb-6 mt-3">
           <ItemList empty="No skills">
             {view.skills.map((s) => (
-              <li key={s.id} className="px-3 py-2">
+              <ItemRow
+                key={s.id}
+                label={s.name}
+                onOpen={() => setOpened({ kind: 'skills', id: s.id })}
+              >
                 <p className="flex items-center gap-2 text-xs font-medium">
                   {shortName(s.name, label)}
                   {s.sessionOnly && (
@@ -141,7 +230,7 @@ function PluginDetail({ view }: { view: PluginView }): React.JSX.Element {
                     {s.sessionCount === 1 ? '' : 's'}
                   </p>
                 )}
-              </li>
+              </ItemRow>
             ))}
           </ItemList>
         </TabsContent>
@@ -149,7 +238,11 @@ function PluginDetail({ view }: { view: PluginView }): React.JSX.Element {
         <TabsContent value="commands" className="flex-1 overflow-y-auto px-6 pb-6 mt-3">
           <ItemList empty="No commands">
             {view.commands.map((c) => (
-              <li key={c.id} className="px-3 py-2">
+              <ItemRow
+                key={c.id}
+                label={`/${c.name}`}
+                onOpen={() => setOpened({ kind: 'commands', id: c.id })}
+              >
                 <p className="text-xs font-medium font-mono">/{c.name}</p>
                 {c.description && (
                   <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
@@ -161,7 +254,7 @@ function PluginDetail({ view }: { view: PluginView }): React.JSX.Element {
                     {c.arguments.map((a) => (a.required ? a.name : `[${a.name}]`)).join(' ')}
                   </p>
                 )}
-              </li>
+              </ItemRow>
             ))}
           </ItemList>
         </TabsContent>
@@ -169,28 +262,32 @@ function PluginDetail({ view }: { view: PluginView }): React.JSX.Element {
         <TabsContent value="hooks" className="flex-1 overflow-y-auto px-6 pb-6 mt-3">
           <ItemList empty="No hooks">
             {view.hooks.map(({ event, rule }) => (
-              <li key={rule.id} className="px-3 py-2 space-y-1">
+              <ItemRow
+                key={rule.id}
+                label={`${event} ${rule.matcher || '*'}`}
+                onOpen={() => setOpened({ kind: 'hooks', id: rule.id })}
+              >
                 <p className="text-xs font-medium">
                   {event}
                   <span className="ml-2 font-mono text-muted-foreground">
                     {rule.matcher || '*'}
                   </span>
                 </p>
-                {rule.hooks.map((h, i) => (
-                  <pre
-                    key={i}
-                    className="text-[11px] font-mono text-muted-foreground whitespace-pre-wrap break-all"
-                  >
-                    {h.command}
-                  </pre>
-                ))}
+                <p
+                  className={cn(
+                    'text-[11px] font-mono text-muted-foreground mt-0.5 truncate',
+                    rule.inactiveReason && 'opacity-70'
+                  )}
+                >
+                  {rule.hooks.map((h) => h.command).join(' · ')}
+                </p>
                 {rule.inactiveReason && (
-                  <p className="flex items-center gap-1 text-[10px] text-muted-foreground/70">
+                  <p className="flex items-center gap-1 text-[10px] text-muted-foreground/70 mt-0.5">
                     <Info className="h-3 w-3" />
                     {inactiveReasonText(rule.inactiveReason)}
                   </p>
                 )}
-              </li>
+              </ItemRow>
             ))}
           </ItemList>
         </TabsContent>
@@ -212,5 +309,6 @@ export default function PluginsPanel(): React.JSX.Element {
         description="Plugins you install in Claude Code appear here with their skills, commands and hooks"
       />
     )
+  // Remount per plugin so its tab and open item reset.
   return <PluginDetail key={selected.source.id} view={selected} />
 }

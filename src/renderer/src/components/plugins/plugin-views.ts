@@ -77,6 +77,36 @@ export function defaultPluginTab(view: Pick<PluginView, PluginTab>): PluginTab {
   return 'skills'
 }
 
+/** The item opened from a plugin's tab: a skill or command id, or a hook rule id. */
+export interface PluginItemRef {
+  kind: PluginTab
+  id: string
+}
+
+export type PluginItem =
+  | { kind: 'skills'; item: SkillEntry }
+  | { kind: 'commands'; item: CommandEntry }
+  | { kind: 'hooks'; item: PluginHook }
+
+/** The item `ref` names in `view`, or null when nothing is open or it is gone after a reload. */
+export function findPluginItem(view: PluginView, ref: PluginItemRef | null): PluginItem | null {
+  if (!ref) return null
+  switch (ref.kind) {
+    case 'skills': {
+      const item = view.skills.find((s) => s.id === ref.id)
+      return item ? { kind: 'skills', item } : null
+    }
+    case 'commands': {
+      const item = view.commands.find((c) => c.id === ref.id)
+      return item ? { kind: 'commands', item } : null
+    }
+    case 'hooks': {
+      const item = view.hooks.find((h) => h.rule.id === ref.id)
+      return item ? { kind: 'hooks', item } : null
+    }
+  }
+}
+
 function count(n: number, noun: string): string | null {
   return n > 0 ? `${n} ${noun}${n === 1 ? '' : 's'}` : null
 }
