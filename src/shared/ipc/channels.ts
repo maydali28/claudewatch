@@ -19,6 +19,7 @@ export const CHANNELS = {
   CONFIG_GET_FULL: 'config:get-full',
   CONFIG_GET_COMMANDS: 'config:get-commands',
   CONFIG_GET_SKILLS: 'config:get-skills',
+  CONFIG_GET_PLUGINS: 'config:get-plugins',
   CONFIG_GET_MCPS: 'config:get-mcps',
   CONFIG_GET_MEMORY: 'config:get-memory',
   CONFIG_GET_PROJECT_CLAUDE_MDS: 'config:get-project-claude-mds',

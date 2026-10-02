@@ -25,6 +25,7 @@ import type {
   CommandArgument,
   ConfigScope,
   ConfigSource,
+  PluginEntry,
   ExtendedConfig,
   HookEventGroup,
   HookCommand,
@@ -928,6 +929,37 @@ export async function readAllSkills(projects: SkillScanProject[]): Promise<Skill
   }
 
   return [...onDisk, ...fromSessions]
+}
+
+// ─── readPlugins ──────────────────────────────────────────────────────────────
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+/**
+ * Every installed plugin (see `discoverPluginSources`), with the description,
+ * author and homepage its `plugin.json` gives. `author` may be a name or an
+ * object with a `name`.
+ */
+export async function readPlugins(): Promise<PluginEntry[]> {
+  const sources = await currentPluginSources()
+  return Promise.all(
+    sources.map(async (source): Promise<PluginEntry> => {
+      const manifest = source.root ? await readPluginManifest(source.root) : {}
+      const author =
+        nonEmptyString(manifest.author) ??
+        (isPlainObject(manifest.author) ? nonEmptyString(manifest.author.name) : undefined)
+      const description = nonEmptyString(manifest.description)
+      const homepage = nonEmptyString(manifest.homepage)
+      return {
+        source,
+        ...(description ? { description } : {}),
+        ...(author ? { author } : {}),
+        ...(homepage ? { homepage } : {}),
+      }
+    })
+  )
 }
 
 // ─── readMemoryFiles ──────────────────────────────────────────────────────────

@@ -13,6 +13,7 @@ import type {
   SkillEntry,
   McpServerEntry,
   MemoryFile,
+  PluginEntry,
 } from '@shared/types/config'
 import type { LintResult, LintSummary } from '@shared/types/lint'
 import type { AppPreferences } from '@shared/types/preferences'
@@ -82,6 +83,10 @@ export interface IPCContracts {
   'config:get-skills': {
     request: void
     response: Result<SkillEntry[]>
+  }
+  'config:get-plugins': {
+    request: void
+    response: Result<PluginEntry[]>
   }
   'config:get-mcps': {
     request: { projectId?: string }

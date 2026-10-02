@@ -14,6 +14,7 @@ import {
   type SourceFilter,
 } from './scope-groups'
 import { relativeDay } from './skill-usage'
+import { isPluginSourced } from '@renderer/components/plugins/plugin-views'
 import type { SkillEntry } from '@shared/types'
 
 const UNKNOWN_SOURCE = { kind: 'user', id: 'user', label: 'Global' } as const
@@ -70,7 +71,9 @@ function SkillItem({
 
 export default function SkillsSidebar(): React.JSX.Element {
   const isLoading = useConfigStore((s) => s.isLoading)
-  const skills = useConfigStore((s) => s.skills)
+  const allSkills = useConfigStore((s) => s.skills)
+  // Plugin skills, and the claude.ai account's, are listed in the Plugins tab.
+  const skills = allSkills.filter((s) => !isPluginSourced(s.source))
   const loadAll = useConfigStore((s) => s.loadAll)
   const selectedSkillId = useConfigStore((s) => s.selectedSkillId)
   const setSelectedSkill = useConfigStore((s) => s.setSelectedSkill)
@@ -145,7 +148,6 @@ export default function SkillsSidebar(): React.JSX.Element {
             { value: 'all', label: 'All', count: counts.all },
             { value: 'user', label: 'User', count: counts.user },
             { value: 'project', label: 'Project', count: counts.project },
-            { value: 'plugin', label: 'Plugin', count: counts.plugin },
             { value: 'builtin', label: 'Built-in', count: counts.builtin },
           ]}
         />

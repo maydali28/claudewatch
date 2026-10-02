@@ -8,6 +8,7 @@ import {
   readExtendedConfig,
   readCommands,
   readAllSkills,
+  readPlugins,
   readMcps,
   readMemoryFiles,
 } from '@main/services/config-service'
@@ -57,6 +58,15 @@ export function registerConfigHandlers(): void {
       // Session skill listings come from the scan, so this waits for it.
       const skills = await readAllSkills(await getOrScanProjects())
       return ok(skills)
+    } catch (e) {
+      captureHandlerException(e)
+      return err(toSafeError(e), 'CONFIG_READ_ERROR')
+    }
+  })
+
+  ipcMain.handle(CHANNELS.CONFIG_GET_PLUGINS, async () => {
+    try {
+      return ok(await readPlugins())
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'CONFIG_READ_ERROR')

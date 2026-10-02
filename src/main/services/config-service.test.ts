@@ -48,6 +48,7 @@ import {
   readMemoryFiles,
   readCommands,
   readAllSkills,
+  readPlugins,
 } from './config-service'
 
 // The fixture keeps `.claude` spelled `dot-claude` on disk: a common global
@@ -559,6 +560,41 @@ describe('readAllSkills', () => {
       source: { kind: 'project', label: 'demo-app' },
       sessionOnly: true,
     })
+  })
+})
+
+describe('readPlugins', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+
+  it('lists every installed plugin with what its plugin.json says about it', async () => {
+    const root = path.join(pluginsDir(), 'cache', 'official', 'superpowers', '6.4.1')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), {
+      name: 'superpowers',
+      description: 'Core skills library',
+      author: { name: 'Jesse', email: 'x@example.com' },
+      homepage: 'https://example.com/superpowers',
+    })
+    const bare = path.join(pluginsDir(), 'cache', 'official', 'bare', '1')
+    writeJson(path.join(bare, '.claude-plugin', 'plugin.json'), { name: 'bare', author: 'Solo' })
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: {
+        'superpowers@official': [{ installPath: root, version: '6.4.1' }],
+        'bare@official': [{ installPath: bare }],
+      },
+    })
+
+    const plugins = await readPlugins()
+
+    expect(plugins.map((p) => p.source.label)).toEqual(['bare', 'superpowers'])
+    expect(plugins[1]).toMatchObject({
+      source: { kind: 'plugin', id: 'plugin:superpowers@official' },
+      description: 'Core skills library',
+      author: 'Jesse',
+      homepage: 'https://example.com/superpowers',
+    })
+    expect(plugins[0]).toMatchObject({ author: 'Solo' })
+    expect(plugins[0].description).toBeUndefined()
   })
 })
 

@@ -8,6 +8,7 @@ import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
 import { ScopeGroup } from './scope-group'
 import { SourceChips } from './source-chips'
 import { sourceGroupDecor } from './source-group-decor'
+import { isPluginSourced } from '@renderer/components/plugins/plugin-views'
 import {
   countBySourceFilter,
   groupCommandsByScope,
@@ -18,7 +19,9 @@ import {
 export default function CommandsSidebar(): React.JSX.Element {
   const paths = useClaudePaths()
   const isLoading = useConfigStore((s) => s.isLoading)
-  const commands = useConfigStore((s) => s.commands)
+  const allCommands = useConfigStore((s) => s.commands)
+  // Plugin commands are listed in the Plugins tab.
+  const commands = allCommands.filter((c) => !isPluginSourced(c.source))
   const selectedCommandId = useConfigStore((s) => s.selectedCommandId)
   const setSelectedCommand = useConfigStore((s) => s.setSelectedCommand)
   const loadAll = useConfigStore((s) => s.loadAll)
@@ -92,7 +95,6 @@ export default function CommandsSidebar(): React.JSX.Element {
             { value: 'all', label: 'All', count: counts.all },
             { value: 'user', label: 'User', count: counts.user },
             { value: 'project', label: 'Project', count: counts.project },
-            { value: 'plugin', label: 'Plugin', count: counts.plugin },
           ]}
         />
       )}
