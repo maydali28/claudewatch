@@ -119,6 +119,45 @@ function session(
   return file
 }
 
+describe('parseSessionMetadata — skill listing', () => {
+  it('records the skills the session listed, and leaves usage untouched', async () => {
+    const file = session('skills', [
+      {
+        type: 'attachment',
+        uuid: 'att-1',
+        timestamp: '2026-09-10T09:58:00.000Z',
+        attachment: {
+          type: 'skill_listing',
+          names: ['humanizer', 'code-review'],
+          content: '- humanizer: Remove AI tells.\n- code-review: Review the diff.',
+          skillCount: 2,
+          isInitial: true,
+        },
+      },
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1', input: 100, output: 20 }),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'skills', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.skillListing).toEqual([
+      { name: 'humanizer', description: 'Remove AI tells.' },
+      { name: 'code-review', description: 'Review the diff.' },
+    ])
+    expect(summary.totalInputTokens).toBe(100)
+    expect(summary.messageCount).toBe(2)
+  })
+
+  it('leaves skillListing out for a session without a listing', async () => {
+    const file = session('no-skills', [
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1', input: 1, output: 1 }),
+    ])
+    const summary = await parseSessionMetadata(file, 'no-skills', 'proj', ANTHROPIC_PRICING)
+    expect(summary.skillListing).toBeUndefined()
+  })
+})
+
 describe('parseSessionMetadata — usage comes from the response ledger', () => {
   it('counts a response once even when several records carry it', async () => {
     const file = session('dup', [

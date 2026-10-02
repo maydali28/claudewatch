@@ -33,6 +33,7 @@ vi.mock('@main/lib/claude-paths', async () => {
     getMcpDebugLatestPath: () => p.join(dirs.claudeDir, 'debug', 'latest'),
     getUserCommandsDirPath: () => p.join(dirs.claudeDir, 'commands'),
     getPluginsDirPath: () => p.join(dirs.claudeDir, 'plugins'),
+    getUserSkillsDirPath: () => p.join(dirs.claudeDir, 'skills'),
     getManagedSettingsPath: () => p.join(dirs.tmp, 'managed', 'managed-settings.json'),
   }
 })
@@ -46,6 +47,7 @@ import {
   readMcps,
   readMemoryFiles,
   readCommands,
+  readAllSkills,
 } from './config-service'
 
 // The fixture keeps `.claude` spelled `dot-claude` on disk: a common global
@@ -432,6 +434,131 @@ describe('readExtendedConfig — plugin and managed hooks', () => {
     writeJson(managedPath(), { enabledPlugins: { 'superpowers@official': false } })
     const rule = (await sessionStartRules()).find((r) => r.source.label === 'superpowers')!
     expect(rule.inactiveReason).toBe('plugin-disabled')
+  })
+})
+
+describe('readAllSkills', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+
+  function writeSkill(dir: string, name: string, description: string): void {
+    fs.mkdirSync(path.join(dir, name), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${description}\n---\nBody of ${name}.`
+    )
+  }
+
+  beforeEach(() => {
+    writeSkill(path.join(dirs.claudeDir, 'skills'), 'humanizer', 'Remove AI tells')
+
+    const root = path.join(pluginsDir(), 'cache', 'official', 'superpowers', '6.4.1')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name: 'superpowers' })
+    writeSkill(path.join(root, 'skills'), 'brainstorming', 'Explore intent first')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: { 'superpowers@official': [{ installPath: root, version: '6.4.1' }] },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'superpowers@official': true },
+    })
+    copyFixture(
+      'project/dot-claude/commands/ship.md',
+      path.join(projectRoot, '.claude', 'commands', 'ship.md')
+    )
+  })
+
+  const projectWith = (sessions: Array<{ lastTimestamp: string; skillListing?: unknown }>) => ({
+    id: '-tmp-demo-app',
+    name: 'demo-app',
+    path: projectRoot,
+    pathResolved: true,
+    localSkills: [
+      {
+        id: 'repo-skill',
+        name: 'repo-skill',
+        displayName: 'repo-skill',
+        metadata: {},
+        body: 'Project skill.',
+        sizeBytes: 14,
+      },
+    ],
+    sessions: sessions as Array<{
+      lastTimestamp: string
+      skillListing?: Array<{ name: string; description?: string }>
+    }>,
+  })
+
+  it('lists user, project and plugin skills from disk with their sources', async () => {
+    const skills = await readAllSkills([projectWith([])])
+    const byName = new Map(skills.map((s) => [s.name, s]))
+
+    expect(byName.get('humanizer')).toMatchObject({
+      source: { kind: 'user' },
+      description: 'Remove AI tells',
+      filePath: path.join(dirs.claudeDir, 'skills', 'humanizer', 'SKILL.md'),
+    })
+    expect(byName.get('repo-skill')?.source).toMatchObject({ kind: 'project', label: 'demo-app' })
+    expect(byName.get('superpowers:brainstorming')).toMatchObject({
+      source: { kind: 'plugin', id: 'plugin:superpowers@official' },
+      body: 'Body of brainstorming.',
+    })
+    expect(new Set(skills.map((s) => s.id)).size).toBe(skills.length)
+  })
+
+  it('adds the skills sessions listed that have no file, classified by name', async () => {
+    const skills = await readAllSkills([
+      projectWith([
+        {
+          lastTimestamp: '2026-09-01T10:00:00.000Z',
+          skillListing: [
+            { name: 'humanizer', description: 'dup' },
+            { name: 'superpowers:brainstorming' },
+            { name: 'code-review', description: 'Review the diff' },
+            { name: 'anthropic-skills:docx', description: 'Word files' },
+            { name: 'gone-plugin:thing' },
+            { name: 'ship' },
+          ],
+        },
+        {
+          lastTimestamp: '2026-09-20T10:00:00.000Z',
+          skillListing: [{ name: 'code-review' }],
+        },
+      ]),
+    ])
+    const byName = new Map(skills.map((s) => [s.name, s]))
+
+    // On disk already: not listed twice, but usage is attached.
+    expect(skills.filter((s) => s.name === 'humanizer')).toHaveLength(1)
+    expect(byName.get('humanizer')).toMatchObject({
+      sessionCount: 1,
+      lastSeen: '2026-09-01T10:00:00.000Z',
+    })
+    expect(skills.filter((s) => s.name === 'superpowers:brainstorming')).toHaveLength(1)
+
+    expect(byName.get('code-review')).toMatchObject({
+      source: { kind: 'builtin', id: 'builtin', label: 'Built-in' },
+      description: 'Review the diff',
+      sessionOnly: true,
+      sessionCount: 2,
+      lastSeen: '2026-09-20T10:00:00.000Z',
+      body: '',
+    })
+    expect(byName.get('anthropic-skills:docx')?.source).toMatchObject({
+      kind: 'plugin',
+      label: 'anthropic-skills',
+      plugin: { origin: 'claude.ai', enabled: true },
+    })
+    expect(byName.get('gone-plugin:thing')?.source).toMatchObject({
+      kind: 'plugin',
+      label: 'gone-plugin',
+      plugin: { installed: false },
+    })
+    expect(byName.get('ship')).toMatchObject({
+      exposedAs: 'command',
+      source: { kind: 'project', label: 'demo-app' },
+      sessionOnly: true,
+    })
   })
 })
 

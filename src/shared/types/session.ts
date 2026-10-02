@@ -12,6 +12,7 @@ export type RecordType =
   | 'file-history-snapshot'
   | 'progress'
   | 'ai-title'
+  | 'attachment'
 
 // ─── Token Usage ──────────────────────────────────────────────────────────────
 
@@ -105,6 +106,12 @@ export interface RawRecord {
    * later writes with the same text; the last one seen wins.
    */
   aiTitle?: string
+  /**
+   * The payload of a `type: 'attachment'` record: context Claude Code adds to
+   * a session (the skill listing, environment, hook output, …). Only the
+   * `skill_listing` kind is read, by `parsers/skill-listing.ts`.
+   */
+  attachment?: { type?: unknown; [key: string]: unknown }
   message?: RawMessage
   subtype?: string
   content?: string
@@ -450,12 +457,25 @@ export interface SessionDayUsage {
 
 // ─── Session Summary (lightweight, for sidebar) ───────────────────────────────
 
+/** A skill Claude Code listed as available in a session. */
+export interface SkillListingEntry {
+  name: string
+  description?: string
+}
+
 export interface SessionSummary {
   id: string
   projectId: string
   projectPath: string
   slug?: string
   title: string
+  /**
+   * Every skill the session's `skill_listing` records named, in first-seen
+   * order; absent when it recorded none. The Skills panel's only source for
+   * skills with no file on disk (built-in, claude.ai). Added in metadata
+   * cache v14.
+   */
+  skillListing?: SkillListingEntry[]
   firstTimestamp: string
   lastTimestamp: string
   /**
