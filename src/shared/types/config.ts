@@ -43,6 +43,14 @@ export interface ConfigSource {
   plugin?: PluginRef
 }
 
+/** An installed plugin, with what its `.claude-plugin/plugin.json` says about it. */
+export interface PluginEntry {
+  source: ConfigSource
+  description?: string
+  author?: string
+  homepage?: string
+}
+
 export interface HookCommand {
   type?: 'command'
   command: string

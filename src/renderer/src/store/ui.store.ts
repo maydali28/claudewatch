@@ -8,6 +8,7 @@ export type ViewId =
   | 'hooks'
   | 'commands'
   | 'skills'
+  | 'plugins'
   | 'mcps'
   | 'memory'
   | 'lint'

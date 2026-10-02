@@ -14,6 +14,7 @@ import {
   type SourceFilter,
 } from './scope-groups'
 import { hookScopeOrder } from './hook-scope-label'
+import { isPluginSourced } from '@renderer/components/plugins/plugin-views'
 import type { HookRule } from '@shared/types'
 
 function hookRuleId(eventGroupId: string, rule: HookRule): string {
@@ -73,7 +74,11 @@ function RuleItem({
 
 export default function HooksSidebar(): React.JSX.Element {
   const isLoading = useConfigStore((s) => s.isLoading)
-  const hooks = useConfigStore((s) => s.hooks)
+  const allHooks = useConfigStore((s) => s.hooks)
+  // Plugin hooks are listed in the Plugins tab.
+  const hooks = allHooks
+    .map((g) => ({ ...g, rules: g.rules.filter((r) => !isPluginSourced(r.source)) }))
+    .filter((g) => g.rules.length > 0)
   const loadAll = useConfigStore((s) => s.loadAll)
   const selectedHookId = useConfigStore((s) => s.selectedHookId)
   const setSelectedHook = useConfigStore((s) => s.setSelectedHook)
@@ -163,7 +168,6 @@ export default function HooksSidebar(): React.JSX.Element {
             { value: 'all', label: 'All', count: counts.all },
             { value: 'user', label: 'User', count: counts.user },
             { value: 'project', label: 'Project', count: counts.project },
-            { value: 'plugin', label: 'Plugin', count: counts.plugin },
             { value: 'managed', label: 'Managed', count: counts.managed },
           ]}
         />
