@@ -10,6 +10,7 @@ import TimelinePanel from '@renderer/components/timeline/timeline-panel'
 import HooksPanel from '@renderer/components/config/hooks-panel'
 import CommandsPanel from '@renderer/components/config/commands-panel'
 import SkillsPanel from '@renderer/components/config/skills-panel'
+import PluginsPanel from '@renderer/components/plugins/plugins-panel'
 import McpsPanel from '@renderer/components/config/mcps-panel'
 import MemoryPanel from '@renderer/components/config/memory-panel'
 import LintPanel from '@renderer/components/lint/lint-panel'
@@ -31,6 +32,8 @@ function PanelContent({ view }: { view: ViewId }): React.JSX.Element {
       return <CommandsPanel />
     case 'skills':
       return <SkillsPanel />
+    case 'plugins':
+      return <PluginsPanel />
     case 'mcps':
       return <McpsPanel />
     case 'memory':

@@ -52,14 +52,20 @@ function ValidationBadge({ ok, label }: { ok: boolean; label: string }): React.J
 
 // ─── Skill detail view ────────────────────────────────────────────────────────
 
-function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
+/** One skill in full; also shown from the Plugins tab. */
+export function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
   const note = sessionOnlyNote(skill)
-  const isValidKebab = KEBAB_RE.test(skill.name)
-  const nameLen = skill.name.length
+  // The naming rules apply to the skill's own name; Claude Code adds the
+  // `<plugin>:` prefix itself.
+  const prefix = skill.source?.kind === 'plugin' ? `${skill.source.label}:` : ''
+  const ownName =
+    prefix && skill.name.startsWith(prefix) ? skill.name.slice(prefix.length) : skill.name
+  const isValidKebab = KEBAB_RE.test(ownName)
+  const nameLen = ownName.length
   const descLen = (skill.description ?? '').length
   const bodyLines = lineCount(skill.body)
-  const hasReservedWords = /claude|anthropic/i.test(skill.name)
-  const hasAngleBrackets = /[<>]/.test(skill.name + (skill.description ?? ''))
+  const hasReservedWords = /claude|anthropic/i.test(ownName)
+  const hasAngleBrackets = /[<>]/.test(ownName + (skill.description ?? ''))
 
   const validationChecks = [
     { ok: isValidKebab, label: 'kebab-case name' },

@@ -3,20 +3,21 @@ import { Webhook, Terminal, Clock, CircleSlash } from 'lucide-react'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { Skeleton } from '@renderer/components/ui/skeleton'
-import type { HookEventGroup, HookRule } from '@shared/types'
+import type { HookRule } from '@shared/types'
 import { formatHookTimeout, hookScopeLabel, inactiveReasonText } from './hook-scope-label'
 import { pluginTags } from './source-group-decor'
 
 // ─── Hook detail ──────────────────────────────────────────────────────────────
 
-function HookDetail({ group, rule }: { group: HookEventGroup; rule: HookRule }): React.JSX.Element {
+/** One hook rule in full; also shown from the Plugins tab. */
+export function HookDetail({ event, rule }: { event: string; rule: HookRule }): React.JSX.Element {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
       <div className="flex items-start gap-3 px-6 py-4 border-b border-border/50 shrink-0">
         <Webhook className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-semibold">{group.event}</h2>
+          <h2 className="text-sm font-semibold">{event}</h2>
           <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
             matcher: {rule.matcher || '*'}
           </p>
@@ -134,5 +135,5 @@ export default function HooksPanel(): React.JSX.Element {
       />
     )
 
-  return <HookDetail group={group} rule={rule} />
+  return <HookDetail event={group.event} rule={rule} />
 }
