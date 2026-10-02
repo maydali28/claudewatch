@@ -28,7 +28,6 @@ overrides:
   postcss@>=8.0.0 <8.5.23: '>=8.5.23 <9'
   tar@<7.5.21: '>=7.5.21 <8'
   undici@<8.9.0: '>=8.9.0'
-  image-size@>=0.6.3 <2.0.3: '>=2.0.3'
 
 patchedDependencies:
   appdmg@0.6.6:
@@ -3884,9 +3883,9 @@ packages:
     resolution: {integrity: sha512-YChdK5txDjwGUvgR7oCJcLGkwi3LDh8Zx8tS7ndYciLEg/oOCL26VUBSUEtgS7EjiybcBqFxh5j0rAdDX7/bbg==}
     engines: {node: '>= 4'}
 
-  image-size@2.0.4:
-    resolution: {integrity: sha512-QRUkFFsRV/6fuESxb9Vkq+a0LkSrgKXuc2NEqfikiXxxN/G3tjWt5EVUlMaImRBZRZK/jRBEbYvpPYZL8t08Zw==}
-    engines: {node: '>=18'}
+  image-size@0.7.5:
+    resolution: {integrity: sha512-Hiyv+mXHfFEP7LzUL/llg9RwFxxY+o9N3JVLIeG5E7iFIFAalxvRU9UZthBdYDEVnzHMgjnKJPPpay5BWf1g9g==}
+    engines: {node: '>=6.9.0'}
     hasBin: true
 
   immer@11.1.18:
@@ -8820,7 +8819,7 @@ snapshots:
       execa: 1.0.0
       fs-temp: 1.2.1
       fs-xattr: 0.3.1
-      image-size: 2.0.4
+      image-size: 0.7.5
       is-my-json-valid: 2.20.6
       minimist: 1.2.8
       parse-color: 1.0.0
@@ -10463,7 +10462,7 @@ snapshots:
 
   ignore@7.0.11: {}
 
-  image-size@2.0.4:
+  image-size@0.7.5:
     optional: true
 
   immer@11.1.18: {}
