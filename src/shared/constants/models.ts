@@ -29,6 +29,7 @@ const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
   'claude-opus-4': 'opus-4',
 
   // ── Sonnet ────────────────────────────────────────────────────────────────
+  'claude-sonnet-5-5': 'sonnet-5-5',
   'claude-sonnet-5': 'sonnet-5',
   'claude-sonnet-4-6': 'sonnet-4-6',
   'claude-sonnet-4-5': 'sonnet-4-5',

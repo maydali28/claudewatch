@@ -47,6 +47,11 @@ const META: Record<ModelFamily, ModelMeta> = {
   },
   'opus-4': { label: 'Opus 4', badgeClass: 'bg-orange-500/10 text-orange-500', color: '#f97316' },
   // ── Sonnet — indigos ─────────────────────────────────────────────────────────
+  'sonnet-5-5': {
+    label: 'Sonnet 5.5',
+    badgeClass: 'bg-indigo-500/10 text-indigo-500',
+    color: '#6366f1',
+  },
   'sonnet-5': {
     label: 'Sonnet 5',
     badgeClass: 'bg-indigo-500/10 text-indigo-500',
