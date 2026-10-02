@@ -29,8 +29,10 @@ import type { AppPreferences } from '@shared/types/preferences'
  *     recognised are repriced instead of staying unpriced; dropped opus-3 /
  *     sonnet-3-7 / sonnet-3-5 / haiku-3, which no longer appear on the
  *     official pricing page, so their sessions now surface as unpriced.
+ * 4 — added sonnet-5-5, so sessions cached as `unknown` before it was
+ *     recognised are repriced instead of staying unpriced.
  */
-export const PRICING_REVISION = 3
+export const PRICING_REVISION = 4
 
 export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   // ── Fable 5.1 / Mythos 5.1 — $10 input / $50 output, $0.25 cache read ────
@@ -55,7 +57,8 @@ export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   'opus-4-1': { input: 15.0, output: 75.0, cacheRead: 1.5, cache5m: 18.75, cache1h: 30.0 },
   'opus-4': { input: 15.0, output: 75.0, cacheRead: 1.5, cache5m: 18.75, cache1h: 30.0 },
 
-  // ── Sonnet 5 — $2 input / $10 output ─────────────────────────────────────
+  // ── Sonnet 5.5 / 5 — $2 input / $10 output ───────────────────────────────
+  'sonnet-5-5': { input: 2.0, output: 10.0, cacheRead: 0.2, cache5m: 2.5, cache1h: 4.0 },
   'sonnet-5': { input: 2.0, output: 10.0, cacheRead: 0.2, cache5m: 2.5, cache1h: 4.0 },
 
   // ── Sonnet 4.6 / 4.5 / 4 — $3 input / $15 output ─────────────────────────

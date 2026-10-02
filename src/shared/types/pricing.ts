@@ -31,7 +31,8 @@ export type ModelFamily =
   // Opus 4.1 / 4 — $15/$75
   | 'opus-4-1'
   | 'opus-4'
-  // Sonnet 5 — $2/$10
+  // Sonnet 5.5 / 5 — $2/$10
+  | 'sonnet-5-5'
   | 'sonnet-5'
   // Sonnet 4.6 / 4.5 / 4 — $3/$15
   | 'sonnet-4-6'

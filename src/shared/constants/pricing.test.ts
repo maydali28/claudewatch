@@ -10,6 +10,7 @@ describe('ANTHROPIC_PRICING — published input/output rates', () => {
     ['opus-5-5', 4, 20],
     ['opus-5', 5, 25],
     ['opus-4-8', 5, 25],
+    ['sonnet-5-5', 2, 10],
     ['sonnet-5', 2, 10],
     ['sonnet-4-6', 3, 15],
     ['haiku-4-5', 1, 5],
@@ -50,6 +51,10 @@ describe('ANTHROPIC_PRICING — cache read rates', () => {
     expect(ANTHROPIC_PRICING['opus-5'].cacheRead).toBe(0.5)
   })
 
+  it('prices Sonnet 5.5 cache reads at 0.1x input', () => {
+    expect(ANTHROPIC_PRICING['sonnet-5-5'].cacheRead).toBe(0.2)
+  })
+
   it('prices Sonnet 5 cache reads at 0.1x input', () => {
     expect(ANTHROPIC_PRICING['sonnet-5'].cacheRead).toBe(0.2)
   })
@@ -62,6 +67,7 @@ describe('ANTHROPIC_PRICING — cache write tiers', () => {
     'fable-5',
     'opus-5-5',
     'opus-5',
+    'sonnet-5-5',
     'sonnet-5',
   ] as ModelFamily[])('%s writes cost 1.25x input for 5m and 2x input for 1h', (family) => {
     const p = ANTHROPIC_PRICING[family]
