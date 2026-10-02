@@ -150,9 +150,15 @@ interface CacheFile {
 // to tell them apart. Discard, so the first scan recounts. Tokens and cost
 // are unaffected.
 //
+// v14: `SessionSummary.skillListing` holds the skills a session's
+// `skill_listing` records named — the only source for skills with no file on
+// disk. A v13 entry has none, and nothing about the transcript changes when
+// the parser learns to read them. Discard, so the first scan collects them.
+// Tokens, cost and counts are unaffected.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 13
+const CACHE_VERSION = 14
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

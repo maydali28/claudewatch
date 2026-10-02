@@ -38,6 +38,7 @@ import {
   judgeResponse,
   type PendingResponse,
 } from './response-observability'
+import { createSkillListingCollector } from './skill-listing'
 import { createLogger } from '@main/lib/logger'
 
 const log = createLogger('MetadataParser')
@@ -636,6 +637,8 @@ export async function parseSessionMetadata(
   // Message counts come from the same response-grouping the ledger uses for
   // usage, so a block-split response counts once for both.
   const activity = createActivityAccumulator()
+  // The skills Claude Code listed for the session — see `SessionSummary.skillListing`.
+  const skills = createSkillListingCollector()
   // Counted, not swallowed — see `SessionSummary.diagnostics`.
   let malformedLines = 0
 
@@ -658,6 +661,7 @@ export async function parseSessionMetadata(
 
     if (shouldSkipRecord(raw, seenUuids)) continue
 
+    skills.add(raw)
     if (raw.slug && !acc.slug) acc.slug = raw.slug
     if (raw.type === 'ai-title') {
       const title = raw.aiTitle?.trim()
@@ -788,6 +792,8 @@ export async function parseSessionMetadata(
   )
 
   summary.subagents = summaries
+  const skillListing = skills.resultOrUndefined()
+  if (skillListing) summary.skillListing = skillListing
   summary.parentMessageCount = activityCounts.total
   summary.messageCount = activityCounts.total + summaries.reduce((s, x) => s + x.messageCount, 0)
 

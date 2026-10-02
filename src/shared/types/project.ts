@@ -3,12 +3,6 @@
 import type { SessionSummary } from './session'
 import type { SkillEntry } from './config'
 
-export interface ProjectSkillEntry extends SkillEntry {
-  projectId: string
-  projectName: string
-  projectPath: string
-}
-
 export interface ProjectClaudeMd {
   projectId: string
   projectName: string

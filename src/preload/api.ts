@@ -59,8 +59,6 @@ export const api = {
 
     getSkills: () => invoke(CHANNELS.CONFIG_GET_SKILLS),
 
-    getProjectSkills: () => invoke(CHANNELS.CONFIG_GET_PROJECT_SKILLS),
-
     getMcps: (projectId?: string) => invoke(CHANNELS.CONFIG_GET_MCPS, { projectId }),
 
     getMemory: (projectId?: string) => invoke(CHANNELS.CONFIG_GET_MEMORY, { projectId }),

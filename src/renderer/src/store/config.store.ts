@@ -7,14 +7,13 @@ import type {
   MemoryFile,
   ExtendedConfig,
 } from '@shared/types'
-import type { ProjectSkillEntry, ProjectClaudeMd } from '@shared/types/project'
+import type { ProjectClaudeMd } from '@shared/types/project'
 import { ipc } from '@renderer/lib/ipc-client'
 
 interface ConfigState {
   hooks: HookEventGroup[]
   commands: CommandEntry[]
   skills: SkillEntry[]
-  projectSkills: ProjectSkillEntry[]
   mcps: McpServerEntry[]
   memoryFiles: MemoryFile[]
   projectClaudeMds: ProjectClaudeMd[]
@@ -41,7 +40,6 @@ export const useConfigStore = create<ConfigState>((set) => ({
   hooks: [],
   commands: [],
   skills: [],
-  projectSkills: [],
   mcps: [],
   memoryFiles: [],
   projectClaudeMds: [],
@@ -63,7 +61,6 @@ export const useConfigStore = create<ConfigState>((set) => ({
         fullResult,
         commandsResult,
         skillsResult,
-        projectSkillsResult,
         mcpsResult,
         memoryResult,
         projectClaudeMdsResult,
@@ -71,7 +68,6 @@ export const useConfigStore = create<ConfigState>((set) => ({
         ipc.config.getFull(projectId),
         ipc.config.getCommands(projectId),
         ipc.config.getSkills(),
-        ipc.config.getProjectSkills(),
         ipc.config.getMcps(projectId),
         ipc.config.getMemory(projectId),
         ipc.config.getProjectClaudeMds(),
@@ -82,7 +78,6 @@ export const useConfigStore = create<ConfigState>((set) => ({
         hooks: fullResult.ok ? (fullResult.data.hooks ?? []) : [],
         commands: commandsResult.ok ? commandsResult.data : [],
         skills: skillsResult.ok ? skillsResult.data : [],
-        projectSkills: projectSkillsResult.ok ? projectSkillsResult.data : [],
         mcps: mcpsResult.ok ? mcpsResult.data : [],
         memoryFiles: memoryResult.ok ? memoryResult.data : [],
         projectClaudeMds: projectClaudeMdsResult.ok ? projectClaudeMdsResult.data : [],
