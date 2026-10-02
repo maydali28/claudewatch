@@ -26,6 +26,8 @@ export interface PluginRef {
   origin: 'marketplace' | 'claude.ai'
   /** Enabled in `enabledPlugins` (claude.ai-synced plugins are always enabled). */
   enabled: boolean
+  /** False for a plugin known only from session skill listings, no longer installed. */
+  installed?: false
 }
 
 export interface ConfigSource {
@@ -154,6 +156,18 @@ export interface SkillEntry {
   metadata: Record<string, string>
   body: string
   sizeBytes: number
+  /** Set on every skill the Skills panel lists; absent on a project's raw `localSkills`. */
+  source?: ConfigSource
+  /** Absolute path of the `SKILL.md`, when there is one. */
+  filePath?: string
+  /** Known only from sessions' skill listings: no file, so no body (built-in, claude.ai, …). */
+  sessionOnly?: true
+  /** A command Claude Code also offers as a skill. */
+  exposedAs?: 'command'
+  /** Last time a session listed this skill (the session's last timestamp). */
+  lastSeen?: string
+  /** How many scanned sessions listed this skill. */
+  sessionCount?: number
 }
 
 // ─── Memory Files ─────────────────────────────────────────────────────────────

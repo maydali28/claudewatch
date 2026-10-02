@@ -80,15 +80,26 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(13, tz)
+    writeCacheFile(14, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 13, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 12, or a
-    // bump to 14 without a matching migration, would do.
+    // If the constant is not 14, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 13, or a
+    // bump to 15 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
+  })
+
+  it('discards a v13 cache file rather than serving it under the v14 contract', () => {
+    const tz = `${TZ}-stale-v13`
+    writeCacheFile(13, tz)
+
+    // A v13 summary has no `skillListing`. Served back, every session would
+    // look as if it listed no skills, and the Skills panel would lose the
+    // built-in and claude.ai skills until each transcript changed. See
+    // `CACHE_VERSION`'s v14 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards a v12 cache file rather than serving it under the v13 contract', () => {

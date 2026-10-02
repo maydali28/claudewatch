@@ -1,4 +1,4 @@
-import type { Project, ProjectSkillEntry, ProjectClaudeMd, UpdateInfo } from '@shared/types/project'
+import type { Project, ProjectClaudeMd, UpdateInfo } from '@shared/types/project'
 import type { PlanSummary, PlanDetail } from '@shared/types/plan'
 import type {
   SessionSummary,
@@ -82,10 +82,6 @@ export interface IPCContracts {
   'config:get-skills': {
     request: void
     response: Result<SkillEntry[]>
-  }
-  'config:get-project-skills': {
-    request: void
-    response: Result<ProjectSkillEntry[]>
   }
   'config:get-mcps': {
     request: { projectId?: string }

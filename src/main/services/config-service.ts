@@ -7,6 +7,7 @@ import {
   getProjectsDirPath,
   getUserCommandsDirPath,
   getUserSettingsPath,
+  getUserSkillsDirPath,
 } from '@main/lib/claude-paths'
 import { assertSafePath } from '@main/lib/safe-path'
 import { samePath } from '@main/lib/same-path'
@@ -729,7 +730,22 @@ export async function readCommands(projects: ProjectRootRef[]): Promise<CommandE
 
 // ─── readSkills ───────────────────────────────────────────────────────────────
 
-export async function readSkillsFromDir(skillsDir: string): Promise<SkillEntry[]> {
+interface SkillDirOptions {
+  /** Labels each skill; ids become `<source.id>:<dir>` so two sources never collide. */
+  source?: ConfigSource
+  /** `<plugin>:` for plugin skills, which Claude Code names by plugin. */
+  namePrefix?: string
+}
+
+/**
+ * Every `<skillsDir>/<name>/SKILL.md`. Without a source the id is the folder
+ * name (a project's raw `localSkills`); with one, each skill carries it and
+ * its file path.
+ */
+export async function readSkillsFromDir(
+  skillsDir: string,
+  opts: SkillDirOptions = {}
+): Promise<SkillEntry[]> {
   let skillDirs: string[] = []
   try {
     const entries = await fs.promises.readdir(skillsDir, { withFileTypes: true })
@@ -750,24 +766,168 @@ export async function readSkillsFromDir(skillsDir: string): Promise<SkillEntry[]
     const { meta, body } = parseFrontmatter(content)
 
     const { name, displayName, description, ...extraMeta } = meta
+    const fullName = `${opts.namePrefix ?? ''}${name || dirName}`
 
     skills.push({
-      id: dirName,
-      name: name ?? dirName,
-      displayName: displayName ?? name ?? dirName,
+      id: opts.source ? `${opts.source.id}:${dirName}` : dirName,
+      name: fullName,
+      displayName: opts.namePrefix ? fullName : displayName || name || dirName,
       description: description,
       metadata: extraMeta,
       body: body.trim(),
       sizeBytes,
+      ...(opts.source ? { source: opts.source, filePath: skillFile } : {}),
     })
   }
 
   return skills
 }
 
-export async function readSkills(): Promise<SkillEntry[]> {
-  const claudeDir = getClaudeDir()
-  return readSkillsFromDir(path.join(claudeDir, 'skills'))
+/** What `readAllSkills` needs from a scanned project. */
+export interface SkillScanProject {
+  id: string
+  name: string
+  path: string
+  pathResolved?: boolean
+  localSkills: SkillEntry[]
+  sessions: Array<{
+    lastTimestamp: string
+    skillListing?: Array<{ name: string; description?: string }>
+  }>
+}
+
+interface SkillUsage {
+  description?: string
+  lastSeen: string
+  sessionCount: number
+}
+
+function skillUsageAcross(projects: SkillScanProject[]): Map<string, SkillUsage> {
+  const usage = new Map<string, SkillUsage>()
+  for (const project of projects) {
+    for (const session of project.sessions) {
+      for (const { name, description } of session.skillListing ?? []) {
+        const u = usage.get(name)
+        if (!u) {
+          usage.set(name, { description, lastSeen: session.lastTimestamp, sessionCount: 1 })
+          continue
+        }
+        u.sessionCount++
+        if (session.lastTimestamp > u.lastSeen) u.lastSeen = session.lastTimestamp
+        u.description ??= description
+      }
+    }
+  }
+  return usage
+}
+
+const BUILTIN_SOURCE: ConfigSource = { kind: 'builtin', id: 'builtin', label: 'Built-in' }
+const CLAUDE_AI_SKILLS_PREFIX = 'anthropic-skills'
+
+/**
+ * The source of a skill a session listed that no file on disk provides:
+ * `anthropic-skills:<x>` is the claude.ai account's skills; `<plugin>:<x>`
+ * an installed plugin, or one no longer installed; a bare name is built into
+ * Claude Code.
+ */
+function sessionSkillSource(name: string, plugins: Map<string, ConfigSource>): ConfigSource {
+  const colon = name.indexOf(':')
+  if (colon <= 0) return BUILTIN_SOURCE
+  const prefix = name.slice(0, colon)
+  if (prefix === CLAUDE_AI_SKILLS_PREFIX) {
+    return {
+      kind: 'plugin',
+      id: `plugin:${prefix}@claude.ai`,
+      label: prefix,
+      plugin: { name: prefix, origin: 'claude.ai', enabled: true },
+    }
+  }
+  return (
+    plugins.get(prefix) ?? {
+      kind: 'plugin',
+      id: `plugin:${prefix}@unknown`,
+      label: prefix,
+      plugin: { name: prefix, origin: 'marketplace', enabled: false, installed: false },
+    }
+  )
+}
+
+/**
+ * Every skill Claude Code can load, for the Skills panel: user skills
+ * (`<claudeDir>/skills`), each resolved project's `.claude/skills`, every
+ * installed plugin's `skills/` (named `<plugin>:<skill>`), and every skill a
+ * scanned session listed that none of those provide — built-in skills,
+ * claude.ai skills, skills of a plugin since removed, and commands Claude
+ * Code also offers as skills. Session-listed skills have a name and a
+ * description, no body. Every skill a session listed carries when it was last
+ * listed and in how many sessions.
+ */
+export async function readAllSkills(projects: SkillScanProject[]): Promise<SkillEntry[]> {
+  const roots = projects
+    .filter((p) => p.pathResolved !== false)
+    .map((p) => ({ id: p.id, name: p.name, path: p.path }))
+  const userSource = sourceForLayer({ scope: 'user', path: '', settings: {} })
+
+  const [userSkills, plugins, commands] = await Promise.all([
+    readSkillsFromDir(getUserSkillsDirPath(), { source: userSource }),
+    currentPluginSources(),
+    readCommands(roots),
+  ])
+  const projectSkills = projects.flatMap((project) => {
+    const source = sourceForLayer({ scope: 'project', path: '', settings: {}, project })
+    return project.localSkills.map((skill): SkillEntry => ({
+      ...skill,
+      id: `${source.id}:${skill.id}`,
+      source,
+      filePath: path.join(project.path, '.claude', 'skills', skill.id, 'SKILL.md'),
+    }))
+  })
+  const pluginSkills = (
+    await Promise.all(
+      plugins.map((source) =>
+        source.root
+          ? readSkillsFromDir(path.join(source.root, 'skills'), {
+              source,
+              namePrefix: `${source.label}:`,
+            })
+          : []
+      )
+    )
+  ).flat()
+
+  const usage = skillUsageAcross(projects)
+  const withUsage = (skill: SkillEntry): SkillEntry => {
+    const u = usage.get(skill.name)
+    return u ? { ...skill, lastSeen: u.lastSeen, sessionCount: u.sessionCount } : skill
+  }
+
+  const onDisk = [...userSkills, ...projectSkills, ...pluginSkills].map(withUsage)
+  const known = new Set(onDisk.map((s) => s.name))
+  const pluginsByName = new Map(plugins.map((p) => [p.label, p]))
+  const commandsByName = new Map(commands.map((c) => [c.name, c]))
+
+  const fromSessions: SkillEntry[] = []
+  for (const [name, u] of usage) {
+    if (known.has(name)) continue
+    const command = commandsByName.get(name)
+    const source = command ? command.source : sessionSkillSource(name, pluginsByName)
+    fromSessions.push({
+      id: `${source.id}:session:${name}`,
+      name,
+      displayName: name,
+      description: u.description ?? command?.description,
+      metadata: {},
+      body: '',
+      sizeBytes: 0,
+      source,
+      sessionOnly: true,
+      ...(command ? { exposedAs: 'command' as const, filePath: command.filePath } : {}),
+      lastSeen: u.lastSeen,
+      sessionCount: u.sessionCount,
+    })
+  }
+
+  return [...onDisk, ...fromSessions]
 }
 
 // ─── readMemoryFiles ──────────────────────────────────────────────────────────

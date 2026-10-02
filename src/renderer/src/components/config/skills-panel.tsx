@@ -1,11 +1,34 @@
 import React from 'react'
-import { Layers, CheckCircle, XCircle } from 'lucide-react'
+import { Layers, CheckCircle, XCircle, Info } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { SkillEntry } from '@shared/types'
 import MarkdownBody from '@renderer/components/shared/markdown-body'
 import { lineCount } from '@renderer/components/shared/markdown-body-rules'
+import { pluginTags } from './source-group-decor'
+import { relativeDay, sessionOnlyNote } from './skill-usage'
+
+/** "user" | "<project> · project" | "<plugin> · plugin (tags)" | "built-in" */
+function skillSourceLabel(skill: SkillEntry): string {
+  const source = skill.source
+  if (!source) return ''
+  switch (source.kind) {
+    case 'user':
+      return 'user'
+    case 'project':
+    case 'local':
+      return `${source.label} · project`
+    case 'plugin': {
+      const tags = pluginTags(source)
+      return `${source.label} · plugin${tags.length > 0 ? ` (${tags.join(', ')})` : ''}`
+    }
+    case 'managed':
+      return 'managed'
+    case 'builtin':
+      return 'built-in'
+  }
+}
 
 const KEBAB_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/
 
@@ -30,6 +53,7 @@ function ValidationBadge({ ok, label }: { ok: boolean; label: string }): React.J
 // ─── Skill detail view ────────────────────────────────────────────────────────
 
 function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
+  const note = sessionOnlyNote(skill)
   const isValidKebab = KEBAB_RE.test(skill.name)
   const nameLen = skill.name.length
   const descLen = (skill.description ?? '').length
@@ -60,21 +84,48 @@ function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
               {skill.description}
             </p>
           )}
+          <p className="text-[10px] text-muted-foreground mt-1">
+            {skillSourceLabel(skill)}
+            {skill.lastSeen && (
+              <>
+                {' '}
+                · seen {relativeDay(skill.lastSeen)} in {skill.sessionCount ?? 0} session
+                {skill.sessionCount === 1 ? '' : 's'}
+              </>
+            )}
+          </p>
+          {skill.filePath && (
+            <p
+              className="text-[10px] text-muted-foreground/50 mt-0.5 truncate font-mono"
+              title={skill.filePath}
+            >
+              {skill.filePath}
+            </p>
+          )}
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6 space-y-5">
-        {/* Validation */}
-        <div>
-          <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">
-            Validation
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {validationChecks.map((c) => (
-              <ValidationBadge key={c.label} ok={c.ok} label={c.label} />
-            ))}
+        {note && (
+          <div className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            {note}
           </div>
-        </div>
+        )}
+
+        {/* Validation applies to SKILL.md files only. */}
+        {!note && (
+          <div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">
+              Validation
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {validationChecks.map((c) => (
+                <ValidationBadge key={c.label} ok={c.ok} label={c.label} />
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Metadata */}
         {Object.keys(skill.metadata).length > 0 && (
@@ -96,7 +147,7 @@ function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
         )}
 
         {/* Body */}
-        <MarkdownBody content={skill.body} label="Body" />
+        {!note && <MarkdownBody content={skill.body} label="Body" />}
       </div>
     </div>
   )
@@ -105,11 +156,8 @@ function SkillDetail({ skill }: { skill: SkillEntry }): React.JSX.Element {
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 export default function SkillsPanel(): React.JSX.Element {
-  const { skills, projectSkills, selectedSkillId } = useConfigStore()
-  const selected =
-    skills.find((s) => s.id === selectedSkillId) ??
-    projectSkills.find((s) => `project:${s.projectId}:${s.id}` === selectedSkillId) ??
-    null
+  const { skills, selectedSkillId } = useConfigStore()
+  const selected = skills.find((s) => s.id === selectedSkillId) ?? null
 
   if (!selected)
     return (

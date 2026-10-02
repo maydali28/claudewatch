@@ -15,6 +15,7 @@ export function shortVersion(version: string): string {
 export function pluginTags(source: ConfigSource | undefined): string[] {
   const plugin = source?.plugin
   if (!plugin) return []
+  if (plugin.installed === false) return ['not installed']
   return [
     ...(plugin.version ? [shortVersion(plugin.version)] : []),
     ...(plugin.origin === 'claude.ai' ? ['claude.ai'] : []),
