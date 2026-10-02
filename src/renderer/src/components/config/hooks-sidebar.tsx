@@ -1,10 +1,18 @@
 import React, { useState } from 'react'
-import { RefreshCw, Search, X, Webhook, FolderOpen } from 'lucide-react'
+import { RefreshCw, Search, X, Webhook } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
+import { useUIStore } from '@renderer/store/ui.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { ScopeGroup } from './scope-group'
-import { groupHooksByScope } from './scope-groups'
+import { SourceChips } from './source-chips'
+import { sourceGroupDecor } from './source-group-decor'
+import {
+  countBySourceFilter,
+  groupHooksByScope,
+  matchesSourceFilter,
+  type SourceFilter,
+} from './scope-groups'
 import { hookScopeOrder } from './hook-scope-label'
 import type { HookRule } from '@shared/types'
 
@@ -17,7 +25,13 @@ function RuleItem({
   selectedId,
   onSelect,
 }: {
-  rule: { id: string; matcher: string; commandCount: number; isLocal: boolean }
+  rule: {
+    id: string
+    matcher: string
+    commandCount: number
+    isLocal: boolean
+    inactive: boolean
+  }
   selectedId: string | null
   onSelect: (id: string) => void
 }): React.JSX.Element {
@@ -26,7 +40,8 @@ function RuleItem({
       onClick={() => onSelect(rule.id)}
       className={cn(
         'w-full rounded-md px-2.5 py-2 text-left transition-colors',
-        selectedId === rule.id ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
+        selectedId === rule.id ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent',
+        rule.inactive && 'opacity-60'
       )}
     >
       <p className="flex items-center gap-1.5 min-w-0">
@@ -41,6 +56,11 @@ function RuleItem({
         {rule.isLocal && (
           <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
             local
+          </span>
+        )}
+        {rule.inactive && (
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
+            off
           </span>
         )}
       </p>
@@ -58,18 +78,31 @@ export default function HooksSidebar(): React.JSX.Element {
   const selectedHookId = useConfigStore((s) => s.selectedHookId)
   const setSelectedHook = useConfigStore((s) => s.setSelectedHook)
   const [search, setSearch] = useState('')
+  const sourceFilter = (useUIStore((s) => s.sourceFilters.hooks) ?? 'all') as SourceFilter
+  const setSourceFilter = useUIStore((s) => s.setSourceFilter)
 
   const q = search.toLowerCase()
 
-  const filteredGroups = hooks
+  const searched = hooks
     .map((g) => ({
       ...g,
       rules: g.rules.filter(
         (r) =>
           g.event.toLowerCase().includes(q) ||
           (r.matcher ?? '').toLowerCase().includes(q) ||
-          (r.projectName ?? '').toLowerCase().includes(q)
+          (r.projectName ?? '').toLowerCase().includes(q) ||
+          r.source.label.toLowerCase().includes(q)
       ),
+    }))
+    .filter((g) => g.rules.length > 0)
+  const counts = countBySourceFilter(
+    searched.flatMap((g) => g.rules),
+    (r) => r.source
+  )
+  const filteredGroups = searched
+    .map((g) => ({
+      ...g,
+      rules: g.rules.filter((r) => matchesSourceFilter(r.source, sourceFilter)),
     }))
     .filter((g) => g.rules.length > 0)
 
@@ -121,6 +154,21 @@ export default function HooksSidebar(): React.JSX.Element {
         </div>
       </div>
 
+      {total > 0 && (
+        <SourceChips<SourceFilter>
+          label="Filter hooks by source"
+          value={sourceFilter}
+          onChange={(v) => setSourceFilter('hooks', v)}
+          options={[
+            { value: 'all', label: 'All', count: counts.all },
+            { value: 'user', label: 'User', count: counts.user },
+            { value: 'project', label: 'Project', count: counts.project },
+            { value: 'plugin', label: 'Plugin', count: counts.plugin },
+            { value: 'managed', label: 'Managed', count: counts.managed },
+          ]}
+        />
+      )}
+
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && total === 0 && (
           <div className="flex flex-col gap-2 p-2">
@@ -140,47 +188,51 @@ export default function HooksSidebar(): React.JSX.Element {
           </div>
         )}
 
-        {!isLoading && total > 0 && scopeGroups.length === 0 && search && (
+        {!isLoading && total > 0 && scopeGroups.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
-            <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
+            <p className="text-xs text-muted-foreground">
+              {search ? <>No matches for &quot;{search}&quot;</> : 'No hooks from this source'}
+            </p>
           </div>
         )}
 
-        {scopeGroups.map((sg) => (
-          <ScopeGroup
-            key={sg.key}
-            label={sg.label}
-            count={sg.eventGroups.reduce((acc, eg) => acc + eg.rules.length, 0)}
-            icon={
-              sg.kind === 'project' ? (
-                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-              ) : undefined
-            }
-          >
-            {sg.eventGroups.map((eg) => (
-              <ScopeGroup key={eg.id} label={eg.event} count={eg.rules.length}>
-                {[...eg.rules]
-                  .sort((a, b) => hookScopeOrder(a).localeCompare(hookScopeOrder(b)))
-                  .map((rule) => {
-                    const id = hookRuleId(eg.id, rule)
-                    return (
-                      <RuleItem
-                        key={id}
-                        rule={{
-                          id,
-                          matcher: rule.matcher,
-                          commandCount: rule.hooks.length,
-                          isLocal: rule.scope === 'local',
-                        }}
-                        selectedId={selectedHookId}
-                        onSelect={setSelectedHook}
-                      />
-                    )
-                  })}
-              </ScopeGroup>
-            ))}
-          </ScopeGroup>
-        ))}
+        {scopeGroups.map((sg) => {
+          const decor = sourceGroupDecor(sg)
+          return (
+            <ScopeGroup
+              key={sg.key}
+              label={sg.label}
+              count={sg.eventGroups.reduce((acc, eg) => acc + eg.rules.length, 0)}
+              icon={decor.icon}
+              tags={decor.tags}
+              muted={decor.muted}
+            >
+              {sg.eventGroups.map((eg) => (
+                <ScopeGroup key={eg.id} label={eg.event} count={eg.rules.length}>
+                  {[...eg.rules]
+                    .sort((a, b) => hookScopeOrder(a).localeCompare(hookScopeOrder(b)))
+                    .map((rule) => {
+                      const id = hookRuleId(eg.id, rule)
+                      return (
+                        <RuleItem
+                          key={id}
+                          rule={{
+                            id,
+                            matcher: rule.matcher,
+                            commandCount: rule.hooks.length,
+                            isLocal: rule.scope === 'local',
+                            inactive: rule.inactiveReason !== undefined,
+                          }}
+                          selectedId={selectedHookId}
+                          onSelect={setSelectedHook}
+                        />
+                      )
+                    })}
+                </ScopeGroup>
+              ))}
+            </ScopeGroup>
+          )
+        })}
       </div>
     </div>
   )

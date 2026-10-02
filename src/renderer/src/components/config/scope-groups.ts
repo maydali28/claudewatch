@@ -1,4 +1,4 @@
-import type { CommandEntry, HookEventGroup, HookRule } from '@shared/types'
+import type { CommandEntry, ConfigSource, HookEventGroup, HookRule } from '@shared/types'
 
 /**
  * One group of items in a "Global, then per-project" sidebar: `Global` first
@@ -54,6 +54,114 @@ export function groupByScope<T>(items: T[], opts: GroupByScopeOptions<T>): Scope
   return groups
 }
 
+// ─── Groups by source ─────────────────────────────────────────────────────────
+
+export type SourceGroupKind = 'global' | 'project' | 'plugin' | 'managed' | 'builtin'
+
+/** One sidebar group of items sharing a source (a project's `local` items join its project). */
+export interface SourceGroup<T> {
+  key: string
+  label: string
+  kind: SourceGroupKind
+  /** The plugin's source for a plugin group, for its version and tags. */
+  source?: ConfigSource
+  items: T[]
+}
+
+const KIND_RANK: Record<SourceGroupKind, number> = {
+  global: 0,
+  project: 1,
+  plugin: 2,
+  managed: 3,
+  builtin: 4,
+}
+
+function groupKindOf(source: ConfigSource): SourceGroupKind {
+  switch (source.kind) {
+    case 'user':
+      return 'global'
+    case 'project':
+    case 'local':
+      return 'project'
+    default:
+      return source.kind
+  }
+}
+
+function groupKeyOf(source: ConfigSource, kind: SourceGroupKind): string {
+  switch (kind) {
+    case 'global':
+      return 'global'
+    case 'project':
+      return source.projectId ?? source.id
+    default:
+      return source.id
+  }
+}
+
+/**
+ * Groups items by source in the order the setup sidebars show them: Global,
+ * then projects, then plugins (each alphabetically, case-insensitively), then
+ * Managed, then Built-in. Empty groups never appear; items keep their order.
+ */
+export function groupBySource<T>(
+  items: T[],
+  sourceOf: (item: T) => ConfigSource
+): SourceGroup<T>[] {
+  const groups = new Map<string, SourceGroup<T>>()
+  for (const item of items) {
+    const source = sourceOf(item)
+    const kind = groupKindOf(source)
+    const key = groupKeyOf(source, kind)
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        key,
+        label: kind === 'global' ? 'Global' : (source.projectName ?? source.label),
+        kind,
+        ...(kind === 'plugin' ? { source } : {}),
+        items: [],
+      }
+      groups.set(key, group)
+    }
+    group.items.push(item)
+  }
+  return [...groups.values()].sort(
+    (a, b) =>
+      KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
+      a.label.toLowerCase().localeCompare(b.label.toLowerCase())
+  )
+}
+
+// ─── Source filter ────────────────────────────────────────────────────────────
+
+/** The source chips above a setup sidebar. A project's `local` items count as Project. */
+export type SourceFilter = 'all' | 'user' | 'project' | 'plugin' | 'managed' | 'builtin'
+
+export function sourceFilterOf(source: ConfigSource): Exclude<SourceFilter, 'all'> {
+  return source.kind === 'local' ? 'project' : source.kind
+}
+
+export function matchesSourceFilter(source: ConfigSource, filter: SourceFilter): boolean {
+  return filter === 'all' || sourceFilterOf(source) === filter
+}
+
+export function countBySourceFilter<T>(
+  items: T[],
+  sourceOf: (item: T) => ConfigSource
+): Record<SourceFilter, number> {
+  const counts: Record<SourceFilter, number> = {
+    all: items.length,
+    user: 0,
+    project: 0,
+    plugin: 0,
+    managed: 0,
+    builtin: 0,
+  }
+  for (const item of items) counts[sourceFilterOf(sourceOf(item))]++
+  return counts
+}
+
 // ─── Hooks ────────────────────────────────────────────────────────────────────
 
 export interface HookScopeEventGroup {
@@ -65,7 +173,8 @@ export interface HookScopeEventGroup {
 export interface HookScopeGroup {
   key: string
   label: string
-  kind: 'global' | 'project'
+  kind: SourceGroupKind
+  source?: ConfigSource
   eventGroups: HookScopeEventGroup[]
 }
 
@@ -76,11 +185,10 @@ interface FlatHookRule {
 }
 
 /**
- * Hook rules grouped `Global` (scope `user`) then one group per project
- * (that project's `project` and `local` rules together — a project group
- * doesn't distinguish the two; rule items still carry their own scope).
- * Within each scope group, rules are nested one sub-group per event, in the
- * order events first appear, keeping the original event group's `id` so
+ * Hook rules grouped by source (see `groupBySource`): a project's `project`
+ * and `local` rules share its group; rule items still carry their own scope.
+ * Within each group, rules are nested one sub-group per event, in the order
+ * events first appear, keeping the original event group's `id` so
  * `hooks-panel.tsx`'s `${eventGroupId}::${rule.id}` selection ids still
  * resolve.
  */
@@ -92,16 +200,11 @@ export function groupHooksByScope(hookGroups: HookEventGroup[]): HookScopeGroup[
     }
   }
 
-  const scopeGroups = groupByScope(flat, {
-    isGlobal: (f) => f.rule.scope === 'user',
-    projectKey: (f) => f.rule.projectId ?? '',
-    projectName: (f) => f.rule.projectName ?? '',
-  })
-
-  return scopeGroups.map((sg) => ({
+  return groupBySource(flat, (f) => f.rule.source).map((sg) => ({
     key: sg.key,
     label: sg.label,
     kind: sg.kind,
+    ...(sg.source ? { source: sg.source } : {}),
     eventGroups: groupFlatRulesByEvent(sg.items),
   }))
 }

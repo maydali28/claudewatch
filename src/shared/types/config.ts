@@ -13,6 +13,34 @@
  */
 export type ConfigScope = 'user' | 'project' | 'local'
 
+// ─── Sources ──────────────────────────────────────────────────────────────────
+
+/** Where a hook, command or skill comes from. `local` items group with their project. */
+export type ConfigSourceKind = 'user' | 'project' | 'local' | 'plugin' | 'managed' | 'builtin'
+
+export interface PluginRef {
+  name: string
+  /** `name@marketplace` key of a marketplace install; absent for claude.ai-synced plugins. */
+  marketplace?: string
+  version?: string
+  origin: 'marketplace' | 'claude.ai'
+  /** Enabled in `enabledPlugins` (claude.ai-synced plugins are always enabled). */
+  enabled: boolean
+}
+
+export interface ConfigSource {
+  kind: ConfigSourceKind
+  /** 'user' · 'project:<projectId>' · 'local:<projectId>' · 'plugin:<name>@<marketplace>' · 'managed' · 'builtin' */
+  id: string
+  /** 'Global' · project name · plugin name · 'Managed' · 'Built-in' */
+  label: string
+  /** Folder the items are read from (absent for built-in). */
+  root?: string
+  projectId?: string
+  projectName?: string
+  plugin?: PluginRef
+}
+
 export interface HookCommand {
   type?: 'command'
   command: string
@@ -20,13 +48,24 @@ export interface HookCommand {
   statusMessage?: string
 }
 
+/** A settings scope, or a hook that comes from a plugin or the managed settings file. */
+export type HookScope = ConfigScope | 'plugin' | 'managed'
+
+/**
+ * Why Claude Code will not run a rule ClaudeWatch still lists: its plugin is
+ * disabled, or managed settings set `allowManagedHooksOnly`.
+ */
+export type HookInactiveReason = 'plugin-disabled' | 'managed-only'
+
 export interface HookRule {
   id: string
   matcher: string
   hooks: HookCommand[]
-  scope: ConfigScope
-  /** Absolute path of the settings file the rule came from. */
+  scope: HookScope
+  /** Absolute path of the settings or hooks file the rule came from. */
   sourcePath: string
+  source: ConfigSource
+  inactiveReason?: HookInactiveReason
   projectId?: string
   projectName?: string
 }
@@ -185,4 +224,8 @@ export interface RawSettings {
   profile?: ClaudeProfile
   allowedChannelPlugins?: string[]
   plansDirectory?: string
+  /** `{"name@marketplace": true|false}` */
+  enabledPlugins?: Record<string, boolean>
+  /** Managed settings only: when true, Claude Code runs managed hooks and no others. */
+  allowManagedHooksOnly?: boolean
 }
