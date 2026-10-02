@@ -35,7 +35,6 @@ export const CHANNELS = {
   // Plans
   PLANS_LIST: 'plans:list',
   PLANS_GET: 'plans:get',
-  PLANS_GET_PROJECTS: 'plans:get-projects',
 
   // Updates
   UPDATES_CHECK: 'updates:check',

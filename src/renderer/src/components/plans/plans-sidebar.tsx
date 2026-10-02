@@ -4,7 +4,15 @@ import { cn } from '@renderer/lib/cn'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
 import { ScopeGroup } from '@renderer/components/config/scope-group'
-import { groupPlansByDirectory } from './group-plans'
+import { SourceChips } from '@renderer/components/config/source-chips'
+import { useUIStore } from '@renderer/store/ui.store'
+import {
+  abbreviateHome,
+  filterPlansByFolder,
+  groupPlans,
+  planFolderCounts,
+  type PlanFolderFilter,
+} from './group-plans'
 import type { PlanSummary } from '@shared/types'
 
 interface Props {
@@ -40,14 +48,19 @@ export default function PlansSidebar({
   const paths = useClaudePaths()
   const [search, setSearch] = useState('')
   const q = search.toLowerCase()
+  const folderFilter = (useUIStore((s) => s.sourceFilters.plans) ?? 'all') as PlanFolderFilter
+  const setSourceFilter = useUIStore((s) => s.setSourceFilter)
 
-  const filtered = plans.filter(
+  const matching = plans.filter(
     (p) =>
       p.title.toLowerCase().includes(q) ||
       p.filename.toLowerCase().includes(q) ||
-      (p.projectName ?? '').toLowerCase().includes(q)
+      (p.projectName ?? '').toLowerCase().includes(q) ||
+      (p.usedBy ?? []).some((u) => u.projectName.toLowerCase().includes(q))
   )
-  const groups = groupPlansByDirectory(filtered)
+  const counts = planFolderCounts(matching)
+  const filtered = filterPlansByFolder(matching, folderFilter)
+  const groups = groupPlans(filtered)
 
   return (
     <div className="flex flex-col h-full">
@@ -96,6 +109,19 @@ export default function PlansSidebar({
         </div>
       </div>
 
+      {plans.length > 0 && (
+        <SourceChips<PlanFolderFilter>
+          label="Filter plans by folder"
+          value={folderFilter}
+          onChange={(v) => setSourceFilter('plans', v)}
+          options={[
+            { value: 'all', label: 'All', count: counts.all },
+            { value: 'project', label: 'Project folder', count: counts.project },
+            { value: 'shared', label: 'Shared folder', count: counts.shared },
+          ]}
+        />
+      )}
+
       {/* List */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && plans.length === 0 && (
@@ -121,7 +147,7 @@ export default function PlansSidebar({
             key={group.key}
             label={group.label}
             count={group.plans.length}
-            title={group.directory}
+            paths={group.folders.map((f) => abbreviateHome(f, paths))}
             icon={
               group.kind === 'project' ? (
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
@@ -130,7 +156,7 @@ export default function PlansSidebar({
           >
             {group.plans.map((plan) => (
               <button
-                key={plan.id}
+                key={`${group.key}:${plan.id}`}
                 onClick={() => onSelect(plan.id)}
                 className={cn(
                   'w-full rounded-md px-2.5 py-2 text-left transition-colors',
@@ -163,6 +189,14 @@ export default function PlansSidebar({
                       <span className="text-[10px] text-muted-foreground/50">
                         {formatBytes(plan.sizeBytes)}
                       </span>
+                      {group.kind === 'project' && plan.scope === 'default' && (
+                        <span
+                          className="text-[10px] px-1 rounded bg-muted text-muted-foreground"
+                          title={abbreviateHome(plan.directory, paths)}
+                        >
+                          shared folder
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -173,7 +207,9 @@ export default function PlansSidebar({
 
         {!isLoading && plans.length > 0 && filtered.length === 0 && (
           <div className="py-8 text-center">
-            <p className="text-xs text-muted-foreground">No plans match &quot;{search}&quot;</p>
+            <p className="text-xs text-muted-foreground">
+              {search ? <>No plans match &quot;{search}&quot;</> : 'No plans in this folder'}
+            </p>
           </div>
         )}
       </div>

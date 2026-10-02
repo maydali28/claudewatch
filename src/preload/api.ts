@@ -87,8 +87,6 @@ export const api = {
     list: () => invoke(CHANNELS.PLANS_LIST),
 
     get: (id: string) => invoke(CHANNELS.PLANS_GET, { id }),
-
-    getProjects: (slug: string) => invoke(CHANNELS.PLANS_GET_PROJECTS, { slug }),
   },
 
   // ─── Updates ─────────────────────────────────────────────────────────────────
