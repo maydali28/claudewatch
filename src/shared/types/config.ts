@@ -117,16 +117,29 @@ export interface McpServerEntry {
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
+/** Commands come from the user folder, a project's folder or a plugin — there is no local commands directory. */
+export type CommandScope = 'user' | 'project' | 'plugin'
+
+/** One entry of a command's frontmatter `arguments` list. */
+export interface CommandArgument {
+  name: string
+  description?: string
+  required?: boolean
+}
+
 export interface CommandEntry {
   id: string
   name: string
   description?: string
   content: string
   sizeBytes: number
-  /** Commands exist only in `user` and `project` scope — no local commands directory. */
-  scope: ConfigScope
+  scope: CommandScope
+  source: ConfigSource
   /** Absolute path of the command's markdown file. */
   filePath: string
+  arguments?: CommandArgument[]
+  /** The command's plugin is disabled, so Claude Code does not offer it. */
+  inactive?: true
   projectId?: string
   projectName?: string
 }
