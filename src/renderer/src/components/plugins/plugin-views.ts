@@ -67,6 +67,16 @@ export function buildPluginViews(
   )
 }
 
+export type PluginTab = 'skills' | 'commands' | 'hooks'
+
+/** The tab a plugin opens on: its first section with items, or Skills when it has none. */
+export function defaultPluginTab(view: Pick<PluginView, PluginTab>): PluginTab {
+  if (view.skills.length > 0) return 'skills'
+  if (view.commands.length > 0) return 'commands'
+  if (view.hooks.length > 0) return 'hooks'
+  return 'skills'
+}
+
 function count(n: number, noun: string): string | null {
   return n > 0 ? `${n} ${noun}${n === 1 ? '' : 's'}` : null
 }
