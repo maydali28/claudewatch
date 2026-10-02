@@ -224,11 +224,7 @@ function groupFlatRulesByEvent(items: FlatHookRule[]): HookScopeEventGroup[] {
 
 // ─── Commands ─────────────────────────────────────────────────────────────────
 
-/** Commands grouped `Global` (scope `user`) then one group per project (scope `project`, by `projectId`). */
-export function groupCommandsByScope(commands: CommandEntry[]): ScopeGroup<CommandEntry>[] {
-  return groupByScope(commands, {
-    isGlobal: (c) => c.scope === 'user',
-    projectKey: (c) => c.projectId ?? '',
-    projectName: (c) => c.projectName ?? '',
-  })
+/** Commands grouped by source: Global, then each project, then each plugin (see `groupBySource`). */
+export function groupCommandsByScope(commands: CommandEntry[]): SourceGroup<CommandEntry>[] {
+  return groupBySource(commands, (c) => c.source)
 }

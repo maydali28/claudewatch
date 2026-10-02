@@ -1,9 +1,24 @@
 import React, { useState } from 'react'
-import { Terminal, Copy, Check } from 'lucide-react'
+import { Terminal, Copy, Check, CircleSlash } from 'lucide-react'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { CommandEntry } from '@shared/types'
 import MarkdownBody from '@renderer/components/shared/markdown-body'
+import { pluginTags } from './source-group-decor'
+
+/** "user" | "<project> · project" | "<plugin> · plugin (tags)" */
+function commandSourceLabel(cmd: CommandEntry): string {
+  switch (cmd.scope) {
+    case 'user':
+      return 'user'
+    case 'project':
+      return cmd.projectName ? `${cmd.projectName} · project` : 'project'
+    case 'plugin': {
+      const tags = pluginTags(cmd.source)
+      return `${cmd.source.label} · plugin${tags.length > 0 ? ` (${tags.join(', ')})` : ''}`
+    }
+  }
+}
 
 // ─── Command detail view ──────────────────────────────────────────────────────
 
@@ -27,8 +42,8 @@ function CommandDetail({ cmd }: { cmd: CommandEntry }): React.JSX.Element {
           {cmd.description && (
             <p className="text-xs text-muted-foreground mt-1">{cmd.description}</p>
           )}
-          <p className="text-[10px] text-muted-foreground/50 mt-1">
-            {(cmd.sizeBytes / 1024).toFixed(1)} KB
+          <p className="text-[10px] text-muted-foreground mt-1">
+            {commandSourceLabel(cmd)} · {(cmd.sizeBytes / 1024).toFixed(1)} KB
           </p>
           <p className="text-[10px] text-muted-foreground/50 mt-0.5 truncate" title={cmd.filePath}>
             {cmd.filePath}
@@ -49,7 +64,33 @@ function CommandDetail({ cmd }: { cmd: CommandEntry }): React.JSX.Element {
 
       {/* Body: frontmatter is already stripped by the config service, so this
           is the prompt itself — markdown, like a skill body. */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
+        {cmd.inactive && (
+          <div className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <CircleSlash className="h-3.5 w-3.5 shrink-0" />
+            Not available: the plugin is disabled
+          </div>
+        )}
+        {cmd.arguments && cmd.arguments.length > 0 && (
+          <div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold mb-2">
+              Arguments
+            </p>
+            <ul className="space-y-1">
+              {cmd.arguments.map((arg) => (
+                <li key={arg.name} className="text-xs">
+                  <code className="font-mono bg-muted px-1.5 py-0.5 rounded">{arg.name}</code>
+                  {arg.required && (
+                    <span className="ml-1.5 text-[10px] text-muted-foreground">required</span>
+                  )}
+                  {arg.description && (
+                    <span className="ml-2 text-muted-foreground">{arg.description}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <MarkdownBody content={cmd.content} label="Body" />
       </div>
     </div>

@@ -521,7 +521,7 @@ describe('readCommands', () => {
     expect(cmds.every((c) => c.projectId === 'p1')).toBe(true)
     const ship = cmds.find((c) => c.name === 'ship')!
     expect(ship.filePath).toBe(path.join(projectRoot, '.claude', 'commands', 'ship.md'))
-    expect(ship.id).toBe(`project:${ship.filePath}`)
+    expect(ship.id).toBe(`project:p1:${ship.filePath}`)
     expect(ship.description).toBe('Run the release checklist')
   })
 
@@ -554,6 +554,120 @@ describe('readCommands', () => {
 
     const cmds = await readCommands([])
     expect(cmds.map((c) => c.name)).toEqual(['keep'])
+  })
+
+  it('reads a multi-line frontmatter description (| and >) instead of showing the marker', async () => {
+    const cmdsDir = path.join(dirs.claudeDir, 'commands')
+    fs.mkdirSync(cmdsDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(cmdsDir, 'literal.md'),
+      '---\ndescription: |\n  First line.\n  Second line.\nname: lit\n---\nBody.'
+    )
+    fs.writeFileSync(
+      path.join(cmdsDir, 'folded.md'),
+      '---\ndescription: >\n  Folded\n  together.\n---\nBody.'
+    )
+
+    const cmds = await readCommands([])
+    expect(cmds.find((c) => c.name === 'lit')?.description).toBe('First line.\nSecond line.')
+    expect(cmds.find((c) => c.name === 'folded')?.description).toBe('Folded together.')
+  })
+
+  it('gives user and project commands their source', async () => {
+    copyFixture(
+      'project/dot-claude/commands/ship.md',
+      path.join(projectRoot, '.claude', 'commands', 'ship.md')
+    )
+    const cmds = await readCommands([demoApp()])
+    expect(cmds.find((c) => c.name === 'ship')?.source).toMatchObject({
+      kind: 'project',
+      id: 'project:-tmp-demo-app',
+      label: 'demo-app',
+    })
+  })
+})
+
+describe('readCommands — plugin commands', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+
+  function installPlugin(name: string, manifest: Record<string, unknown> = {}): string {
+    const root = path.join(pluginsDir(), 'cache', 'official', name, '2.0.0')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name, ...manifest })
+    return root
+  }
+
+  function writeCommand(file: string, content: string): void {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, content)
+  }
+
+  it('names plugin commands <plugin>:<name>, namespaced like Claude Code shows them', async () => {
+    const root = installPlugin('seo')
+    writeCommand(
+      path.join(root, 'commands', 'seo-check.md'),
+      [
+        '---',
+        'description: Quick SEO check',
+        'arguments:',
+        '  - name: url',
+        '    description: Page to check',
+        '    required: true',
+        '  - name: depth',
+        '---',
+        'Check the page.',
+      ].join('\n')
+    )
+    writeCommand(path.join(root, 'commands', 'audit', 'full.md'), 'Full audit.')
+    // List items at column 0, as real plugin commands write them.
+    writeCommand(
+      path.join(root, 'commands', 'flat.md'),
+      '---\ndescription: Flat list\narguments:\n- name: file\n  required: false\n---\nBody.'
+    )
+    writeCommand(path.join(root, 'commands', 'renamed.md'), '---\nname: tidy\n---\nTidy.')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: { 'seo@official': [{ installPath: root, version: '2.0.0' }] },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'seo@official': true },
+    })
+
+    const cmds = (await readCommands([])).filter((c) => c.scope === 'plugin')
+
+    expect(cmds.map((c) => c.name).sort()).toEqual([
+      'seo:audit:full',
+      'seo:flat',
+      'seo:seo-check',
+      'seo:tidy',
+    ])
+    expect(cmds.find((c) => c.name === 'seo:flat')).toMatchObject({
+      description: 'Flat list',
+      arguments: [{ name: 'file', required: false }],
+    })
+    const check = cmds.find((c) => c.name === 'seo:seo-check')!
+    expect(check).toMatchObject({
+      description: 'Quick SEO check',
+      source: { kind: 'plugin', id: 'plugin:seo@official', plugin: { enabled: true } },
+      arguments: [{ name: 'url', description: 'Page to check', required: true }, { name: 'depth' }],
+    })
+    expect(check.id).toBe(`plugin:seo@official:${check.filePath}`)
+    expect(check.inactive).toBeUndefined()
+  })
+
+  it('also reads the command paths plugin.json declares, and marks a disabled plugin’s commands', async () => {
+    const root = installPlugin('extra', { commands: ['./more', './one.md'] })
+    writeCommand(path.join(root, 'more', 'a.md'), 'A.')
+    writeCommand(path.join(root, 'one.md'), 'One.')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: { 'extra@official': [{ installPath: root }] },
+    })
+
+    const cmds = (await readCommands([])).filter((c) => c.scope === 'plugin')
+
+    expect(cmds.map((c) => c.name).sort()).toEqual(['extra:a', 'extra:one'])
+    expect(cmds.every((c) => c.inactive === true)).toBe(true)
   })
 })
 
