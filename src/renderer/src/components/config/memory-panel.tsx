@@ -2,7 +2,16 @@ import React from 'react'
 import { Brain, Eye, Code } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
+import { useUIStore } from '@renderer/store/ui.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
+import { isMemorySelectionVisible, memoryContentState, type MemoryFilter } from './memory-filter'
+
+const FILTER_LABEL: Record<MemoryFilter, string> = {
+  all: 'All',
+  global: 'Global',
+  project: 'Project',
+  auto: 'Auto memory',
+}
 import type { MemoryFile } from '@shared/types'
 import type { ProjectClaudeMd } from '@shared/types/project'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
@@ -62,6 +71,7 @@ function ContentSection({ content }: { content: string }): React.JSX.Element {
 
 function MemoryDetail({ file }: { file: MemoryFile }): React.JSX.Element {
   const lineCount = file.content?.split('\n').length ?? 0
+  const state = memoryContentState(file.content)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -77,19 +87,22 @@ function MemoryDetail({ file }: { file: MemoryFile }): React.JSX.Element {
                 {(file.sizeBytes / 1024).toFixed(1)} KB
               </span>
             )}
-            {file.content && (
+            {state === 'present' && (
               <span className="text-[10px] text-muted-foreground/60">{lineCount} lines</span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Content or unavailable */}
-      {file.content ? (
-        <ContentSection content={file.content} />
+      {/* Content, an empty file, or one that could not be read */}
+      {state === 'present' ? (
+        <ContentSection content={file.content ?? ''} />
       ) : (
-        <div className="flex flex-col items-center justify-center flex-1 text-center gap-2">
-          <p className="text-xs text-muted-foreground">Content not available</p>
+        <div className="flex flex-col items-center justify-center flex-1 text-center gap-1 px-6">
+          <p className="text-xs text-muted-foreground">
+            {state === 'empty' ? 'This file is empty' : 'Content not available'}
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 font-mono break-all">{file.path}</p>
         </div>
       )}
     </div>
@@ -111,6 +124,17 @@ function projectClaudeMdToMemoryFile(p: ProjectClaudeMd): MemoryFile {
 
 export default function MemoryPanel(): React.JSX.Element {
   const { memoryFiles, projectClaudeMds, selectedMemoryId } = useConfigStore()
+  const kindFilter = (useUIStore((s) => s.sourceFilters.memory) ?? 'all') as MemoryFilter
+
+  // The list hides what the filter leaves out; the panel must not keep showing it.
+  if (selectedMemoryId && !isMemorySelectionVisible(selectedMemoryId, kindFilter, memoryFiles))
+    return (
+      <EmptyState
+        icon={Brain}
+        title="No memory file selected"
+        description={`The selected file is hidden by the ${FILTER_LABEL[kindFilter]} filter. Choose a file from the list, or switch the filter back to All.`}
+      />
+    )
 
   const selected =
     memoryFiles.find((f) => f.id === selectedMemoryId) ??
