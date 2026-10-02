@@ -4,6 +4,11 @@
 ### Features
 
 * **models:** add sonnet 5.5 to the model families and pricing
+
+### Bug Fixes
+
+* **pricing:** clear a custom rate by emptying its field, and edit rates in one table
+* **pricing:** update costs across the app as soon as a rate changes
 ## 1.5.6 (2026-09-25)
 
 

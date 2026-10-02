@@ -739,6 +739,50 @@ describe('useSessionsStore — closeActiveSession ("Back to sessions")', () => {
   })
 })
 
+describe('useSessionsStore — handlePricingChanged', () => {
+  it('reloads the project list, whose summaries carry the old estimated costs', async () => {
+    mockListProjects.mockResolvedValueOnce({ ok: true, data: { projects: [] } })
+
+    await useSessionsStore.getState().handlePricingChanged()
+
+    expect(mockListProjects).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches the open session in place, without a loading skeleton', async () => {
+    mockGetParsed.mockResolvedValueOnce(ok(makeParsedSession('open-one', 1)))
+    await useSessionsStore.getState().loadParsedSession('open-one', PROJECT_ID)
+
+    mockListProjects.mockResolvedValueOnce({ ok: true, data: { projects: [] } })
+    mockGetParsed.mockResolvedValueOnce(ok(makeParsedSession('open-one', 2)))
+    await useSessionsStore.getState().handlePricingChanged()
+    expect(panelView()).toBe('content')
+    await flushAsync()
+
+    expect(mockGetParsed).toHaveBeenCalledTimes(2)
+    expect(useSessionsStore.getState().parsedSession?.metadata).toEqual({ marker: 2 })
+  })
+
+  it('does not serve a session visited earlier from the cache at the old rates', async () => {
+    mockGetParsed.mockResolvedValueOnce(ok(fakeParsed('visited')))
+    await useSessionsStore.getState().loadParsedSession('visited', PROJECT_ID)
+    mockGetParsed.mockResolvedValueOnce(ok(fakeParsed('now-open')))
+    await useSessionsStore.getState().loadParsedSession('now-open', PROJECT_ID)
+
+    mockListProjects.mockResolvedValueOnce({ ok: true, data: { projects: [] } })
+    mockGetParsed.mockResolvedValueOnce(ok(fakeParsed('now-open')))
+    await useSessionsStore.getState().handlePricingChanged()
+    await flushAsync()
+
+    const next = deferred<Result<ParsedSession>>()
+    mockGetParsed.mockReturnValueOnce(next.promise)
+    const loading = useSessionsStore.getState().loadParsedSession('visited', PROJECT_ID)
+    expect(panelView()).toBe('loading')
+
+    next.resolve(ok(fakeParsed('visited')))
+    await loading
+  })
+})
+
 // ─── Auto-loading the project list ──────────────────────────────────────────
 //
 // The Analytics sidebar loads the project list on mount when nothing has been
