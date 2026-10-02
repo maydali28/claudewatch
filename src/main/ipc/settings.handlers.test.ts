@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { CHANNELS } from '@shared/ipc/channels'
 import type { AppPreferences } from '@shared/types/preferences'
+import type * as SharedUtils from '@shared/utils'
 
 // Finding 2 (round-1 review) of Task 17: `settings:set` is the only path that
 // writes `pricingOverrides`/`pricingProvider`, and a rate change must refresh
@@ -51,6 +52,12 @@ vi.mock('@main/services/autostart', () => ({
 const mockBroadcastToRenderers = vi.fn()
 vi.mock('@main/window-manager', () => ({
   broadcastToRenderers: (...args: unknown[]) => mockBroadcastToRenderers(...args),
+}))
+
+const mockSessionCacheClear = vi.fn()
+vi.mock('@shared/utils', async (importOriginal) => ({
+  ...(await importOriginal<typeof SharedUtils>()),
+  sessionCache: { clear: () => mockSessionCacheClear() },
 }))
 
 const mockScanCacheRefresh = vi.fn(async () => ({ projects: [] }))
@@ -107,6 +114,36 @@ describe('settings:set — pricing change cascade', () => {
 
     expect(mockScanCacheRefresh).not.toHaveBeenCalled()
     expect(result).toEqual({ ok: true, data: undefined })
+  })
+
+  it('tells renderers to reload costs once the repriced scan is ready', async () => {
+    const order: string[] = []
+    mockScanCacheRefresh.mockImplementationOnce(async () => {
+      order.push('refresh')
+      return { projects: [] }
+    })
+    mockBroadcastToRenderers.mockImplementation((channel: string) => order.push(channel))
+
+    await callSettingsSet({ pricingOverrides: { 'opus-5': { input: 42 } } })
+
+    expect(order).toContain(CHANNELS.PUSH_PRICING_CHANGED)
+    expect(order.indexOf('refresh')).toBeLessThan(order.indexOf(CHANNELS.PUSH_PRICING_CHANGED))
+  })
+
+  it('drops cached full parses, whose estimated cost used the old rates', async () => {
+    await callSettingsSet({ pricingOverrides: { 'opus-5': { input: 42 } } })
+
+    expect(mockSessionCacheClear).toHaveBeenCalledTimes(1)
+  })
+
+  it('does NOT announce a pricing change for an unrelated preference patch', async () => {
+    await callSettingsSet({ theme: 'dark' })
+
+    expect(mockSessionCacheClear).not.toHaveBeenCalled()
+    expect(mockBroadcastToRenderers).not.toHaveBeenCalledWith(
+      CHANNELS.PUSH_PRICING_CHANGED,
+      expect.anything()
+    )
   })
 
   it('still reports the settings write as successful if the scan refresh fails', async () => {

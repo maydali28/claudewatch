@@ -7,6 +7,7 @@ import { setSentryEnabled, captureHandlerException } from '@main/services/sentry
 import { setAutostart } from '@main/services/autostart'
 import { broadcastToRenderers } from '@main/window-manager'
 import { scanCache } from '@main/services/scan-cache'
+import { sessionCache } from '@shared/utils'
 import { createLogger } from '@main/lib/logger'
 
 const log = createLogger('Settings')
@@ -41,11 +42,17 @@ export function registerSettingsHandlers(): void {
       // the new active table and, via its pricing fingerprint, discards the
       // stale disk entries too — one call covers both caches.
       if ('pricingProvider' in settingsPatch || 'pricingOverrides' in settingsPatch) {
+        // Full parses carry an estimated cost too; drop them so an open
+        // session is re-parsed at the new rates.
+        sessionCache.clear()
         // Best-effort: the preference write already succeeded, and a scan
         // failure here (e.g. an unreadable projects dir) shouldn't be
         // reported back as the settings write itself failing.
         try {
           await scanCache.refresh()
+          // Renderers fetched their summaries and analytics before the
+          // refresh; tell them to fetch again now that costs are repriced.
+          broadcastToRenderers(CHANNELS.PUSH_PRICING_CHANGED, undefined)
         } catch (error) {
           log.warn('Failed to refresh scan cache after a pricing change:', error)
         }

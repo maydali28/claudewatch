@@ -114,6 +114,8 @@ interface SessionsState {
   handleSessionDeleted(payload: { sessionId: string; projectId: string }): void
   /** "Back to sessions": deselect the active conversation and drop its load state (error, loading flags, in-flight counter) in one update. */
   closeActiveSession(): void
+  /** Rates changed: every summary and cached parse holds a cost at the old rates, so reload them. */
+  handlePricingChanged(): Promise<void>
 }
 
 /**
@@ -466,5 +468,16 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       isRefreshingSession: false,
       sessionError: null,
     })
+  },
+
+  async handlePricingChanged() {
+    rendererSessionCache.clear()
+    // The open session is refetched in place: loadParsedSession keeps the
+    // displayed parse on screen while the repriced one loads.
+    const { activeSessionId, activeProjectId, parsedSession } = get()
+    if (activeSessionId && activeProjectId && parsedSession?.id === activeSessionId) {
+      void get().loadParsedSession(activeSessionId, activeProjectId)
+    }
+    await get().loadProjects()
   },
 }))

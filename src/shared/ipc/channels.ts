@@ -90,6 +90,12 @@ export const CHANNELS = {
    */
   PUSH_PREFERENCES_CHANGED: 'push:preferences-changed',
   /**
+   * Fired by the SETTINGS_SET handler once a pricing change has been applied
+   * to the scan cache. Renderers hold session summaries and analytics fetched
+   * under the old rates, so they reload them on this event. No payload.
+   */
+  PUSH_PRICING_CHANGED: 'push:pricing-changed',
+  /**
    * Surfaced by the global uncaughtException / unhandledRejection guards in
    * the main process. Renderer shows a non-fatal toast so users notice
    * something went sideways instead of staring at a frozen UI.
@@ -111,4 +117,5 @@ export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_SHOW_UPDATE'
   | 'PUSH_SHOW_ONBOARDING'
   | 'PUSH_PREFERENCES_CHANGED'
+  | 'PUSH_PRICING_CHANGED'
   | 'PUSH_MAIN_ERROR']
