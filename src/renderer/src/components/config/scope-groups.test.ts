@@ -292,12 +292,23 @@ describe('sourceFilterOf, matchesSourceFilter and countBySourceFilter', () => {
 // ─── groupCommandsByScope ─────────────────────────────────────────────────────
 
 function command(overrides: Partial<CommandEntry>): CommandEntry {
+  const source: ConfigSource =
+    overrides.scope === 'project'
+      ? {
+          kind: 'project',
+          id: `project:${overrides.projectId}`,
+          label: overrides.projectName ?? '',
+          projectId: overrides.projectId,
+          projectName: overrides.projectName,
+        }
+      : USER_SOURCE
   return {
     id: 'user:review',
     name: 'review',
     content: '',
     sizeBytes: 0,
     scope: 'user',
+    source,
     filePath: '/commands/review.md',
     ...overrides,
   }
@@ -330,5 +341,22 @@ describe('groupCommandsByScope', () => {
     expect(groups.map((g) => g.label)).toEqual(['alpha', 'zeta'])
     expect(groups[0].items.map((c) => c.name)).toEqual(['build'])
     expect(groups[1].items.map((c) => c.name)).toEqual(['ship'])
+  })
+
+  it('gives each plugin its own group after the projects', () => {
+    const groups = groupCommandsByScope([
+      command({
+        id: 'plugin:seo@m:/c.md',
+        name: 'seo:check',
+        scope: 'plugin',
+        source: pluginSource('seo'),
+      }),
+      command({ id: 'user:review' }),
+    ])
+    expect(groups.map((g) => [g.kind, g.label])).toEqual([
+      ['global', 'Global'],
+      ['plugin', 'seo'],
+    ])
+    expect(groups[1].source).toEqual(pluginSource('seo'))
   })
 })

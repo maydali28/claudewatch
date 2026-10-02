@@ -16,9 +16,12 @@ import {
   effectiveEnabledPlugins,
   readManagedSettings,
   readPluginHooks,
+  readPluginManifest,
+  resolvePluginPath,
   sourceForLayer,
 } from './config-sources'
 import type {
+  CommandArgument,
   ConfigScope,
   ConfigSource,
   ExtendedConfig,
@@ -67,7 +70,12 @@ async function fileExists(filePath: string): Promise<boolean> {
 /**
  * Parse YAML-style frontmatter from a markdown file.
  * Returns { meta: Record<string,string>, body: string }.
- * Only handles simple key: value pairs (no nested structures).
+ *
+ * Reads top-level `key: value` pairs only; indented lines belong to the key
+ * above them (a nested list such as a command's `arguments`, read by
+ * `parseFrontmatterArguments`) and never become keys of their own. A block
+ * value — `key: |` keeps line breaks, `key: >` folds them into spaces — is
+ * read from the indented lines that follow it.
  */
 function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
   const meta: Record<string, string> = {}
@@ -75,21 +83,80 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
 
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
   if (fmMatch) {
-    const rawMeta = fmMatch[1]
+    const lines = fmMatch[1].split(/\r?\n/)
     body = fmMatch[2] ?? ''
-    for (const line of rawMeta.split('\n')) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      // Indented lines and list items belong to the key above them.
+      if (/^\s/.test(line) || line.startsWith('-')) continue
       const colonIdx = line.indexOf(':')
-      if (colonIdx > 0) {
-        const key = line.slice(0, colonIdx).trim()
-        const val = line
-          .slice(colonIdx + 1)
-          .trim()
-          .replace(/^["']|["']$/g, '')
-        if (key) meta[key] = val
+      if (colonIdx <= 0) continue
+      const key = line.slice(0, colonIdx).trim()
+      const raw = line.slice(colonIdx + 1).trim()
+      if (!key) continue
+
+      const block = raw.match(/^([|>])[+-]?$/)
+      if (block) {
+        const blockLines: string[] = []
+        while (i + 1 < lines.length && (/^\s/.test(lines[i + 1]) || lines[i + 1] === '')) {
+          blockLines.push(lines[++i].trim())
+        }
+        while (blockLines.length > 0 && blockLines[blockLines.length - 1] === '') blockLines.pop()
+        meta[key] = block[1] === '|' ? blockLines.join('\n') : blockLines.join(' ')
+        continue
       }
+      meta[key] = raw.replace(/^["']|["']$/g, '')
     }
   }
   return { meta, body }
+}
+
+/**
+ * The `arguments` list of a command's frontmatter — the one nested structure
+ * commands use, which `parseFrontmatter` does not read:
+ *
+ *   arguments:
+ *     - name: url
+ *       description: Page to check
+ *       required: true
+ *
+ * The items may also start at column 0 (`- name: url`), as real plugin
+ * commands write them.
+ *
+ * Entries without a name are dropped. Returns undefined when there is no list.
+ */
+export function parseFrontmatterArguments(content: string): CommandArgument[] | undefined {
+  const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!fm) return undefined
+  const lines = fm[1].split(/\r?\n/)
+  const start = lines.findIndex((l) => /^arguments:\s*$/.test(l))
+  if (start === -1) return undefined
+
+  const args: CommandArgument[] = []
+  let current: Record<string, string> | null = null
+  const flush = (): void => {
+    if (current?.name) {
+      args.push({
+        name: current.name,
+        ...(current.description ? { description: current.description } : {}),
+        ...(current.required !== undefined ? { required: current.required === 'true' } : {}),
+      })
+    }
+  }
+  for (const line of lines.slice(start + 1)) {
+    // List items may sit at column 0 (`- name: x`) or be indented; the next
+    // top-level key ends the list.
+    if (!/^\s/.test(line) && !line.startsWith('-')) break
+    const item = line.match(/^\s*-\s*(.*)$/)
+    const field = (item ? item[1] : line).match(/^\s*([\w-]+):\s*(.*)$/)
+    if (item) {
+      flush()
+      current = {}
+    }
+    if (field && current) current[field[1]] = field[2].trim().replace(/^["']|["']$/g, '')
+  }
+  flush()
+  return args
 }
 
 // ─── Settings layers ─────────────────────────────────────────────────────────
@@ -520,18 +587,25 @@ async function walkMarkdown(dir: string, rel: string[] = []): Promise<MarkdownFi
   return results
 }
 
-/**
- * Reads every command markdown file under `dir` (recursively). The display
- * name for a namespaced file joins its directory segments and base name with
- * `:` (e.g. `git/commit.md` -> `git:commit`), unless the frontmatter sets an
- * explicit `name`, which replaces that computed name entirely.
- */
-async function readCommandsFromDir(
-  dir: string,
-  scope: 'user' | 'project',
+interface CommandContext {
+  scope: 'user' | 'project' | 'plugin'
+  source: ConfigSource
   project?: ProjectRootRef
+  /** `<plugin>:` for plugin commands, which Claude Code namespaces by plugin. */
+  namePrefix?: string
+  inactive?: boolean
+}
+
+/**
+ * The display name for a namespaced file joins its directory segments and
+ * base name with `:` (e.g. `git/commit.md` -> `git:commit`), unless the
+ * frontmatter sets an explicit `name`, which replaces that computed name. A
+ * plugin's commands get the plugin name in front (`seo:seo-check`).
+ */
+async function commandsFromFiles(
+  files: MarkdownFile[],
+  ctx: CommandContext
 ): Promise<CommandEntry[]> {
-  const files = await walkMarkdown(dir)
   const entries: CommandEntry[] = []
 
   for (const { file, rel } of files) {
@@ -543,43 +617,114 @@ async function readCommandsFromDir(
     const { meta, body } = parseFrontmatter(content)
     const baseName = rel[rel.length - 1].replace(/\.md$/, '')
     const defaultName = [...rel.slice(0, -1), baseName].join(':')
+    const args = parseFrontmatterArguments(content)
 
     entries.push({
-      id: `${scope}:${file}`,
-      name: meta['name'] ?? defaultName,
+      id: `${ctx.source.id}:${file}`,
+      name: `${ctx.namePrefix ?? ''}${meta['name'] || defaultName}`,
       description: meta['description'],
       content: body.trim() || content,
       sizeBytes,
-      scope,
+      scope: ctx.scope,
+      source: ctx.source,
       filePath: file,
-      projectId: project?.id,
-      projectName: project?.name,
+      ...(args && args.length > 0 ? { arguments: args } : {}),
+      ...(ctx.inactive ? { inactive: true as const } : {}),
+      projectId: ctx.project?.id,
+      projectName: ctx.project?.name,
     })
   }
 
   return entries
 }
 
+/** Every command markdown file under `dir` (recursively). */
+async function readCommandsFromDir(dir: string, ctx: CommandContext): Promise<CommandEntry[]> {
+  return commandsFromFiles(await walkMarkdown(dir), ctx)
+}
+
 /**
- * User commands from `getUserCommandsDirPath()`, then each project's
- * `<root>/.claude/commands`, recursively. Never
- * `<claudeDir>/projects/<id>/commands` — that directory only holds
- * transcripts and `memory/`, never commands.
+ * A plugin's command files: its `commands/` folder plus every path its
+ * `plugin.json` lists under `commands` (folders or single `.md` files), each
+ * resolved inside the plugin folder. A file reached twice is read once.
+ */
+async function pluginCommandFiles(root: string): Promise<MarkdownFile[]> {
+  const manifest = await readPluginManifest(root)
+  const declared =
+    typeof manifest.commands === 'string'
+      ? [manifest.commands]
+      : Array.isArray(manifest.commands)
+        ? manifest.commands.filter((c): c is string => typeof c === 'string')
+        : []
+
+  const files: MarkdownFile[] = []
+  for (const entry of ['commands', ...declared]) {
+    const resolved = await resolvePluginPath(root, entry)
+    if (!resolved) continue
+    const stat = await fs.promises.stat(resolved).catch(() => null)
+    if (stat?.isDirectory()) files.push(...(await walkMarkdown(resolved)))
+    else if (stat?.isFile() && resolved.endsWith('.md')) {
+      files.push({ file: resolved, rel: [path.basename(resolved)] })
+    }
+  }
+  const seen = new Set<string>()
+  return files.filter((f) => !seen.has(f.file) && !!seen.add(f.file))
+}
+
+/** Installed plugins, enabled as the user and managed settings say. */
+async function currentPluginSources(): Promise<ConfigSource[]> {
+  const [userLayers, managed] = await Promise.all([readSettingsLayers(), readManagedSettings()])
+  return discoverPluginSources(
+    effectiveEnabledPlugins(mergeSettingsLayers(userLayers), managed?.settings)
+  )
+}
+
+/**
+ * User commands from `getUserCommandsDirPath()`, each project's
+ * `<root>/.claude/commands` and every installed plugin's commands,
+ * recursively. Never `<claudeDir>/projects/<id>/commands` — that directory
+ * only holds transcripts and `memory/`, never commands.
  *
  * A project rooted at the home directory shares its commands directory with
  * the user one, and every command in it was listed twice. Such a project is
  * skipped here, exactly as its settings layer is in `readSettingsLayers`.
+ * A disabled plugin's commands are listed, marked `inactive`.
  */
 export async function readCommands(projects: ProjectRootRef[]): Promise<CommandEntry[]> {
   const userCommandsDir = getUserCommandsDirPath()
-  const userCommands = await readCommandsFromDir(userCommandsDir, 'user')
-  const projectCommands = await Promise.all(
-    projects
-      .map((project) => ({ project, dir: path.join(project.path, '.claude', 'commands') }))
-      .filter(({ dir }) => !samePath(dir, userCommandsDir))
-      .map(({ project, dir }) => readCommandsFromDir(dir, 'project', project))
-  )
-  return [...userCommands, ...projectCommands.flat()]
+  const [userCommands, projectCommands, pluginCommands] = await Promise.all([
+    readCommandsFromDir(userCommandsDir, {
+      scope: 'user',
+      source: sourceForLayer({ scope: 'user', path: '', settings: {} }),
+    }),
+    Promise.all(
+      projects
+        .map((project) => ({ project, dir: path.join(project.path, '.claude', 'commands') }))
+        .filter(({ dir }) => !samePath(dir, userCommandsDir))
+        .map(({ project, dir }) =>
+          readCommandsFromDir(dir, {
+            scope: 'project',
+            source: sourceForLayer({ scope: 'project', path: '', settings: {}, project }),
+            project,
+          })
+        )
+    ),
+    currentPluginSources().then((plugins) =>
+      Promise.all(
+        plugins.map(async (source) =>
+          source.root
+            ? commandsFromFiles(await pluginCommandFiles(source.root), {
+                scope: 'plugin',
+                source,
+                namePrefix: `${source.label}:`,
+                inactive: source.plugin?.enabled === false,
+              })
+            : []
+        )
+      )
+    ),
+  ])
+  return [...userCommands, ...projectCommands.flat(), ...pluginCommands.flat()]
 }
 
 // ─── readSkills ───────────────────────────────────────────────────────────────
