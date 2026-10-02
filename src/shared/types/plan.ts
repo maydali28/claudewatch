@@ -1,5 +1,10 @@
 // ─── Plans ────────────────────────────────────────────────────────────────────
 
+export interface PlanProjectRef {
+  projectId: string
+  projectName: string
+}
+
 export interface PlanSummary {
   id: string // absolute file path — unique across directories
   filename: string
@@ -10,6 +15,11 @@ export interface PlanSummary {
   projectName?: string
   createdAt?: string // ISO date string
   sizeBytes: number
+  /**
+   * Shared-folder plans only (`scope: 'default'`): the projects whose
+   * sessions used this plan. Empty when no scanned session did.
+   */
+  usedBy?: PlanProjectRef[]
 }
 
 export interface PlanDetail {

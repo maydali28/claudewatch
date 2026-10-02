@@ -123,10 +123,6 @@ export interface IPCContracts {
     request: { id: string }
     response: Result<PlanDetail>
   }
-  'plans:get-projects': {
-    request: { slug: string }
-    response: Result<string[]>
-  }
   'updates:check': {
     request: void
     response: Result<UpdateInfo | null>

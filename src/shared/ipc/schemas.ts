@@ -118,12 +118,6 @@ export const SettingsSetSchema = z
 
 // ─── Plans ────────────────────────────────────────────────────────────────────
 
-const planSlug = z
-  .string()
-  .min(1)
-  .max(200)
-  .regex(/^[a-zA-Z0-9._-]+$/, 'slug must be alphanumeric / dot / dash / underscore')
-
 /** plans:list — no payload */
 export const PlansListSchema = z.void()
 
@@ -131,9 +125,6 @@ export const PlansListSchema = z.void()
  * `readPlan` re-derives and validates it against the resolved plan directories,
  * this bound is defence in depth against an oversized payload. */
 export const PlansGetSchema = z.object({ id: z.string().min(1).max(4096) })
-
-/** plans:get-projects */
-export const PlansGetProjectsSchema = z.object({ slug: planSlug })
 
 // ─── Tray ─────────────────────────────────────────────────────────────────────
 
