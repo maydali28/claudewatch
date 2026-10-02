@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { buildPluginViews, isPluginSourced, pluginItemSummary } from './plugin-views'
+import {
+  buildPluginViews,
+  defaultPluginTab,
+  isPluginSourced,
+  pluginItemSummary,
+} from './plugin-views'
 import type {
   CommandEntry,
   ConfigSource,
@@ -125,5 +130,37 @@ describe('buildPluginViews', () => {
       '1 skill · 1 hook'
     )
     expect(pluginItemSummary(views.find((v) => v.source.label === 'empty')!)).toBe('No items')
+  })
+})
+
+describe('defaultPluginTab', () => {
+  const base = { source: plugin('p'), skills: [], commands: [], hooks: [] }
+
+  it('opens on the first section that has items', () => {
+    expect(defaultPluginTab({ ...base, skills: [skill('a', plugin('p'))] })).toBe('skills')
+    expect(defaultPluginTab({ ...base, commands: [command('c', plugin('p'))] })).toBe('commands')
+    expect(
+      defaultPluginTab({
+        ...base,
+        hooks: [
+          {
+            event: 'Stop',
+            eventGroupId: 'Stop',
+            rule: {
+              id: 'r',
+              matcher: '',
+              hooks: [],
+              scope: 'plugin',
+              sourcePath: '/h.json',
+              source: plugin('p'),
+            },
+          },
+        ],
+      })
+    ).toBe('hooks')
+  })
+
+  it('opens on Skills for a plugin with no items', () => {
+    expect(defaultPluginTab(base)).toBe('skills')
   })
 })
