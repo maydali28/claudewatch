@@ -119,6 +119,26 @@ export function getUserSkillsDirPath(): string {
   return path.join(getClaudeDir(), 'skills')
 }
 
+/** Absolute path to the `plugins` directory under the effective Claude dir. */
+export function getPluginsDirPath(): string {
+  return path.join(getClaudeDir(), 'plugins')
+}
+
+/**
+ * Where an administrator's managed settings live: a fixed system location
+ * per platform, independent of `CLAUDE_CONFIG_DIR`.
+ */
+export function getManagedSettingsPath(platform: NodeJS.Platform = process.platform): string {
+  switch (platform) {
+    case 'darwin':
+      return '/Library/Application Support/ClaudeCode/managed-settings.json'
+    case 'win32':
+      return path.win32.join('C:\\Program Files', 'ClaudeCode', 'managed-settings.json')
+    default:
+      return '/etc/claude-code/managed-settings.json'
+  }
+}
+
 /** Absolute path to the `debug/latest` MCP log under the effective Claude dir. */
 export function getMcpDebugLatestPath(): string {
   return path.join(getClaudeDir(), 'debug', 'latest')

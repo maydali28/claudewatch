@@ -32,6 +32,8 @@ vi.mock('@main/lib/claude-paths', async () => {
     getUserSettingsPath: () => p.join(dirs.claudeDir, 'settings.json'),
     getMcpDebugLatestPath: () => p.join(dirs.claudeDir, 'debug', 'latest'),
     getUserCommandsDirPath: () => p.join(dirs.claudeDir, 'commands'),
+    getPluginsDirPath: () => p.join(dirs.claudeDir, 'plugins'),
+    getManagedSettingsPath: () => p.join(dirs.tmp, 'managed', 'managed-settings.json'),
   }
 })
 
@@ -332,6 +334,104 @@ describe('readExtendedConfig', () => {
 
     expect((await readRawSettings(project)).hooks?.Notification).toBeUndefined()
     expect((await readMcps(project)).map((m) => m.name)).not.toContain('legacy')
+  })
+
+  it('gives every settings rule its source', async () => {
+    const cfg = await readExtendedConfig([demoApp()])
+    const rules = cfg.hooks.flatMap((g) => g.rules)
+    expect(rules.find((r) => r.scope === 'user')?.source).toEqual({
+      kind: 'user',
+      id: 'user',
+      label: 'Global',
+    })
+    expect(rules.find((r) => r.scope === 'project')?.source).toMatchObject({
+      kind: 'project',
+      id: 'project:-tmp-demo-app',
+      projectName: 'demo-app',
+      root: projectRoot,
+    })
+  })
+})
+
+describe('readExtendedConfig — plugin and managed hooks', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+  const managedPath = (): string => path.join(dirs.tmp, 'managed', 'managed-settings.json')
+
+  function installPluginWithHook(name: string, command: string): string {
+    const root = path.join(pluginsDir(), 'cache', 'official', name, '1.0.0')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name })
+    writeJson(path.join(root, 'hooks', 'hooks.json'), {
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command }] }] },
+    })
+    return root
+  }
+
+  beforeEach(() => {
+    const enabled = installPluginWithHook('superpowers', '${CLAUDE_PLUGIN_ROOT}/hooks/run.sh')
+    const disabled = installPluginWithHook('sleepy', 'sleepy.sh')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: {
+        'superpowers@official': [{ installPath: enabled, version: '1.0.0' }],
+        'sleepy@official': [{ installPath: disabled, version: '1.0.0' }],
+      },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'superpowers@official': true },
+    })
+  })
+
+  const sessionStartRules = async () =>
+    (await readExtendedConfig([demoApp()])).hooks.find((g) => g.event === 'SessionStart')?.rules ??
+    []
+
+  it('lists each plugin’s hooks with the plugin as source and the hooks file as path', async () => {
+    const rule = (await sessionStartRules()).find((r) => r.source.label === 'superpowers')!
+    expect(rule).toMatchObject({
+      id: 'plugin:superpowers@official:SessionStart-0',
+      scope: 'plugin',
+      matcher: 'startup',
+      source: { kind: 'plugin', plugin: { enabled: true, origin: 'marketplace' } },
+    })
+    expect(rule.sourcePath.endsWith(path.join('hooks', 'hooks.json'))).toBe(true)
+    expect(rule.inactiveReason).toBeUndefined()
+  })
+
+  it('marks the hooks of a disabled plugin as not running', async () => {
+    const rule = (await sessionStartRules()).find((r) => r.source.label === 'sleepy')!
+    expect(rule.inactiveReason).toBe('plugin-disabled')
+  })
+
+  it('lists managed hooks, and marks every other hook inactive when managed settings allow only theirs', async () => {
+    writeJson(managedPath(), {
+      allowManagedHooksOnly: true,
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'audit.sh' }] }] },
+    })
+
+    const cfg = await readExtendedConfig([demoApp()])
+    const rules = cfg.hooks.flatMap((g) => g.rules)
+    const managed = rules.filter((r) => r.scope === 'managed')
+
+    expect(managed).toHaveLength(1)
+    expect(managed[0]).toMatchObject({
+      id: 'managed:SessionStart-0',
+      sourcePath: managedPath(),
+      source: { kind: 'managed', id: 'managed', label: 'Managed' },
+    })
+    expect(managed[0].inactiveReason).toBeUndefined()
+    const others = rules.filter((r) => r.scope !== 'managed')
+    expect(others.length).toBeGreaterThan(0)
+    expect(others.every((r) => r.inactiveReason !== undefined)).toBe(true)
+    // A disabled plugin's own reason wins: it would not run even without the managed rule.
+    expect(others.find((r) => r.source.label === 'sleepy')?.inactiveReason).toBe('plugin-disabled')
+    expect(others.find((r) => r.scope === 'user')?.inactiveReason).toBe('managed-only')
+  })
+
+  it('lets managed enabledPlugins switch a plugin off', async () => {
+    writeJson(managedPath(), { enabledPlugins: { 'superpowers@official': false } })
+    const rule = (await sessionStartRules()).find((r) => r.source.label === 'superpowers')!
+    expect(rule.inactiveReason).toBe('plugin-disabled')
   })
 })
 

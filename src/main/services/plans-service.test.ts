@@ -31,6 +31,8 @@ vi.mock('@main/lib/claude-paths', async () => {
     getUserSettingsPath: () => p.join(dirs.claudeDir, 'settings.json'),
     getMcpDebugLatestPath: () => p.join(dirs.claudeDir, 'debug', 'latest'),
     getUserCommandsDirPath: () => p.join(dirs.claudeDir, 'commands'),
+    getPluginsDirPath: () => p.join(dirs.claudeDir, 'plugins'),
+    getManagedSettingsPath: () => p.join(dirs.tmp, 'managed', 'managed-settings.json'),
     getDefaultPlansDirPath: () => p.join(dirs.claudeDir, 'plans'),
   }
 })

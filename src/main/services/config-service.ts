@@ -10,11 +10,22 @@ import {
 } from '@main/lib/claude-paths'
 import { assertSafePath } from '@main/lib/safe-path'
 import { samePath } from '@main/lib/same-path'
+import {
+  MANAGED_SOURCE,
+  discoverPluginSources,
+  effectiveEnabledPlugins,
+  readManagedSettings,
+  readPluginHooks,
+  sourceForLayer,
+} from './config-sources'
 import type {
   ConfigScope,
+  ConfigSource,
   ExtendedConfig,
   HookEventGroup,
   HookCommand,
+  HookInactiveReason,
+  HookScope,
   McpServerEntry,
   McpCapabilities,
   CommandEntry,
@@ -185,20 +196,43 @@ export function mergeSettingsLayers(layers: SettingsLayer[]): RawSettings {
 // ─── parseHooks ──────────────────────────────────────────────────────────────
 
 /**
- * Every hook rule from every layer, in layer order. Claude Code runs the
- * hooks of all scopes, so nothing is replaced; each rule records the scope
- * and file it came from. Ids are built from the scope, the project id (when
- * the layer belongs to a project) and an index counted within that single
- * layer's rules for that event — never across the whole event group. That
- * keeps an id stable when another project or scope later gains a rule for
- * the same event, and keeps two projects' rules for the same event distinct.
- * Segments are joined so the id never contains `::` (the separator
- * `hooks-panel.tsx` uses to split a group id from a rule id).
+ * One file's hooks block: a settings layer, a plugin's hooks file or the
+ * managed settings. `inactiveReason` marks rules Claude Code will not run.
  */
-export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
+export interface HookLayer {
+  scope: HookScope
+  path: string
+  hooks: unknown
+  source: ConfigSource
+  project?: ProjectRootRef
+  inactiveReason?: HookInactiveReason
+}
+
+function hookLayerOf(layer: SettingsLayer): HookLayer {
+  return {
+    scope: layer.scope,
+    path: layer.path,
+    hooks: layer.settings.hooks,
+    source: sourceForLayer(layer),
+    project: layer.project,
+  }
+}
+
+/**
+ * Every hook rule from every layer, in layer order. Claude Code runs the
+ * hooks of all sources, so nothing is replaced; each rule records the source
+ * and file it came from. An id is the source id plus an index counted within
+ * that single layer's rules for that event — never across the whole event
+ * group. That keeps an id stable when another source later gains a rule for
+ * the same event, and keeps two projects' rules for the same event distinct.
+ * Source ids never contain `::` (the separator `hooks-panel.tsx` uses to
+ * split a group id from a rule id), so neither does a rule id.
+ */
+export function parseHookLayers(layers: HookLayer[]): HookEventGroup[] {
   const byEvent = new Map<string, HookEventGroup>()
   for (const layer of layers) {
-    for (const [event, entries] of Object.entries(layer.settings.hooks ?? {})) {
+    if (!isPlainObject(layer.hooks)) continue
+    for (const [event, entries] of Object.entries(layer.hooks)) {
       if (!Array.isArray(entries)) continue
       let group = byEvent.get(event)
       if (!group) {
@@ -208,16 +242,15 @@ export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
       const base = {
         scope: layer.scope,
         sourcePath: layer.path,
+        source: layer.source,
         projectId: layer.project?.id,
         projectName: layer.project?.name,
+        ...(layer.inactiveReason ? { inactiveReason: layer.inactiveReason } : {}),
       }
       let localIndex = 0
       for (const entry of entries) {
         if (!entry || typeof entry !== 'object') continue
-        const idSegments = [layer.scope, layer.project?.id, `${event}-${localIndex}`].filter(
-          (s): s is string => s !== undefined
-        )
-        const id = idSegments.join(':')
+        const id = `${layer.source.id}:${event}-${localIndex}`
         if ('command' in entry) {
           // Bare HookCommand — wrap in a rule with an empty matcher
           group.rules.push({ ...base, id, matcher: '', hooks: [entry as HookCommand] })
@@ -237,21 +270,73 @@ export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
   return [...byEvent.values()]
 }
 
+/** The hooks of user, project and local settings layers. See {@link parseHookLayers}. */
+export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
+  return parseHookLayers(layers.map(hookLayerOf))
+}
+
 // ─── readExtendedConfig ───────────────────────────────────────────────────────
 
+/** The hooks blocks of every installed plugin, disabled ones marked as not running. */
+async function pluginHookLayers(enabledPlugins: Record<string, boolean>): Promise<HookLayer[]> {
+  const plugins = await discoverPluginSources(enabledPlugins)
+  const layers = await Promise.all(
+    plugins.map(async (source): Promise<HookLayer | null> => {
+      const read = await readPluginHooks(source)
+      if (!read) return null
+      return {
+        scope: 'plugin',
+        path: read.path,
+        hooks: read.hooks,
+        source,
+        ...(source.plugin?.enabled ? {} : { inactiveReason: 'plugin-disabled' as const }),
+      }
+    })
+  )
+  return layers.filter((l): l is HookLayer => l !== null)
+}
+
 /**
- * Hooks from the user layers plus the project and local layers of every
- * project passed. The panel's scalar settings come from the user layers only.
+ * Hooks from the user layers, the project and local layers of every project
+ * passed, every installed plugin and the managed settings file, in that
+ * order. With `allowManagedHooksOnly` set in managed settings, every other
+ * rule is marked as not running (a disabled plugin keeps its own reason).
+ * The panel's scalar settings come from the user layers only.
  */
 export async function readExtendedConfig(projects: ProjectRootRef[]): Promise<ExtendedConfig> {
-  const userLayers = await readSettingsLayers()
-  const projectLayers = (await Promise.all(projects.map((p) => readSettingsLayers(p))))
+  const [userLayers, projectLayersPerRoot, managed] = await Promise.all([
+    readSettingsLayers(),
+    Promise.all(projects.map((p) => readSettingsLayers(p))),
+    readManagedSettings(),
+  ])
+  const projectLayers = projectLayersPerRoot
     .flat()
     .filter((l) => l.scope === 'project' || l.scope === 'local')
   const settings = mergeSettingsLayers(userLayers)
+  const plugins = await pluginHookLayers(effectiveEnabledPlugins(settings, managed?.settings))
+
+  let hookLayers: HookLayer[] = [
+    ...[...userLayers, ...projectLayers].map(hookLayerOf),
+    ...plugins,
+    ...(managed
+      ? [
+          {
+            scope: 'managed' as const,
+            path: managed.path,
+            hooks: managed.settings.hooks,
+            source: MANAGED_SOURCE,
+          },
+        ]
+      : []),
+  ]
+  if (managed?.settings.allowManagedHooksOnly === true) {
+    hookLayers = hookLayers.map((l) =>
+      l.scope === 'managed' || l.inactiveReason ? l : { ...l, inactiveReason: 'managed-only' }
+    )
+  }
 
   return {
-    hooks: parseHooks([...userLayers, ...projectLayers]),
+    hooks: parseHookLayers(hookLayers),
     sandbox: settings.sandbox,
     skipDangerousModePermissionPrompt: settings.skipDangerousModePermissionPrompt ?? false,
     disableSkillShellExecution: settings.disableSkillShellExecution ?? false,

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { formatHookTimeout, hookScopeLabel, hookScopeOrder } from './hook-scope-label'
+import {
+  formatHookTimeout,
+  hookScopeLabel,
+  hookScopeOrder,
+  inactiveReasonText,
+} from './hook-scope-label'
 
 describe('hookScopeLabel', () => {
   it('labels a user-scope rule "user"', () => {
@@ -28,6 +33,23 @@ describe('hookScopeLabel', () => {
 
   it('ignores projectName for the user scope', () => {
     expect(hookScopeLabel({ scope: 'user', projectName: 'claudewatch' })).toBe('user')
+  })
+
+  it('labels a plugin rule "<plugin> · plugin" and a managed rule "managed"', () => {
+    expect(hookScopeLabel({ scope: 'plugin', source: { label: 'superpowers' } })).toBe(
+      'superpowers · plugin'
+    )
+    expect(hookScopeLabel({ scope: 'plugin' })).toBe('plugin')
+    expect(hookScopeLabel({ scope: 'managed' })).toBe('managed')
+  })
+})
+
+describe('inactiveReasonText', () => {
+  it('says why Claude Code will not run the rule', () => {
+    expect(inactiveReasonText('plugin-disabled')).toBe("Won't run: the plugin is disabled")
+    expect(inactiveReasonText('managed-only')).toBe(
+      "Won't run: managed settings allow only managed hooks"
+    )
   })
 })
 
