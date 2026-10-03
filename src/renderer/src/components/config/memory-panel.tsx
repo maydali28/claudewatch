@@ -80,7 +80,15 @@ function MemoryDetail({ file }: { file: MemoryFile }): React.JSX.Element {
         <Brain className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold">{file.label}</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{file.sublabel}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {file.projectName ? `${file.projectName} · auto memory` : file.sublabel}
+          </p>
+          <p
+            className="text-[10px] text-muted-foreground/50 mt-0.5 font-mono truncate"
+            title={file.path}
+          >
+            {file.path}
+          </p>
           <div className="flex items-center gap-3 mt-1">
             {file.sizeBytes !== undefined && (
               <span className="text-[10px] text-muted-foreground/60">
