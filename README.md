@@ -196,13 +196,15 @@ Every conversation Claude Code still has on disk, fully accessible and searchabl
 - **Real-time updates** — sessions appear the moment Claude Code writes a new file; no refresh needed
 - **Full transcript view** — browse the complete conversation including user messages, assistant responses, thinking blocks, tool calls, file reads, and bash output
 - **In-session search** — press `Cmd+F` to find anything inside the open session; collapsed blocks auto-expand on match
-- **Session detail panel** — tokens, cost, compaction count, subagent usage, thinking effort distribution, and error flags all in one place
+- **Session detail panel** — tokens, cost, compaction count, subagent usage, thinking effort distribution, and error flags beside the conversation
+- **Sub-agents tab** — every run titled with its task, with its agent type, run time and cost, cost by agent type, and a live marker on the ones still running
+- **Tools & MCPs tab** — calls, errors, result size and cost per tool and per MCP server (including configured servers the session never called), with cumulative cost and the context size of every response over time
 
 **How far back does history go?** Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default), so "All" covers roughly the last month unless you raise that setting.
 
 ### Analytics Dashboard
 
-Six purpose-built analytics tabs, each answering a different question about how you use Claude Code. Every tab shares the same date range picker (Today, 7d, 30d, All, or custom) and project filter so comparisons are always consistent.
+Seven purpose-built analytics tabs, each answering a different question about how you use Claude Code. Every tab shares the same date range picker (Today, 7d, 30d, All, or custom) and project filter so comparisons are always consistent.
 
 **Overview** — The big picture. KPI cards for sessions, messages, tokens, cache hit rate, and cost. A daily token usage chart, project cost breakdown, and a sessions table sortable by activity, tokens, or cost.
 
@@ -215,6 +217,8 @@ Six purpose-built analytics tabs, each answering a different question about how 
 **Latency** — Slow turns break flow. See the p50, p95, and p99 turn durations, a duration distribution histogram, and a direct comparison of normal turns versus turns after a context compaction.
 
 **Effort** — Not every session is equal. Turn effort is classified into Low, Medium, High, and Ultrathink levels. See where your ultrathink budget goes, cost by effort level, and parallel tool usage distribution.
+
+**Tools** — Which tools and MCP servers your sessions lean on. Calls, error rate and cost share per tool and per MCP server, configured servers nobody called, and sub-agent runs and cost by agent type.
 
 **Configuration scopes.** Hooks and Commands below are both read from user (`~/.claude`) and project (`<repo>/.claude`) scopes, including `settings.local.json`. Plugin and managed scopes are on the roadmap.
 
@@ -395,7 +399,7 @@ claudewatch/
 │   │   │   ├── metadata-cache.ts      # Session metadata cache
 │   │   │   ├── scan-cache.ts          # Project scan cache
 │   │   │   ├── update-service.ts      # GitHub release fetcher
-│   │   │   ├── export-service.ts      # Markdown / JSON export
+│   │   │   ├── export-service.ts      # Markdown / JSON / CSV export
 │   │   │   ├── sentry-scrub.ts        # Strips PII from Sentry events before send
 │   │   │   └── sentry.ts              # Sentry init, enable/disable, capture helpers
 │   │   ├── ipc/                 # IPC request handlers (domain-split)
