@@ -187,6 +187,9 @@ export interface MemoryFile {
   path: string
   content?: string
   sizeBytes?: number
+  /** Auto-memory notes: the project whose `projects/<dir>/memory` folder holds the file. */
+  projectId?: string
+  projectName?: string
 }
 
 // ─── Extended Config ──────────────────────────────────────────────────────────

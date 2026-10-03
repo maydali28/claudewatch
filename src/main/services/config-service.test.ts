@@ -49,6 +49,7 @@ import {
   readCommands,
   readAllSkills,
   readPlugins,
+  readAllAutoMemory,
 } from './config-service'
 
 // The fixture keeps `.claude` spelled `dot-claude` on disk: a common global
@@ -931,6 +932,63 @@ describe('a project whose root is a symlink to the home directory', () => {
 
     const cmds = await readCommands([linkedProject()])
     expect(cmds.map((c) => c.scope)).toEqual(['user'])
+  })
+})
+
+describe('readAllAutoMemory', () => {
+  function writeMemory(dirId: string, name: string, content: string): string {
+    const file = path.join(dirs.claudeDir, 'projects', dirId, 'memory', name)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, content)
+    return file
+  }
+
+  it('reads every project’s memory folder, naming each file’s project', async () => {
+    const appIndex = writeMemory('-tmp-demo-app', 'MEMORY.md', '- [note](note.md)')
+    writeMemory('-tmp-demo-app', 'note.md', 'remember this')
+    // A worktree folder of the same project, merged into it by the scan.
+    writeMemory('-tmp-demo-app--claude-worktrees-feat', 'MEMORY.md', '- [wt](wt.md)')
+    // A folder the scan does not know (its transcripts were deleted): named
+    // after the folder minus the encoded home directory, not decoded — '-'
+    // could stand for '/', '.' or '-', so decoding would guess.
+    writeMemory('-Users-me-Workspace-other-app', 'MEMORY.md', 'other')
+    // Not memory: no folder, or not markdown.
+    fs.mkdirSync(path.join(dirs.claudeDir, 'projects', '-tmp-no-memory'), { recursive: true })
+    writeMemory('-tmp-demo-app', 'notes.txt', 'ignored')
+
+    const files = await readAllAutoMemory(
+      [
+        {
+          id: '-tmp-demo-app',
+          name: 'demo-app',
+          sessions: [
+            { projectId: '-tmp-demo-app' },
+            { projectId: '-tmp-demo-app--claude-worktrees-feat' },
+          ],
+        },
+      ],
+      '/Users/me'
+    )
+
+    // Sorted by project, then folder, with each folder's MEMORY.md index first.
+    expect(files.map((f) => [f.projectName, f.label])).toEqual([
+      ['demo-app', 'MEMORY'],
+      ['demo-app', 'note'],
+      ['demo-app', 'MEMORY'],
+      ['Workspace-other-app', 'MEMORY'],
+    ])
+    expect(files.find((f) => f.path === appIndex)).toMatchObject({
+      id: 'memory:-tmp-demo-app:MEMORY.md',
+      sublabel: 'auto-memory',
+      path: appIndex,
+      content: '- [note](note.md)',
+      projectId: '-tmp-demo-app',
+    })
+    expect(new Set(files.map((f) => f.id)).size).toBe(files.length)
+  })
+
+  it('returns nothing when there is no projects folder', async () => {
+    expect(await readAllAutoMemory([])).toEqual([])
   })
 })
 

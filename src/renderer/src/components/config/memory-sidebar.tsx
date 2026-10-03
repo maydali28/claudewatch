@@ -11,6 +11,7 @@ import {
   type MemoryFilter,
   type MemoryKind,
 } from './memory-filter'
+import type { MemoryFile } from '@shared/types'
 import type { ProjectClaudeMd } from '@shared/types/project'
 
 function projectClaudeMdId(entry: ProjectClaudeMd): string {
@@ -76,11 +77,11 @@ function MemoryItem({
   )
 }
 
-/** The second line of a card for a file `readMemoryFiles` returned. */
-function ownerOf(kind: MemoryKind, sublabel: string): string {
+/** The second line of a card: Global, the project, or the project an auto-memory note belongs to. */
+function ownerOf(kind: MemoryKind, file: MemoryFile): string {
   if (kind === 'global') return 'Global'
-  if (kind === 'auto') return 'Auto memory'
-  return sublabel
+  if (kind === 'auto') return file.projectName ? `${file.projectName} · auto memory` : 'Auto memory'
+  return file.sublabel
 }
 
 export default function MemorySidebar(): React.JSX.Element {
@@ -97,7 +98,10 @@ export default function MemorySidebar(): React.JSX.Element {
   const q = search.toLowerCase()
 
   const searchedFiles = memoryFiles.filter(
-    (f) => f.label.toLowerCase().includes(q) || f.sublabel.toLowerCase().includes(q)
+    (f) =>
+      f.label.toLowerCase().includes(q) ||
+      f.sublabel.toLowerCase().includes(q) ||
+      (f.projectName ?? '').toLowerCase().includes(q)
   )
   const searchedProjectMds = projectClaudeMds.filter(
     (p) => p.projectName.toLowerCase().includes(q) || 'claude.md'.includes(q)
@@ -207,9 +211,9 @@ export default function MemorySidebar(): React.JSX.Element {
             <MemoryItem
               key={file.id}
               id={file.id}
-              label={file.label}
+              label={kind === 'auto' ? `${file.label}.md` : file.label}
               kind={kind}
-              owner={ownerOf(kind, file.sublabel)}
+              owner={ownerOf(kind, file)}
               sizeBytes={file.sizeBytes}
               selectedId={selectedMemoryId}
               onSelect={setSelectedMemory}

@@ -1,4 +1,5 @@
 import * as fs from 'fs'
+import * as os from 'os'
 import * as path from 'path'
 import {
   getClaudeDir,
@@ -1036,6 +1037,101 @@ export async function readMemoryFiles(
   }
 
   return files
+}
+
+/** What `readAllAutoMemory` needs from a scanned project to name its memory folders. */
+export interface MemoryScanProject {
+  id: string
+  name: string
+  /** Each session's `projectId` is the folder it was scanned from (worktree folders included). */
+  sessions: Array<{ projectId: string }>
+}
+
+/**
+ * The auto-memory notes Claude Code keeps in every `projects/<dir>/memory`
+ * folder, for the Memory tab's all-projects view. Each file is named after
+ * the scanned project that owns its folder — a worktree folder merged into a
+ * project counts as that project — or, for a folder the scan does not know,
+ * after the folder itself. Sorted by project, then folder, with each folder's
+ * `MEMORY.md` index first.
+ */
+export async function readAllAutoMemory(
+  projects: MemoryScanProject[],
+  home: string = os.homedir()
+): Promise<MemoryFile[]> {
+  // Claude Code names a project folder after its path with every character
+  // that isn't a letter or digit turned into '-'. That can't be decoded
+  // reliably, so a folder the scan doesn't know is shown as its own name
+  // minus the encoded home directory.
+  const encodedHome = home.replace(/[^A-Za-z0-9]/g, '-')
+  const folderLabel = (dirId: string): string =>
+    dirId.startsWith(`${encodedHome}-`)
+      ? dirId.slice(encodedHome.length + 1)
+      : dirId.replace(/^-+/, '') || dirId
+  const projectsDir = getProjectsDirPath()
+  let dirIds: string[]
+  try {
+    dirIds = (await fs.promises.readdir(projectsDir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+  } catch {
+    return []
+  }
+
+  const owner = new Map<string, { id: string; name: string }>()
+  for (const project of projects) {
+    const ref = { id: project.id, name: project.name }
+    owner.set(project.id, ref)
+    for (const session of project.sessions) owner.set(session.projectId, ref)
+  }
+
+  const perDir = await Promise.all(
+    dirIds.map(async (dirId): Promise<MemoryFile[]> => {
+      const memoryDir = path.join(projectsDir, dirId, 'memory')
+      let names: string[]
+      try {
+        names = (await fs.promises.readdir(memoryDir, { withFileTypes: true }))
+          .filter((e) => e.isFile() && e.name.endsWith('.md'))
+          .map((e) => e.name)
+      } catch {
+        return []
+      }
+      const project = owner.get(dirId) ?? { id: dirId, name: folderLabel(dirId) }
+      names.sort((a, b) => (a === 'MEMORY.md' ? -1 : b === 'MEMORY.md' ? 1 : a.localeCompare(b)))
+      return Promise.all(
+        names.map(async (name): Promise<MemoryFile> => {
+          const filePath = path.join(memoryDir, name)
+          const [content, stat] = await Promise.all([
+            readTextFile(filePath),
+            fs.promises.stat(filePath).catch(() => null),
+          ])
+          return {
+            id: `memory:${dirId}:${name}`,
+            label: name.replace(/\.md$/, ''),
+            sublabel: 'auto-memory',
+            path: filePath,
+            content: content ?? undefined,
+            sizeBytes: stat?.size,
+            projectId: project.id,
+            projectName: project.name,
+          }
+        })
+      )
+    })
+  )
+
+  // The project's own folder before its worktree folders, then by folder name.
+  const folderOf = (f: MemoryFile): string => path.basename(path.dirname(path.dirname(f.path)))
+  const isOwnFolder = (f: MemoryFile): number => (folderOf(f) === f.projectId ? 0 : 1)
+  return perDir
+    .filter((files) => files.length > 0)
+    .sort(
+      (a, b) =>
+        (a[0].projectName ?? '').localeCompare(b[0].projectName ?? '') ||
+        isOwnFolder(a[0]) - isOwnFolder(b[0]) ||
+        folderOf(a[0]).localeCompare(folderOf(b[0]))
+    )
+    .flat()
 }
 
 // ─── readRawSettings ──────────────────────────────────────────────────────────
