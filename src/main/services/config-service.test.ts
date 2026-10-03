@@ -984,6 +984,7 @@ describe('readAllAutoMemory', () => {
       content: '- [note](note.md)',
       projectId: '-tmp-demo-app',
     })
+    expect(Number.isNaN(Date.parse(files[0].modifiedAt ?? ''))).toBe(false)
     expect(new Set(files.map((f) => f.id)).size).toBe(files.length)
   })
 

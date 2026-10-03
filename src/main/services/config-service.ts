@@ -989,6 +989,7 @@ export async function readMemoryFiles(
       path: globalClaudeMd,
       content: content ?? undefined,
       sizeBytes: stat?.size,
+      modifiedAt: stat?.mtime.toISOString(),
     })
   }
 
@@ -1005,6 +1006,7 @@ export async function readMemoryFiles(
         path: projectClaudeMd,
         content: content ?? undefined,
         sizeBytes: stat?.size,
+        modifiedAt: stat?.mtime.toISOString(),
       })
     }
   }
@@ -1029,6 +1031,7 @@ export async function readMemoryFiles(
           path: memPath,
           content: content ?? undefined,
           sizeBytes: stat?.size,
+          modifiedAt: stat?.mtime.toISOString(),
         })
       }
     } catch {
@@ -1112,6 +1115,7 @@ export async function readAllAutoMemory(
             path: filePath,
             content: content ?? undefined,
             sizeBytes: stat?.size,
+            modifiedAt: stat?.mtime.toISOString(),
             projectId: project.id,
             projectName: project.name,
           }
