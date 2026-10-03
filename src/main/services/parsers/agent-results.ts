@@ -12,6 +12,11 @@ import { getRawBlocks } from './parser-helpers'
 //   …<usage>…<duration_ms>187978</duration_ms></usage></task-notification>
 //
 // A resumed agent notifies again, so the latest notification wins.
+//
+// A notification that arrives while the parent is mid-turn is not written as
+// a user record but as an `attachment` of type `queued_command`, with the same
+// text in `prompt` and the run's figures in `usage.durationMs`. About half of
+// all notifications take this form, so both are read.
 
 interface AgentStop {
   durationMs?: number
@@ -39,8 +44,37 @@ export function createAgentResultCollector(): AgentResultCollector {
   // errored or was interrupted has one without `totalDurationMs`.
   const resultAtByToolUseId = new Map<string, string>()
 
+  function readNotification(text: string, timestamp?: string, reportedMs?: number): void {
+    if (!text.includes('<task-notification>')) return
+    const agentId = text.match(TASK_ID)?.[1]
+    const status = text.match(STATUS)?.[1]
+    if (!agentId || !status || status === 'running') return
+    const duration = text.match(DURATION)?.[1]
+    byAgentId.set(
+      agentId,
+      laterStop(byAgentId.get(agentId), {
+        durationMs: reportedMs ?? (duration ? Number(duration) : undefined),
+        stoppedAt: timestamp,
+      })
+    )
+  }
+
   return {
     add(raw) {
+      if (raw.type === 'attachment') {
+        const a = raw.attachment
+        if (a && a.type === 'queued_command' && typeof a.prompt === 'string') {
+          const usage = a.usage as { durationMs?: unknown } | undefined
+          const reportedMs =
+            typeof usage?.durationMs === 'number' && usage.durationMs >= 0
+              ? usage.durationMs
+              : undefined
+          const timestamp =
+            raw.timestamp ?? (typeof a.timestamp === 'string' ? a.timestamp : undefined)
+          readNotification(a.prompt, timestamp, reportedMs)
+        }
+        return
+      }
       if (raw.type !== 'user') return
       const result = raw.toolUseResult
       if (result && typeof result === 'object' && typeof result.agentId === 'string') {
@@ -58,18 +92,7 @@ export function createAgentResultCollector(): AgentResultCollector {
         if (block.type === 'tool_result' && block.tool_use_id && raw.timestamp) {
           resultAtByToolUseId.set(block.tool_use_id, raw.timestamp)
         }
-        if (block.type !== 'text' || !block.text?.includes('<task-notification>')) continue
-        const agentId = block.text.match(TASK_ID)?.[1]
-        const status = block.text.match(STATUS)?.[1]
-        if (!agentId || !status || status === 'running') continue
-        const duration = block.text.match(DURATION)?.[1]
-        byAgentId.set(
-          agentId,
-          laterStop(byAgentId.get(agentId), {
-            durationMs: duration ? Number(duration) : undefined,
-            stoppedAt: raw.timestamp,
-          })
-        )
+        if (block.type === 'text' && block.text) readNotification(block.text, raw.timestamp)
       }
     },
 

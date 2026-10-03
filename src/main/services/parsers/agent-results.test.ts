@@ -112,4 +112,34 @@ describe('createAgentResultCollector', () => {
     })
     expect(other.stoppedAt).toBeUndefined()
   })
+
+  it('reads a notification queued while the parent was mid-turn', () => {
+    const c = createAgentResultCollector()
+    c.add({
+      type: 'attachment',
+      uuid: 'q1',
+      timestamp: '2026-09-10T10:05:00.000Z',
+      attachment: {
+        type: 'queued_command',
+        commandMode: 'task-notification',
+        prompt:
+          '<task-notification>\n<task-id>a1</task-id>\n<status>completed</status>\n</task-notification>',
+        usage: { totalTokens: 27927, toolUses: 2, durationMs: 21630 },
+      },
+    })
+    // A queued slash command is not a notification.
+    c.add({
+      type: 'attachment',
+      uuid: 'q2',
+      timestamp: '2026-09-10T10:06:00.000Z',
+      attachment: { type: 'queued_command', prompt: '/compact' },
+    })
+    const s = sub({ isBackground: true })
+    c.apply([s])
+    expect(s).toMatchObject({
+      durationMs: 21630,
+      durationSource: 'reported',
+      stoppedAt: '2026-09-10T10:05:00.000Z',
+    })
+  })
 })
