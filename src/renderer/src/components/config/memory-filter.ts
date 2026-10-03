@@ -16,22 +16,6 @@ export function memoryKindOf(file: MemoryFile): MemoryKind {
   }
 }
 
-/**
- * Whether the file `id` names is shown under `filter`, so the panel does not
- * keep showing a file the list has hidden. Project CLAUDE.md files, listed
- * separately as `project-claude-md:<projectId>`, are Project.
- */
-export function isMemorySelectionVisible(
-  id: string,
-  filter: MemoryFilter,
-  files: MemoryFile[]
-): boolean {
-  if (filter === 'all') return true
-  if (id.startsWith('project-claude-md:')) return filter === 'project'
-  const file = files.find((f) => f.id === id)
-  return file !== undefined && memoryKindOf(file) === filter
-}
-
 /** `empty` for a file that exists with nothing in it; `unavailable` when it could not be read. */
 export function memoryContentState(
   content: string | undefined

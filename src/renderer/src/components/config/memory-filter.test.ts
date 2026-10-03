@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   countMemoryByKind,
-  isMemorySelectionVisible,
   memoryContentState,
   memoryKindOf,
   type MemoryKind,
@@ -24,28 +23,6 @@ describe('memoryKindOf', () => {
 
   it('treats an unknown label as global', () => {
     expect(memoryKindOf(file('something-new'))).toBe<MemoryKind>('global')
-  })
-})
-
-describe('isMemorySelectionVisible', () => {
-  const files = [
-    { ...file('global'), id: 'global-claude-md' },
-    { ...file('auto-memory'), id: 'memory-notes' },
-  ]
-
-  it('keeps every selection under All', () => {
-    expect(isMemorySelectionVisible('global-claude-md', 'all', files)).toBe(true)
-  })
-
-  it('hides a selection the active filter leaves out', () => {
-    expect(isMemorySelectionVisible('global-claude-md', 'project', files)).toBe(false)
-    expect(isMemorySelectionVisible('memory-notes', 'auto', files)).toBe(true)
-    expect(isMemorySelectionVisible('memory-notes', 'global', files)).toBe(false)
-  })
-
-  it('files a project CLAUDE.md under Project', () => {
-    expect(isMemorySelectionVisible('project-claude-md:p1', 'project', files)).toBe(true)
-    expect(isMemorySelectionVisible('project-claude-md:p1', 'global', files)).toBe(false)
   })
 })
 
