@@ -1,33 +1,47 @@
 import React, { useState } from 'react'
-import { Brain, RefreshCw, Search, X, FolderOpen } from 'lucide-react'
+import { Brain, RefreshCw, Search, X, FolderOpen, Globe, Sparkles } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { useUIStore } from '@renderer/store/ui.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
-import { ScopeGroup } from './scope-group'
 import { SourceChips } from './source-chips'
-import { countMemoryByKind, memoryKindOf, type MemoryFilter } from './memory-filter'
+import {
+  countMemoryByKind,
+  memoryKindOf,
+  type MemoryFilter,
+  type MemoryKind,
+} from './memory-filter'
 import type { ProjectClaudeMd } from '@shared/types/project'
 
 function projectClaudeMdId(entry: ProjectClaudeMd): string {
   return `project-claude-md:${entry.projectId}`
 }
 
+const KIND_ICON: Record<MemoryKind, React.ElementType> = {
+  global: Globe,
+  project: FolderOpen,
+  auto: Sparkles,
+}
+
+/** One memory file as a card: its name, then where it belongs (Global, a project, Auto memory). */
 function MemoryItem({
   id,
   label,
-  sublabel,
+  kind,
+  owner,
   sizeBytes,
   selectedId,
   onSelect,
 }: {
   id: string
   label: string
-  sublabel: string
+  kind: MemoryKind
+  owner: string
   sizeBytes?: number
   selectedId: string | null
   onSelect: (id: string) => void
 }): React.JSX.Element {
+  const Icon = KIND_ICON[kind]
   return (
     <button
       onClick={() => onSelect(id)}
@@ -44,7 +58,15 @@ function MemoryItem({
       >
         {label}
       </p>
-      {sublabel && <p className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</p>}
+      <p className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5 min-w-0">
+        <Icon
+          className={cn(
+            'h-3 w-3 shrink-0',
+            kind === 'project' ? 'text-amber-500' : 'text-muted-foreground/70'
+          )}
+        />
+        <span className="truncate">{owner}</span>
+      </p>
       {sizeBytes !== undefined && (
         <p className="text-[10px] text-muted-foreground/50 mt-0.5">
           {(sizeBytes / 1024).toFixed(1)} KB
@@ -52,6 +74,13 @@ function MemoryItem({
       )}
     </button>
   )
+}
+
+/** The second line of a card for a file `readMemoryFiles` returned. */
+function ownerOf(kind: MemoryKind, sublabel: string): string {
+  if (kind === 'global') return 'Global'
+  if (kind === 'auto') return 'Auto memory'
+  return sublabel
 }
 
 export default function MemorySidebar(): React.JSX.Element {
@@ -172,39 +201,36 @@ export default function MemorySidebar(): React.JSX.Element {
             </div>
           )}
 
-        {filteredFiles.length > 0 && (
-          <ScopeGroup label="Claude Memory" count={filteredFiles.length}>
-            {filteredFiles.map((file) => (
-              <MemoryItem
-                key={file.id}
-                id={file.id}
-                label={file.label}
-                sublabel={file.sublabel}
-                sizeBytes={file.sizeBytes}
-                selectedId={selectedMemoryId}
-                onSelect={setSelectedMemory}
-              />
-            ))}
-          </ScopeGroup>
-        )}
-
-        {filteredProjectMds.map((p) => (
-          <ScopeGroup
-            key={p.projectId}
-            label={p.projectName}
-            count={1}
-            icon={<FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
-          >
+        {filteredFiles.map((file) => {
+          const kind = memoryKindOf(file)
+          return (
             <MemoryItem
+              key={file.id}
+              id={file.id}
+              label={file.label}
+              kind={kind}
+              owner={ownerOf(kind, file.sublabel)}
+              sizeBytes={file.sizeBytes}
+              selectedId={selectedMemoryId}
+              onSelect={setSelectedMemory}
+            />
+          )
+        })}
+
+        {[...filteredProjectMds]
+          .sort((a, b) => a.projectName.toLowerCase().localeCompare(b.projectName.toLowerCase()))
+          .map((p) => (
+            <MemoryItem
+              key={p.projectId}
               id={projectClaudeMdId(p)}
               label="CLAUDE.md"
-              sublabel=""
+              kind="project"
+              owner={p.projectName}
               sizeBytes={p.sizeBytes}
               selectedId={selectedMemoryId}
               onSelect={setSelectedMemory}
             />
-          </ScopeGroup>
-        ))}
+          ))}
       </div>
     </div>
   )
