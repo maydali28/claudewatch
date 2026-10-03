@@ -740,7 +740,7 @@ export async function parseSessionMetadata(
     childActivityByDay,
     diagnostics: childDiagnostics,
     toolUsage: childToolUsage,
-  } = await parseSubagents(filePath, sessionId, projectId, pricingTable)
+  } = await parseSubagents(filePath, sessionId, projectId, pricingTable, agentResults)
 
   const parentEntries = ledger.entries()
   const usage = projectUsage([...parentEntries, ...childEntries])

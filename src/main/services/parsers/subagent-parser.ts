@@ -13,6 +13,7 @@ import {
 import { projectUsage } from '@main/services/accounting/projection'
 import { createActivityAccumulator, type DayActivity } from './activity-reducer'
 import { createToolUsageAccumulator, mergeToolUsage } from './tool-usage'
+import type { AgentResultCollector } from './agent-results'
 
 /**
  * See `SessionSummary.diagnostics` — this is that shape, scoped to subagents.
@@ -65,7 +66,13 @@ export async function parseSubagents(
   sessionFilePath: string,
   sessionId: string,
   projectId: string,
-  pricingTable: Record<ModelFamily, ModelPricing>
+  pricingTable: Record<ModelFamily, ModelPricing>,
+  /**
+   * Also fed every sub-agent record: a sub-agent that starts sub-agents of its
+   * own receives their Agent tool results and task notifications in its own
+   * transcript, not in the session's.
+   */
+  agentResults?: AgentResultCollector
 ): Promise<SubagentParseResult> {
   const sessionDir = sessionFilePath.replace(/\.jsonl$/, '')
   const subagentsDir = path.join(sessionDir, 'subagents')
@@ -105,7 +112,14 @@ export async function parseSubagents(
   const parsed = await Promise.all(
     files.map((file) =>
       limit(() =>
-        parseSingleSubagent(path.join(subagentsDir, file), file, sessionId, projectId, pricingTable)
+        parseSingleSubagent(
+          path.join(subagentsDir, file),
+          file,
+          sessionId,
+          projectId,
+          pricingTable,
+          agentResults
+        )
       )
     )
   )
@@ -202,7 +216,8 @@ async function parseSingleSubagent(
   fileName: string,
   sessionId: string,
   projectId: string,
-  pricingTable: Record<ModelFamily, ModelPricing>
+  pricingTable: Record<ModelFamily, ModelPricing>,
+  agentResults?: AgentResultCollector
 ): Promise<{
   summary: SubagentSummary | null
   entries: ResponseEntry[]
@@ -244,6 +259,7 @@ async function parseSingleSubagent(
       activity.add(raw)
       accumulator.add(raw)
       tools.add(raw)
+      agentResults?.add(raw)
     }
   } catch {
     // The file exists (it came from `readdir`) but could not be read — a

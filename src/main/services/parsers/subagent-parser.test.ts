@@ -4,6 +4,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
 import { parseSubagents } from './subagent-parser'
+import { createAgentResultCollector } from './agent-results'
 
 let dir: string
 beforeAll(() => {
@@ -131,6 +132,85 @@ describe('parseSubagents', () => {
       expect(sub.description).toBeUndefined()
       expect(sub.isBackground).toBeUndefined()
     }
+  })
+
+  it("reads a nested agent's end from the transcript of the agent that started it", async () => {
+    const parent = path.join(dir, 'sess-nested.jsonl')
+    fs.writeFileSync(parent, '')
+    const subdir = path.join(dir, 'sess-nested', 'subagents')
+    fs.mkdirSync(subdir, { recursive: true })
+    const reply = (uuid: string, ts: string) => ({
+      type: 'assistant',
+      uuid,
+      timestamp: ts,
+      message: {
+        id: uuid,
+        model: 'claude-opus-5',
+        content: [{ type: 'text', text: 'ok' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    })
+    const prompt = (uuid: string, ts: string) => ({
+      type: 'user',
+      uuid,
+      timestamp: ts,
+      message: { content: [{ type: 'text', text: 'go' }] },
+    })
+    // The outer agent receives the inner one's notification.
+    const outer = [
+      prompt('o1', '2026-09-10T10:00:00.000Z'),
+      reply('o2', '2026-09-10T10:00:01.000Z'),
+      {
+        type: 'user',
+        uuid: 'o3',
+        timestamp: '2026-09-10T10:05:00.000Z',
+        origin: { kind: 'task-notification' },
+        message: {
+          content: [
+            {
+              type: 'text',
+              text: '<task-notification>\n<task-id>inner</task-id>\n<status>completed</status>\n<usage><duration_ms>4200</duration_ms></usage>\n</task-notification>',
+            },
+          ],
+        },
+      },
+    ]
+    const inner = [
+      prompt('i1', '2026-09-10T10:01:00.000Z'),
+      reply('i2', '2026-09-10T10:04:00.000Z'),
+    ]
+    fs.writeFileSync(
+      path.join(subdir, 'agent-outer.jsonl'),
+      outer.map((l) => JSON.stringify(l)).join('\n')
+    )
+    fs.writeFileSync(
+      path.join(subdir, 'agent-inner.jsonl'),
+      inner.map((l) => JSON.stringify(l)).join('\n')
+    )
+    fs.writeFileSync(
+      path.join(subdir, 'agent-inner.meta.json'),
+      JSON.stringify({
+        agentType: 'Explore',
+        parentAgentId: 'outer',
+        spawnDepth: 2,
+        requestShape: 'background',
+      })
+    )
+
+    const collector = createAgentResultCollector()
+    const { summaries } = await parseSubagents(
+      parent,
+      'sess-nested',
+      'proj',
+      ANTHROPIC_PRICING,
+      collector
+    )
+    collector.apply(summaries)
+    expect(summaries.find((s) => s.agentId === 'inner')).toMatchObject({
+      durationMs: 4200,
+      durationSource: 'reported',
+      stoppedAt: '2026-09-10T10:05:00.000Z',
+    })
   })
 
   it('reports a malformed line in a subagent transcript', async () => {
