@@ -80,15 +80,26 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(14, tz)
+    writeCacheFile(15, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 14, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 13, or a
-    // bump to 15 without a matching migration, would do.
+    // If the constant is not 15, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 14, or a
+    // bump to 16 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
+  })
+
+  it('discards a v14 cache file rather than serving it under the v15 contract', () => {
+    const tz = `${TZ}-stale-v14`
+    writeCacheFile(14, tz)
+
+    // A v14 summary's sub-agents have no type, description, duration or stop
+    // time. Served back, every sub-agent card would show a bare agent id and
+    // never a run time until each transcript changed. See `CACHE_VERSION`'s
+    // v15 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards a v13 cache file rather than serving it under the v14 contract', () => {

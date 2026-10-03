@@ -71,6 +71,68 @@ describe('parseSubagents', () => {
     expect(summaries[0].messageCount).toBe(2)
   })
 
+  it("reads each sub-agent's meta file and tolerates a missing or broken one", async () => {
+    const parent = path.join(dir, 'sess-meta.jsonl')
+    fs.writeFileSync(parent, '')
+    const subdir = path.join(dir, 'sess-meta', 'subagents')
+    fs.mkdirSync(subdir, { recursive: true })
+    const transcript = [
+      {
+        type: 'user',
+        uuid: 'u',
+        timestamp: '2026-09-10T10:00:00.000Z',
+        message: { content: [{ type: 'text', text: 'go' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a',
+        timestamp: '2026-09-10T10:00:01.000Z',
+        message: {
+          id: 'm',
+          model: 'claude-opus-5',
+          content: [{ type: 'text', text: 'ok' }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join('\n')
+    for (const id of ['withmeta', 'nometa', 'badmeta']) {
+      fs.writeFileSync(path.join(subdir, `agent-${id}.jsonl`), transcript)
+    }
+    fs.writeFileSync(
+      path.join(subdir, 'agent-withmeta.meta.json'),
+      JSON.stringify({
+        agentType: 'Explore',
+        description: '  Find the parser  ',
+        toolUseId: 'toolu_1',
+        parentAgentId: 'aparent',
+        spawnDepth: 2,
+        requestShape: 'background',
+        model: 'claude-opus-5',
+      })
+    )
+    fs.writeFileSync(path.join(subdir, 'agent-badmeta.meta.json'), '{not json')
+
+    const { summaries } = await parseSubagents(parent, 'sess-meta', 'proj', ANTHROPIC_PRICING)
+    const byId = new Map(summaries.map((s) => [s.agentId, s]))
+    expect(byId.get('withmeta')).toMatchObject({
+      agentType: 'Explore',
+      description: 'Find the parser',
+      toolUseId: 'toolu_1',
+      parentAgentId: 'aparent',
+      spawnDepth: 2,
+      isBackground: true,
+    })
+    for (const id of ['nometa', 'badmeta']) {
+      const sub = byId.get(id)!
+      expect(sub.messageCount).toBe(2)
+      expect(sub.agentType).toBeUndefined()
+      expect(sub.description).toBeUndefined()
+      expect(sub.isBackground).toBeUndefined()
+    }
+  })
+
   it('reports a malformed line in a subagent transcript', async () => {
     const parent = path.join(dir, 'sess-malformed.jsonl')
     fs.writeFileSync(parent, '')

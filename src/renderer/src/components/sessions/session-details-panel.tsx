@@ -9,7 +9,9 @@ import { getModelMeta } from '@renderer/lib/model-meta'
 import { getActivePricingTable } from '@shared/constants/pricing'
 import { getModelFamily } from '@shared/constants/models'
 import { EmptyState } from '@renderer/components/shared/empty-state'
-import type { SubagentSummary } from '@shared/types'
+import { isSubagentRunning } from '@shared/utils/live-session'
+import { useNow } from '@renderer/hooks/use-now'
+import { SubagentCard } from './subagent-card'
 
 interface SessionDetailsPanelProps {
   onClose: () => void
@@ -76,39 +78,6 @@ function SectionHeader({
   )
 }
 
-function SubagentCard({ subagent }: { subagent: SubagentSummary }): React.JSX.Element {
-  const meta = subagent.primaryModel ? getModelMeta(subagent.primaryModel) : null
-  const totalTokens = subagent.totalInputTokens + subagent.totalOutputTokens
-
-  return (
-    <div className="rounded-md border border-border/50 bg-muted/20 px-2.5 py-2">
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <span className="text-[10px] font-mono text-muted-foreground truncate flex-1">
-          {subagent.agentId}
-        </span>
-        {meta && (
-          <span
-            className={`shrink-0 rounded-sm px-1 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}
-          >
-            {meta.label}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-2 mt-0.5">
-        <span className="text-[10px] text-muted-foreground">
-          {formatTokens(totalTokens)} tokens
-        </span>
-        <span className="text-[10px] text-muted-foreground/50">·</span>
-        <span className="text-[10px] text-muted-foreground">{subagent.messageCount} msgs</span>
-        <span className="text-[10px] text-muted-foreground/50">·</span>
-        <span className="text-[10px] text-muted-foreground">
-          {formatCost(subagent.estimatedCost)}
-        </span>
-      </div>
-    </div>
-  )
-}
-
 export default function SessionDetailsPanel({
   onClose,
 }: SessionDetailsPanelProps): React.JSX.Element {
@@ -119,6 +88,7 @@ export default function SessionDetailsPanel({
   // process.
   const { prefs } = useSettingsStore()
   const pricingTable = React.useMemo(() => getActivePricingTable(prefs), [prefs])
+  const now = useNow()
 
   if (!parsedSession) {
     return (
@@ -777,7 +747,11 @@ export default function SessionDetailsPanel({
               <SectionHeader icon={Bot} title={`Subagents (${subagents.length})`} />
               <div className="space-y-1.5">
                 {subagents.map((sub) => (
-                  <SubagentCard key={sub.agentId} subagent={sub} />
+                  <SubagentCard
+                    key={sub.agentId}
+                    subagent={sub}
+                    running={isSubagentRunning(sub, now)}
+                  />
                 ))}
               </div>
             </>

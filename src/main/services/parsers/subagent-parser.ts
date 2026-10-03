@@ -154,6 +154,43 @@ export async function parseSubagents(
   return { summaries, entries, childActivityByDay, diagnostics }
 }
 
+type SubagentMeta = Pick<
+  SubagentSummary,
+  'agentType' | 'description' | 'toolUseId' | 'parentAgentId' | 'spawnDepth' | 'isBackground'
+>
+
+/**
+ * Read `agent-<id>.meta.json`, which Claude Code writes beside each sub-agent
+ * transcript: `{ agentType, description, toolUseId, parentAgentId?,
+ * spawnDepth, requestShape: 'foreground' | 'background', … }`. Older agents
+ * have no meta file, and any field may be missing; a missing or unreadable
+ * file leaves the summary without these fields rather than failing the parse.
+ */
+async function readSubagentMeta(transcriptPath: string): Promise<SubagentMeta> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(
+      await fs.promises.readFile(transcriptPath.replace(/\.jsonl$/, '.meta.json'), 'utf-8')
+    )
+  } catch {
+    return {}
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+  const m = parsed as Record<string, unknown>
+  const text = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() ? v.trim() : undefined
+  const meta: SubagentMeta = {}
+  if (text(m.agentType)) meta.agentType = text(m.agentType)
+  if (text(m.description)) meta.description = text(m.description)
+  if (text(m.toolUseId)) meta.toolUseId = text(m.toolUseId)
+  if (text(m.parentAgentId)) meta.parentAgentId = text(m.parentAgentId)
+  if (typeof m.spawnDepth === 'number' && Number.isInteger(m.spawnDepth) && m.spawnDepth > 0) {
+    meta.spawnDepth = m.spawnDepth
+  }
+  if (m.requestShape === 'background') meta.isBackground = true
+  return meta
+}
+
 async function parseSingleSubagent(
   filePath: string,
   fileName: string,
@@ -224,6 +261,7 @@ async function parseSingleSubagent(
   }
 
   const activityCounts = activity.counts()
+  const meta = await readSubagentMeta(filePath)
   // Computed before `diagnostics` (unlike the pre-widening version of this
   // function) so the four usage-completeness fields below can read off the
   // same projection the summary itself is built from, rather than being
@@ -249,6 +287,7 @@ async function parseSingleSubagent(
   return {
     summary: {
       agentId,
+      ...meta,
       messageCount: activityCounts.total,
       totalInputTokens: usage.combined.inputTokens,
       totalOutputTokens: usage.combined.outputTokens,

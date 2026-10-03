@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { formatDistanceToNowStrict } from 'date-fns'
-import { AlertCircle, MessageSquare, ShieldAlert } from 'lucide-react'
+import { AlertCircle, Bot, MessageSquare, ShieldAlert } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import {
@@ -10,7 +10,7 @@ import {
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip'
 import type { SessionSummary, LintCheckId, LintSeverity } from '@shared/types'
-import { isSessionLive } from '@shared/utils/live-session'
+import { isSessionLive, isSubagentRunning } from '@shared/utils/live-session'
 import { ACTIVE_SESSION_MS, LIVE_REFRESH_INTERVAL_MS } from '@shared/constants/tuning'
 import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 
@@ -120,7 +120,12 @@ export default function SessionListItem({
 
   // `isLive` gates on "this window saw a push for it"; the shared rule then
   // ages it exactly as the tray does, so the two surfaces agree.
-  const live = isLive && isSessionLive(session, now)
+  // Background sub-agents keep working after the parent's turn has closed, so
+  // a session with one still running counts as live too.
+  const runningAgents = isLive
+    ? (session.subagents ?? []).filter((s) => isSubagentRunning(s, now)).length
+    : 0
+  const live = (isLive && isSessionLive(session, now)) || runningAgents > 0
   const sessionTokens = session.totalInputTokens + session.totalOutputTokens
   const pct = projectTotalTokens > 0 ? Math.min(100, (sessionTokens / projectTotalTokens) * 100) : 0
 
@@ -154,6 +159,19 @@ export default function SessionListItem({
             </span>
           </div>
           <div className="shrink-0 flex items-center gap-1 text-[10px] text-muted-foreground">
+            {runningAgents > 0 && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="flex items-center gap-0.5 rounded-sm bg-green-500/10 px-1 text-green-600 cursor-default">
+                    <Bot className="h-2.5 w-2.5" />
+                    <span>{runningAgents}</span>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="text-[10px]">
+                  {runningAgents} sub-agent{runningAgents === 1 ? '' : 's'} running
+                </TooltipContent>
+              </Tooltip>
+            )}
             {lintEnabled && lintFlags && lintFlags.length > 0 && lintSeverity && (
               <LintIndicator flags={lintFlags} severity={lintSeverity} />
             )}

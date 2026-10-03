@@ -123,6 +123,12 @@ export interface RawRecord {
     type?: string
     content?: string | Array<{ type: string; text: string }>
     is_error?: boolean
+    /** Agent tool results only: the sub-agent this result belongs to. */
+    agentId?: string
+    /** Agent tool results only: `completed`, or `async_launched` for a background agent. */
+    status?: string
+    /** Agent tool results only: how long a foreground sub-agent ran. */
+    totalDurationMs?: number
   }
   logicalParentUuid?: string
   compactMetadata?: {
@@ -320,7 +326,37 @@ export interface ModelTokenBreakdown {
 
 export interface SubagentSummary {
   agentId: string
+  /** `agentType` from the sub-agent's `agent-<id>.meta.json` (`general-purpose`, `Explore`, …). */
   agentType?: string
+  /**
+   * The task description the parent gave the sub-agent, from its meta file.
+   * Sub-agent transcripts carry no `ai-title` record, so this is the closest
+   * thing to a title.
+   */
+  description?: string
+  /** The parent's Agent tool call that started this sub-agent. */
+  toolUseId?: string
+  /** Set when another sub-agent, not the session itself, started this one. */
+  parentAgentId?: string
+  /** 1 for a sub-agent of the session, 2 for a sub-agent of a sub-agent, … */
+  spawnDepth?: number
+  /** Started in the background: the parent did not wait for it. */
+  isBackground?: boolean
+  /**
+   * How long the sub-agent ran. `reported` is Claude Code's own figure (the
+   * Agent tool result's `totalDurationMs`, or a background agent's
+   * task-notification `duration_ms`); `span` is last minus first timestamp,
+   * which overstates an agent that was resumed later.
+   */
+  durationMs?: number
+  durationSource?: 'reported' | 'span'
+  /**
+   * When the parent last saw this sub-agent stop: its Agent tool result, or
+   * for a background agent its latest task notification. Absent while it is
+   * running, and for a sub-agent whose end was never recorded. Read with
+   * `isSubagentRunning`.
+   */
+  stoppedAt?: string
   messageCount: number
   totalInputTokens: number
   totalOutputTokens: number

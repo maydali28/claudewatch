@@ -36,6 +36,7 @@ import {
   userRecordVariant,
 } from './user-record-presentation'
 import { cn } from '@renderer/lib/cn'
+import { subagentDurationMs } from './subagent-card'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import {
   Tooltip,
@@ -364,11 +365,6 @@ function durationBadgeClass(ms: number): string {
   return 'bg-red-500/10 text-red-500'
 }
 
-function subagentDurationMs(sub: SubagentSummary): number {
-  if (!sub.firstTimestamp || !sub.lastTimestamp) return 0
-  return new Date(sub.lastTimestamp).getTime() - new Date(sub.firstTimestamp).getTime()
-}
-
 function TurnMetrics({
   record,
   turnDuration,
@@ -388,10 +384,14 @@ function TurnMetrics({
 
   const parallelCount = record.contentBlocks.filter((b) => b.type === 'tool_use').length
 
-  // Match subagents that ran during this turn: the subagent starts after the previous
-  // user message and finishes before the next user message (tool_result carrier).
-  // We use lastTimestamp <= turnEnd + durationMs because the agent runs after the
-  // assistant message that launched it (firstTimestamp ≈ assistantTimestamp + few ms).
+  // The sub-agents this response started: matched on the Agent tool call id
+  // from each sub-agent's meta file. A sub-agent without one (no meta file)
+  // falls back to running within the turn: it starts after the previous user
+  // message and finishes before the turn ends. Background agents are left
+  // out: the turn did not wait for them, so their time is not part of it.
+  const toolUseIds = new Set(
+    record.contentBlocks.flatMap((b) => (b.type === 'tool_use' ? [b.id] : []))
+  )
   const turnStart = turnDuration?.prevTimestamp
     ? new Date(turnDuration.prevTimestamp).getTime()
     : null
@@ -399,6 +399,8 @@ function TurnMetrics({
     ? new Date(record.timestamp).getTime() + (turnDuration?.durationMs ?? 0)
     : null
   const turnSubagents = subagents.filter((sub) => {
+    if (sub.isBackground) return false
+    if (sub.toolUseId) return toolUseIds.has(sub.toolUseId)
     if (!sub.firstTimestamp || !sub.lastTimestamp || turnStart === null || turnEnd === null)
       return false
     const start = new Date(sub.firstTimestamp).getTime()

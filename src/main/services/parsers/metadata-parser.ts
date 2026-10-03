@@ -25,6 +25,7 @@ import {
   parseTokenUsage,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
+import { createAgentResultCollector } from './agent-results'
 import { createResponseAccumulator } from '@main/services/accounting/ledger'
 import { projectUsage, type UsageProjection } from '@main/services/accounting/projection'
 import {
@@ -639,6 +640,8 @@ export async function parseSessionMetadata(
   const activity = createActivityAccumulator()
   // The skills Claude Code listed for the session — see `SessionSummary.skillListing`.
   const skills = createSkillListingCollector()
+  // How long each sub-agent ran and when it stopped, as the parent recorded it.
+  const agentResults = createAgentResultCollector()
   // Counted, not swallowed — see `SessionSummary.diagnostics`.
   let malformedLines = 0
 
@@ -662,6 +665,7 @@ export async function parseSessionMetadata(
     if (shouldSkipRecord(raw, seenUuids)) continue
 
     skills.add(raw)
+    agentResults.add(raw)
     if (raw.slug && !acc.slug) acc.slug = raw.slug
     if (raw.type === 'ai-title') {
       const title = raw.aiTitle?.trim()
@@ -791,6 +795,7 @@ export async function parseSessionMetadata(
     diagnostics
   )
 
+  agentResults.apply(summaries)
   summary.subagents = summaries
   const skillListing = skills.resultOrUndefined()
   if (skillListing) summary.skillListing = skillListing
