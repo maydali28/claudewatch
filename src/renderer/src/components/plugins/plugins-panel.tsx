@@ -1,18 +1,15 @@
 import React, { useState } from 'react'
-import {
-  ArrowLeft,
-  ChevronRight,
-  CircleSlash,
-  Info,
-  Layers,
-  Puzzle,
-  Terminal,
-  Webhook,
-} from 'lucide-react'
+import { ChevronRight, CircleSlash, Info, Layers, Puzzle, Terminal, Webhook } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@renderer/components/ui/dialog'
 import { pluginTags } from '@renderer/components/config/source-group-decor'
 import { relativeDay } from '@renderer/components/config/skill-usage'
 import { inactiveReasonText } from '@renderer/components/config/hook-scope-label'
@@ -141,36 +138,37 @@ function PluginDetail({ view }: { view: PluginView }): React.JSX.Element {
   const [opened, setOpened] = useState<PluginItemRef | null>(null)
   const item = findPluginItem(view, opened)
 
-  // An item's full view, with a way back to the tab it was opened from.
-  if (item) {
-    const tabLabel = TABS.find((t) => t.value === item.kind)?.label ?? ''
-    return (
-      <div className="flex flex-col h-full overflow-hidden">
-        <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50 shrink-0 text-xs">
-          <button
-            type="button"
-            onClick={() => setOpened(null)}
-            className="flex items-center gap-1.5 rounded px-1.5 py-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ArrowLeft className="h-3.5 w-3.5" />
-            <Puzzle className="h-3.5 w-3.5 text-violet-500" />
-            {label}
-          </button>
-          <span className="text-muted-foreground/50">/</span>
-          <span className="text-muted-foreground">{tabLabel}</span>
-        </div>
-        <div className="flex-1 overflow-hidden">
-          {item.kind === 'skills' && <SkillDetail skill={item.item} />}
-          {item.kind === 'commands' && <CommandDetail cmd={item.item} />}
-          {item.kind === 'hooks' && <HookDetail event={item.item.event} rule={item.item.rule} />}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PluginHeader view={view} />
+
+      {/* An item opens in a dialog over the plugin, so its tabs stay where they were. */}
+      <Dialog open={item !== null} onOpenChange={(open) => !open && setOpened(null)}>
+        <DialogContent className="flex h-[85vh] w-[92vw] max-w-4xl flex-col overflow-hidden p-0">
+          {item && (
+            <>
+              <div className="flex items-center gap-2 border-b border-border/50 py-2.5 pl-4 pr-12 text-xs shrink-0">
+                <Puzzle className="h-3.5 w-3.5 shrink-0 text-violet-500" />
+                <DialogTitle className="text-xs font-medium text-foreground">{label}</DialogTitle>
+                <span className="text-muted-foreground/50">/</span>
+                <span className="text-muted-foreground">
+                  {TABS.find((t) => t.value === item.kind)?.label}
+                </span>
+              </div>
+              <DialogDescription className="sr-only">
+                The plugin item in full, as Claude Code loads it
+              </DialogDescription>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {item.kind === 'skills' && <SkillDetail skill={item.item} />}
+                {item.kind === 'commands' && <CommandDetail cmd={item.item} />}
+                {item.kind === 'hooks' && (
+                  <HookDetail event={item.item.event} rule={item.item.rule} />
+                )}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Tabs
         value={tab}
