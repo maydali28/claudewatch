@@ -1,5 +1,4 @@
 import React from 'react'
-import { LineChart as LineChartIcon } from 'lucide-react'
 import {
   CartesianGrid,
   ComposedChart,
@@ -13,17 +12,16 @@ import {
 } from 'recharts'
 import { format } from 'date-fns'
 import { formatCost, formatTokens } from '@shared/utils'
-import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { ResponseTimelinePoint } from '@shared/types'
-import { InsightSection, StatTiles } from './insight-section'
+import { InsightSection } from './insight-section'
 import { buildTimelineSeries, type TimelineDatum } from './timeline-series'
 
 // Validated as a two-slot categorical pair in light and dark mode
 // (dataviz validate_palette.js): parent blue, sub-agent amber.
 const PARENT_COLOR = '#3b82f6'
 const SUBAGENT_COLOR = '#d97706'
-const CHART_HEIGHT = 150
-const AXIS_TICK = { fontSize: 9, fill: 'hsl(var(--muted-foreground))' }
+const CHART_HEIGHT = 220
+const AXIS_TICK = { fontSize: 10, fill: 'hsl(var(--muted-foreground))' }
 
 function LegendDot({ color, label }: { color: string; label: string }): React.JSX.Element {
   return (
@@ -66,27 +64,27 @@ function TimelineTooltip({
 
 // Hundreds of sub-agent responses share a few minutes; Recharts' default
 // marker merges them into one blob.
-function SmallDot(props: { cx?: number; cy?: number }): React.JSX.Element | null {
-  if (props.cx === undefined || props.cy === undefined) return null
+function SmallDot(props: {
+  cx?: number
+  cy?: number
+  payload?: TimelineDatum
+}): React.JSX.Element | null {
+  // Recharts calls the shape for every row, parent responses included, and
+  // pins a row with no value to the top edge.
+  if (props.payload?.subagentContext === undefined) return null
+  if (!Number.isFinite(props.cx) || !Number.isFinite(props.cy)) return null
   return <circle cx={props.cx} cy={props.cy} r={2} fill={SUBAGENT_COLOR} fillOpacity={0.7} />
 }
 
-export function SessionTimelineTab({
+/** Cumulative cost and context per response, side by side. */
+export function SessionActivityCharts({
   timeline,
 }: {
   timeline: ResponseTimelinePoint[]
-}): React.JSX.Element {
+}): React.JSX.Element | null {
   const series = React.useMemo(() => buildTimelineSeries(timeline), [timeline])
 
-  if (series.data.length === 0) {
-    return (
-      <EmptyState
-        icon={LineChartIcon}
-        title="No dated responses"
-        description="This session has no API responses with a timestamp"
-      />
-    )
-  }
+  if (series.data.length === 0) return null
 
   const first = series.data[0].t
   const last = series.data[series.data.length - 1].t
@@ -109,21 +107,13 @@ export function SessionTimelineTab({
   const grid = <CartesianGrid vertical={false} strokeDasharray="2 4" className="stroke-border/50" />
 
   return (
-    <div>
-      <StatTiles
-        tiles={[
-          { label: 'Responses', value: series.data.length },
-          { label: 'Peak context', value: formatTokens(series.peakContext) },
-          { label: 'Est. cost', value: formatCost(series.totalCost) },
-        ]}
-      />
-
+    <div className="grid gap-4 xl:grid-cols-2">
       <InsightSection
         title="Cumulative cost"
         note={
           series.unpricedResponses > 0
-            ? `Parent and sub-agents. ${series.unpricedResponses} unpriced response${series.unpricedResponses === 1 ? '' : 's'} add nothing.`
-            : 'Parent and sub-agents'
+            ? `${formatCost(series.totalCost)} over ${series.data.length.toLocaleString()} responses, parent and sub-agents. ${series.unpricedResponses} unpriced response${series.unpricedResponses === 1 ? '' : 's'} add nothing.`
+            : `${formatCost(series.totalCost)} over ${series.data.length.toLocaleString()} responses, parent and sub-agents`
         }
       >
         <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
@@ -134,7 +124,7 @@ export function SessionTimelineTab({
               tick={AXIS_TICK}
               tickLine={false}
               axisLine={false}
-              width={46}
+              width={52}
               tickFormatter={(v: number) => formatCost(v)}
             />
             <Tooltip
@@ -155,7 +145,7 @@ export function SessionTimelineTab({
 
       <InsightSection
         title="Context per response"
-        note="Prompt size of each request: fresh input + cache read + cache write"
+        note={`Prompt size of each request: fresh input + cache read + cache write. Peak ${formatTokens(series.peakContext)}.`}
       >
         <div className="mb-1 flex gap-3 text-[10px] text-muted-foreground">
           <LegendDot color={PARENT_COLOR} label="Session" />
@@ -169,7 +159,7 @@ export function SessionTimelineTab({
               tick={AXIS_TICK}
               tickLine={false}
               axisLine={false}
-              width={46}
+              width={52}
               tickFormatter={(v: number) => formatTokens(v)}
             />
             <Tooltip

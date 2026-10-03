@@ -19,6 +19,12 @@ import {
 import MessageBubble from './message-bubble'
 import SessionDetailsPanel from './session-details-panel'
 import { ExportMenu } from './export-menu'
+import { SessionSubagentsTab } from './insights/session-subagents-tab'
+import { SessionToolsTab } from './insights/session-tools-tab'
+import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
+
+/** Overview is the conversation with its details panel; the others replace the conversation. */
+type SessionTab = 'overview' | 'subagents' | 'tools'
 import type { LintCheckId, LintSeverity, SessionSummary } from '@shared/types'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80
@@ -200,6 +206,8 @@ export default function SessionPanel(): React.JSX.Element | null {
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [detailsWidth, setDetailsWidth] = useState(256)
+  // Kept when another session is opened, so sessions can be compared tab by tab.
+  const [tab, setTab] = useState<SessionTab>('overview')
   const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_BATCH)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -240,7 +248,7 @@ export default function SessionPanel(): React.JSX.Element | null {
       const container = scrollRef.current?.closest('.session-panel-root') as HTMLElement | null
       if (!container) return
       const right = container.getBoundingClientRect().right
-      const newWidth = Math.min(640, Math.max(200, right - ev.clientX))
+      const newWidth = Math.min(480, Math.max(200, right - ev.clientX))
       detailsPanelRef.current?.style.setProperty('width', `${newWidth}px`)
     }
 
@@ -252,7 +260,7 @@ export default function SessionPanel(): React.JSX.Element | null {
       const container = scrollRef.current?.closest('.session-panel-root') as HTMLElement | null
       if (container) {
         const right = container.getBoundingClientRect().right
-        setDetailsWidth(Math.min(640, Math.max(200, right - ev.clientX)))
+        setDetailsWidth(Math.min(480, Math.max(200, right - ev.clientX)))
       }
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
@@ -294,6 +302,17 @@ export default function SessionPanel(): React.JSX.Element | null {
 
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
+  }, [])
+
+  // The conversation unmounts on the other tabs. Coming back reopens it on the
+  // newest record with a fresh render window, as opening the session does.
+  const changeTab = useCallback((next: SessionTab) => {
+    if (next === 'overview') {
+      scrollToEndRef.current = true
+      pendingPrependRef.current = null
+      setVisibleCount(INITIAL_RENDER_BATCH)
+    }
+    setTab(next)
   }, [])
 
   // Reset state when switching sessions / when the search query changes.
@@ -481,6 +500,7 @@ export default function SessionPanel(): React.JSX.Element | null {
   )
 
   const totalTokens = metadata.totalInputTokens + metadata.totalOutputTokens
+  const subagentCount = activeSessionSummary?.subagents.length ?? 0
 
   return (
     <div className="flex h-full session-panel-root">
@@ -550,26 +570,47 @@ export default function SessionPanel(): React.JSX.Element | null {
                   aria-label="Refreshing session…"
                 />
               )}
-              <button
-                onClick={() => setDetailsOpen((v) => !v)}
-                className={`p-1.5 rounded transition-colors ${detailsOpen ? 'bg-accent text-foreground' : 'hover:bg-accent text-muted-foreground'}`}
-                title="Session details"
-              >
-                <Info className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => setSearchOpen((v) => !v)}
-                className="p-1.5 rounded hover:bg-accent transition-colors"
-                title="Search (Cmd+F)"
-              >
-                <Search className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
+              {tab === 'overview' && (
+                <>
+                  <button
+                    onClick={() => setDetailsOpen((v) => !v)}
+                    className={`p-1.5 rounded transition-colors ${detailsOpen ? 'bg-accent text-foreground' : 'hover:bg-accent text-muted-foreground'}`}
+                    title="Session details"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setSearchOpen((v) => !v)}
+                    className="p-1.5 rounded hover:bg-accent transition-colors"
+                    title="Search (Cmd+F)"
+                  >
+                    <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                </>
+              )}
               <ExportMenu sessionId={parsedSession.id} projectId={parsedSession.projectId} />
             </div>
           </div>
 
+          <Tabs value={tab} onValueChange={(v) => changeTab(v as SessionTab)} className="mt-2">
+            <TabsList className="h-7">
+              <TabsTrigger value="overview" className="px-2.5 py-0.5 text-[11px]">
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="subagents" className="px-2.5 py-0.5 text-[11px]">
+                Sub-agents
+                {subagentCount > 0 && (
+                  <span className="ml-1 tabular-nums text-muted-foreground">{subagentCount}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="tools" className="px-2.5 py-0.5 text-[11px]">
+                Tools &amp; MCPs
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
           {/* Search bar */}
-          {searchOpen && (
+          {tab === 'overview' && searchOpen && (
             <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1">
               <Search className="h-3 w-3 text-muted-foreground shrink-0" />
               <input
@@ -597,57 +638,74 @@ export default function SessionPanel(): React.JSX.Element | null {
           )}
         </div>
 
-        {/* Conversation scroll area */}
-        <div className="relative flex-1 min-h-0">
-          {/* overflow-anchor is off: the layout effect above does its own
-              anchoring after a prepend, and Chromium's would double-correct. */}
-          <div
-            ref={scrollRef}
-            onScroll={handleScroll}
-            className="h-full overflow-y-auto py-2"
-            style={{ overflowAnchor: 'none' }}
-          >
-            {filteredRecords.length === 0 && searchQuery && (
-              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-                No messages match &quot;{searchQuery}&quot;
-              </div>
-            )}
-            {visibleCount < filteredRecords.length && (
-              <div className="flex items-center justify-center py-4 text-[11px] text-muted-foreground/60">
-                Loading older messages…
-              </div>
-            )}
-            {filteredRecords
-              .slice(Math.max(0, filteredRecords.length - visibleCount))
-              .map((record) => (
-                <MessageBubble
-                  key={record.uuid}
-                  record={record}
-                  toolResultMap={toolResultMap}
-                  searchQuery={searchQuery}
-                  turnDuration={
-                    record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
-                  }
-                  subagents={activeSessionSummary?.subagents}
-                />
-              ))}
+        {tab === 'subagents' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <SessionSubagentsTab subagents={activeSessionSummary?.subagents ?? []} />
           </div>
+        )}
+        {tab === 'tools' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <SessionToolsTab
+              projectId={parsedSession.projectId}
+              toolUsage={activeSessionSummary?.toolUsage ?? []}
+              timeline={parsedSession.responseTimeline ?? []}
+            />
+          </div>
+        )}
 
-          {/* Scroll-to-bottom button — shown when watcher pushes new messages and user scrolled up */}
-          {showScrollButton && (
-            <button
-              onClick={handleScrollToBottom}
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground shadow-lg transition-opacity hover:opacity-90"
+        {/* Conversation scroll area */}
+        {tab === 'overview' && (
+          <div className="relative flex-1 min-h-0">
+            {/* overflow-anchor is off: the layout effect above does its own
+              anchoring after a prepend, and Chromium's would double-correct. */}
+            <div
+              ref={scrollRef}
+              onScroll={handleScroll}
+              className="h-full overflow-y-auto py-2"
+              style={{ overflowAnchor: 'none' }}
             >
-              <ArrowDown className="h-3 w-3" />
-              New messages
-            </button>
-          )}
-        </div>
+              {filteredRecords.length === 0 && searchQuery && (
+                <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
+                  No messages match &quot;{searchQuery}&quot;
+                </div>
+              )}
+              {visibleCount < filteredRecords.length && (
+                <div className="flex items-center justify-center py-4 text-[11px] text-muted-foreground/60">
+                  Loading older messages…
+                </div>
+              )}
+              {filteredRecords
+                .slice(Math.max(0, filteredRecords.length - visibleCount))
+                .map((record) => (
+                  <MessageBubble
+                    key={record.uuid}
+                    record={record}
+                    toolResultMap={toolResultMap}
+                    searchQuery={searchQuery}
+                    turnDuration={
+                      record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
+                    }
+                    subagents={activeSessionSummary?.subagents}
+                  />
+                ))}
+            </div>
+
+            {/* Scroll-to-bottom button — shown when watcher pushes new messages and user scrolled up */}
+            {showScrollButton && (
+              <button
+                onClick={handleScrollToBottom}
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground shadow-lg transition-opacity hover:opacity-90"
+              >
+                <ArrowDown className="h-3 w-3" />
+                New messages
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Details side panel — resizable right side */}
-      {detailsOpen && (
+      {tab === 'overview' && detailsOpen && (
         <div
           ref={detailsPanelRef}
           className="flex shrink-0 border-l border-border/50"

@@ -5,11 +5,12 @@ import { ipc } from '@renderer/lib/ipc-client'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { parseMcpToolName } from '@shared/utils/mcp-tool-name'
 import { summarizeMcpServers, summarizeTools } from '@shared/utils/tool-usage-summary'
-import type { ToolUsageRow } from '@shared/types'
-import { InsightSection, StatTiles, formatChars } from './insight-section'
+import type { ResponseTimelinePoint, ToolUsageRow } from '@shared/types'
+import { InsightSection, StatTiles, TH, formatChars, percent } from './insight-section'
+import { SessionActivityCharts } from './session-activity-charts'
 
 const COST_NOTE =
-  "Cost is the estimated cost of the responses that made the calls, split evenly when a response called several tools. Tokens spent on MCP tool definitions can't be attributed to a server."
+  'Cost is the estimated cost of the responses that made the calls, split evenly when a response called several tools. Tokens spent on MCP tool definitions can’t be attributed to a server.'
 
 /** Names of the MCP servers configured for this project, globally or in it. */
 function useConfiguredMcpNames(projectId: string): string[] {
@@ -31,18 +32,15 @@ function useConfiguredMcpNames(projectId: string): string[] {
   return names
 }
 
-function ErrorCount({ errors }: { errors: number }): React.JSX.Element {
-  return (
-    <span className={errors > 0 ? 'text-destructive' : 'text-muted-foreground/50'}>{errors}</span>
-  )
-}
-
+/** The session's Tools & MCPs view: tool and MCP server usage, then cost and context over time. */
 export function SessionToolsTab({
   projectId,
   toolUsage,
+  timeline,
 }: {
   projectId: string
   toolUsage: ToolUsageRow[]
+  timeline: ResponseTimelinePoint[]
 }): React.JSX.Element {
   const configuredMcps = useConfiguredMcpNames(projectId)
   const tools = React.useMemo(() => summarizeTools(toolUsage), [toolUsage])
@@ -51,113 +49,130 @@ export function SessionToolsTab({
     [toolUsage, configuredMcps]
   )
 
-  if (tools.length === 0 && servers.length === 0) {
-    return (
-      <EmptyState
-        icon={Wrench}
-        title="No tool calls"
-        description="Neither this session nor its sub-agents called a tool"
-      />
-    )
-  }
-
   const calls = tools.reduce((s, t) => s + t.calls, 0)
   const errors = tools.reduce((s, t) => s + t.errors, 0)
+  const toolCost = tools.reduce((s, t) => s + t.costUsd, 0)
+  const subagentCalls = tools.reduce((s, t) => s + t.subagentCalls, 0)
 
   return (
-    <div>
+    <div className="space-y-4">
       <StatTiles
         tiles={[
-          { label: 'Calls', value: calls },
-          { label: 'Errors', value: errors },
+          { label: 'Tool calls', value: calls.toLocaleString(), hint: 'parent and sub-agents' },
           {
             label: 'Error rate',
-            value: calls > 0 ? `${((errors / calls) * 100).toFixed(1)}%` : '—',
+            value: calls > 0 ? percent(errors / calls) : '—',
+            hint: `${errors.toLocaleString()} failed calls`,
           },
+          {
+            label: 'By sub-agents',
+            value: calls > 0 ? percent(subagentCalls / calls) : '—',
+            hint: `${subagentCalls.toLocaleString()} calls`,
+          },
+          { label: 'Cost of tool turns', value: formatCost(toolCost), hint: 'estimate' },
         ]}
       />
 
-      <InsightSection title={`Tools (${tools.length})`} note="Parent session and sub-agents">
-        <table className="w-full table-fixed text-[10px]">
-          <thead>
-            <tr className="text-left text-[9px] uppercase tracking-wide text-muted-foreground">
-              <th className="py-1 font-medium">Tool</th>
-              <th className="w-9 py-1 text-right font-medium">Calls</th>
-              <th className="w-6 py-1 text-right font-medium">Err</th>
-              <th className="w-12 py-1 text-right font-medium">Result</th>
-              <th className="w-11 py-1 text-right font-medium">Cost</th>
-            </tr>
-          </thead>
-          <tbody className="tabular-nums">
-            {tools.map((t) => {
-              const mcp = parseMcpToolName(t.tool)
-              return (
-                <tr key={t.tool} className="border-t border-border/30">
-                  <td className="py-1 pr-1">
-                    <span
-                      className="block truncate font-mono text-foreground"
-                      title={
-                        t.subagentCalls > 0
-                          ? `${t.tool} · ${t.subagentCalls} of ${t.calls} calls by sub-agents`
-                          : t.tool
-                      }
-                    >
-                      {/* The panel is narrow: the method is what tells calls apart,
-                          and the MCP servers list below names the server. */}
-                      {mcp ? mcp.method : t.tool}
-                    </span>
-                  </td>
-                  <td className="py-1 text-right">{t.calls}</td>
-                  <td className="py-1 text-right">
-                    <ErrorCount errors={t.errors} />
-                  </td>
-                  <td className="py-1 text-right text-muted-foreground">
-                    {formatChars(t.resultChars)}
-                  </td>
-                  <td className="py-1 text-right text-muted-foreground">{formatCost(t.costUsd)}</td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </InsightSection>
+      {tools.length === 0 && servers.length === 0 ? (
+        <EmptyState
+          icon={Wrench}
+          title="No tool calls"
+          description="Neither this session nor its sub-agents called a tool"
+        />
+      ) : (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <InsightSection title={`Tools (${tools.length})`} note={COST_NOTE}>
+            <div className="overflow-x-auto">
+              <table className="w-full whitespace-nowrap text-xs tabular-nums">
+                <thead>
+                  <tr className="text-left">
+                    <th className={TH}>Tool</th>
+                    <th className={`${TH} pl-4 text-right`}>Calls</th>
+                    <th className={`${TH} pl-4 text-right`}>Sub-agents</th>
+                    <th className={`${TH} pl-4 text-right`}>Errors</th>
+                    <th className={`${TH} pl-4 text-right`}>Result</th>
+                    <th className={`${TH} pl-4 text-right`}>Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tools.map((t) => {
+                    const mcp = parseMcpToolName(t.tool)
+                    return (
+                      <tr key={t.tool} className="border-t border-border/40">
+                        <td className="py-1.5 pr-3 font-mono" title={t.tool}>
+                          {mcp ? (
+                            <>
+                              <span className="text-muted-foreground">{mcp.server} › </span>
+                              {mcp.method}
+                            </>
+                          ) : (
+                            t.tool
+                          )}
+                        </td>
+                        <td className="py-1.5 pl-4 text-right">{t.calls.toLocaleString()}</td>
+                        <td className="py-1.5 pl-4 text-right text-muted-foreground">
+                          {t.subagentCalls > 0 ? t.subagentCalls.toLocaleString() : '—'}
+                        </td>
+                        <td
+                          className={`py-1.5 pl-4 text-right ${t.errors > 0 ? 'text-destructive' : 'text-muted-foreground'}`}
+                        >
+                          {t.errors}
+                        </td>
+                        <td className="py-1.5 pl-4 text-right text-muted-foreground">
+                          {formatChars(t.resultChars)}
+                        </td>
+                        <td className="py-1.5 pl-4 text-right">{formatCost(t.costUsd)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </InsightSection>
 
-      <InsightSection
-        title={`MCP servers (${servers.length})`}
-        note="Called servers, and configured ones this session never called"
-      >
-        {servers.length === 0 ? (
-          <p className="text-[10px] text-muted-foreground">No MCP servers configured or called.</p>
-        ) : (
-          <div className="space-y-1">
-            {servers.map((s) => (
-              <div
-                key={s.server}
-                className="flex items-center justify-between gap-2 rounded-md border border-border/40 px-2 py-1"
-              >
-                <div className="min-w-0">
-                  <p className="truncate font-mono text-[10px] text-foreground" title={s.server}>
-                    {s.server}
-                  </p>
-                  <p className="text-[9px] text-muted-foreground">
-                    {s.calls === 0
-                      ? 'not called'
-                      : `${s.toolsUsed} tool${s.toolsUsed === 1 ? '' : 's'} · ${formatCost(s.costUsd)}`}
-                    {!s.configured && ' · not in this project’s MCP config'}
-                  </p>
-                </div>
-                <div className="shrink-0 text-right text-[10px] tabular-nums">
-                  <span className={s.calls === 0 ? 'text-muted-foreground/50' : 'text-foreground'}>
-                    {s.calls} calls
-                  </span>
-                  {s.errors > 0 && <span className="ml-1 text-destructive">{s.errors} err</span>}
-                </div>
+          <InsightSection
+            title={`MCP servers (${servers.length})`}
+            note="Called servers, and configured ones this session never called"
+          >
+            {servers.length === 0 ? (
+              <p className="text-xs text-muted-foreground">No MCP servers configured or called.</p>
+            ) : (
+              <div className="space-y-2">
+                {servers.map((s) => (
+                  <div
+                    key={s.server}
+                    className="flex items-center justify-between gap-3 rounded-md border border-border/40 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-xs text-foreground" title={s.server}>
+                        {s.server}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {s.calls === 0
+                          ? 'configured, not called'
+                          : `${s.toolsUsed} tool${s.toolsUsed === 1 ? '' : 's'} · ${formatCost(s.costUsd)}`}
+                        {!s.configured && ' · not in this project’s MCP config'}
+                      </p>
+                    </div>
+                    <div className="shrink-0 text-right text-xs tabular-nums">
+                      <span
+                        className={s.calls === 0 ? 'text-muted-foreground/60' : 'text-foreground'}
+                      >
+                        {s.calls.toLocaleString()} calls
+                      </span>
+                      {s.errors > 0 && (
+                        <span className="ml-2 text-destructive">{s.errors} errors</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
-      </InsightSection>
-      <p className="mt-3 text-[9px] leading-snug text-muted-foreground/70">{COST_NOTE}</p>
+            )}
+          </InsightSection>
+        </div>
+      )}
+
+      <SessionActivityCharts timeline={timeline} />
     </div>
   )
 }
