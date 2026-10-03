@@ -11,6 +11,7 @@ import {
   readPlugins,
   readMcps,
   readMemoryFiles,
+  readAllAutoMemory,
 } from '@main/services/config-service'
 import { resolvedProjectRoots } from '@main/services/project-roots'
 import { getOrScanProjects } from './sessions.handlers'
@@ -96,6 +97,10 @@ export function registerConfigHandlers(): void {
         ? (await resolvedProjectRoots()).find((r) => r.id === projectId)
         : undefined
       const memoryFiles = await readMemoryFiles(projectId, root)
+      // Without a project, list every project's auto-memory notes too.
+      if (!projectId) {
+        memoryFiles.push(...(await readAllAutoMemory(await getOrScanProjects())))
+      }
       return ok(memoryFiles)
     } catch (e) {
       captureHandlerException(e)

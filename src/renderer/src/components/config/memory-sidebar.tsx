@@ -1,53 +1,117 @@
 import React, { useState } from 'react'
-import { Brain, RefreshCw, Search, X, FolderOpen } from 'lucide-react'
+import { Brain, ChevronDown, ChevronRight, Folder, Globe, RefreshCw, Search, X } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
+import { useUIStore } from '@renderer/store/ui.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
-import { ScopeGroup } from './scope-group'
-import type { ProjectClaudeMd } from '@shared/types/project'
+import { SourceChips } from './source-chips'
+import { countMemoryByKind, memoryKindOf, type MemoryFilter } from './memory-filter'
+import { buildMemoryOwners, visibleMemoryOwners, type MemoryOwner } from './memory-owners'
+import { relativeDay } from './skill-usage'
+import type { MemoryFile } from '@shared/types'
 
-function projectClaudeMdId(entry: ProjectClaudeMd): string {
-  return `project-claude-md:${entry.projectId}`
+const KIND_TAG = { global: 'global', project: 'project', auto: 'auto memory' } as const
+
+/** A memory file's name as listed: notes keep their `.md`, like CLAUDE.md. */
+export function memoryFileName(file: MemoryFile): string {
+  return memoryKindOf(file) === 'auto' ? `${file.label}.md` : file.label
 }
 
-function MemoryItem({
-  id,
-  label,
-  sublabel,
-  sizeBytes,
-  selectedId,
-  onSelect,
+/** One file, as a card like a session's: name and size, then kind and last change. */
+function MemoryFileItem({
+  file,
+  isActive,
+  onClick,
 }: {
-  id: string
-  label: string
-  sublabel: string
-  sizeBytes?: number
-  selectedId: string | null
-  onSelect: (id: string) => void
+  file: MemoryFile
+  isActive: boolean
+  onClick: () => void
 }): React.JSX.Element {
+  const kind = memoryKindOf(file)
+  const isIndex = kind === 'auto' && file.label === 'MEMORY'
   return (
     <button
-      onClick={() => onSelect(id)}
+      onClick={onClick}
       className={cn(
         'w-full rounded-md px-2.5 py-2 text-left transition-colors',
-        selectedId === id ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
+        isActive ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
       )}
     >
-      <p
-        className={cn(
-          'text-xs font-medium truncate',
-          selectedId === id ? 'text-primary' : 'text-foreground'
+      <p className="flex items-center gap-1.5 min-w-0">
+        <span
+          className={cn(
+            'text-xs font-medium truncate flex-1',
+            isActive ? 'text-primary' : 'text-foreground'
+          )}
+        >
+          {memoryFileName(file)}
+        </span>
+        {file.sizeBytes !== undefined && (
+          <span className="text-[10px] tabular-nums text-muted-foreground/60 shrink-0">
+            {(file.sizeBytes / 1024).toFixed(1)} KB
+          </span>
         )}
-      >
-        {label}
       </p>
-      {sublabel && <p className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</p>}
-      {sizeBytes !== undefined && (
-        <p className="text-[10px] text-muted-foreground/50 mt-0.5">
-          {(sizeBytes / 1024).toFixed(1)} KB
-        </p>
-      )}
+      <p className="text-[10px] text-muted-foreground mt-0.5">
+        {isIndex ? 'index' : KIND_TAG[kind]}
+        {file.modifiedAt && <> · {relativeDay(file.modifiedAt)}</>}
+      </p>
     </button>
+  )
+}
+
+/** An owner as a folder, like a project in the Sessions list. */
+function MemoryOwnerTree({
+  owner,
+  activeFileId,
+  onSelectFile,
+}: {
+  owner: MemoryOwner
+  activeFileId: string | null
+  onSelectFile: (id: string) => void
+}): React.JSX.Element {
+  const [expanded, setExpanded] = useState(true)
+  return (
+    <div>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        title={owner.label}
+        className="flex w-full items-center gap-1.5 px-2 py-1.5 text-xs font-medium rounded-md hover:bg-accent/40 transition-colors text-left"
+      >
+        {expanded ? (
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
+        {owner.kind === 'global' ? (
+          <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        ) : (
+          <Folder className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+        )}
+        {/* Cut a long name at its start: folder names of projects without
+            transcripts share a long prefix and differ at the end. */}
+        <span className="truncate flex-1 text-foreground [direction:rtl] text-left">
+          <span className="[direction:ltr] [unicode-bidi:embed]">{owner.label}</span>
+        </span>
+        <span className="ml-auto text-[10px] text-muted-foreground shrink-0">
+          {owner.files.length}
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="ml-2 mt-0.5 space-y-0.5 border-l border-border/40 pl-2">
+          {owner.files.map((file) => (
+            <MemoryFileItem
+              key={file.id}
+              file={file}
+              isActive={file.id === activeFileId}
+              onClick={() => onSelectFile(file.id)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -59,18 +123,16 @@ export default function MemorySidebar(): React.JSX.Element {
   const selectedMemoryId = useConfigStore((s) => s.selectedMemoryId)
   const setSelectedMemory = useConfigStore((s) => s.setSelectedMemory)
   const [search, setSearch] = useState('')
+  const kindFilter = (useUIStore((s) => s.sourceFilters.memory) ?? 'all') as MemoryFilter
+  const setSourceFilter = useUIStore((s) => s.setSourceFilter)
 
-  const q = search.toLowerCase()
-
-  const filteredFiles = memoryFiles.filter(
-    (f) => f.label.toLowerCase().includes(q) || f.sublabel.toLowerCase().includes(q)
+  const owners = buildMemoryOwners(memoryFiles, projectClaudeMds)
+  const counts = countMemoryByKind(
+    visibleMemoryOwners(owners, 'all', search).flatMap((o) => o.files),
+    0
   )
-
-  const filteredProjectMds = projectClaudeMds.filter(
-    (p) => p.projectName.toLowerCase().includes(q) || 'claude.md'.includes(q)
-  )
-
-  const total = memoryFiles.length + projectClaudeMds.length
+  const visible = visibleMemoryOwners(owners, kindFilter, search)
+  const total = owners.reduce((n, o) => n + o.files.length, 0)
 
   return (
     <div className="flex flex-col h-full">
@@ -103,7 +165,7 @@ export default function MemorySidebar(): React.JSX.Element {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter memory files…"
+            placeholder="Search projects or files…"
             className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
           />
           {search && (
@@ -116,6 +178,20 @@ export default function MemorySidebar(): React.JSX.Element {
           )}
         </div>
       </div>
+
+      {total > 0 && (
+        <SourceChips<MemoryFilter>
+          label="Filter memory files by kind"
+          value={kindFilter}
+          onChange={(v) => setSourceFilter('memory', v)}
+          options={[
+            { value: 'all', label: 'All', count: counts.all },
+            { value: 'global', label: 'Global', count: counts.global },
+            { value: 'project', label: 'Project', count: counts.project },
+            { value: 'auto', label: 'Auto memory', count: counts.auto },
+          ]}
+        />
+      )}
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && total === 0 && (
@@ -136,48 +212,21 @@ export default function MemorySidebar(): React.JSX.Element {
           </div>
         )}
 
-        {!isLoading &&
-          total > 0 &&
-          filteredFiles.length === 0 &&
-          filteredProjectMds.length === 0 &&
-          search && (
-            <div className="flex flex-col items-center justify-center py-12 text-center px-3">
-              <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
-            </div>
-          )}
-
-        {filteredFiles.length > 0 && (
-          <ScopeGroup label="Claude Memory" count={filteredFiles.length}>
-            {filteredFiles.map((file) => (
-              <MemoryItem
-                key={file.id}
-                id={file.id}
-                label={file.label}
-                sublabel={file.sublabel}
-                sizeBytes={file.sizeBytes}
-                selectedId={selectedMemoryId}
-                onSelect={setSelectedMemory}
-              />
-            ))}
-          </ScopeGroup>
+        {!isLoading && total > 0 && visible.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-3">
+            <p className="text-xs text-muted-foreground">
+              {search ? <>No matches for &quot;{search}&quot;</> : 'No memory files of this kind'}
+            </p>
+          </div>
         )}
 
-        {filteredProjectMds.map((p) => (
-          <ScopeGroup
-            key={p.projectId}
-            label={p.projectName}
-            count={1}
-            icon={<FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
-          >
-            <MemoryItem
-              id={projectClaudeMdId(p)}
-              label="CLAUDE.md"
-              sublabel=""
-              sizeBytes={p.sizeBytes}
-              selectedId={selectedMemoryId}
-              onSelect={setSelectedMemory}
-            />
-          </ScopeGroup>
+        {visible.map((owner) => (
+          <MemoryOwnerTree
+            key={owner.id}
+            owner={owner}
+            activeFileId={selectedMemoryId}
+            onSelectFile={setSelectedMemory}
+          />
         ))}
       </div>
     </div>

@@ -988,6 +988,7 @@ export async function readMemoryFiles(
       path: globalClaudeMd,
       content: content ?? undefined,
       sizeBytes: stat?.size,
+      modifiedAt: stat?.mtime.toISOString(),
     })
   }
 
@@ -1004,6 +1005,7 @@ export async function readMemoryFiles(
         path: projectClaudeMd,
         content: content ?? undefined,
         sizeBytes: stat?.size,
+        modifiedAt: stat?.mtime.toISOString(),
       })
     }
   }
@@ -1028,6 +1030,7 @@ export async function readMemoryFiles(
           path: memPath,
           content: content ?? undefined,
           sizeBytes: stat?.size,
+          modifiedAt: stat?.mtime.toISOString(),
         })
       }
     } catch {
@@ -1036,6 +1039,92 @@ export async function readMemoryFiles(
   }
 
   return files
+}
+
+/** What `readAllAutoMemory` needs from a scanned project to name its memory folders. */
+export interface MemoryScanProject {
+  id: string
+  name: string
+  /** Each session's `projectId` is the folder it was scanned from (worktree folders included). */
+  sessions: Array<{ projectId: string }>
+}
+
+/**
+ * The auto-memory notes Claude Code keeps in `projects/<dir>/memory`, for the
+ * Memory tab's all-projects view, for the same projects the Sessions tab
+ * lists: those the scan found. Each file is named after the scanned project
+ * that owns its folder — a worktree folder merged into a project counts as
+ * that project. A folder the scan does not know (its transcripts were
+ * deleted) is left out. Sorted by project, then folder, with each folder's
+ * `MEMORY.md` index first.
+ */
+export async function readAllAutoMemory(projects: MemoryScanProject[]): Promise<MemoryFile[]> {
+  const projectsDir = getProjectsDirPath()
+  let dirIds: string[]
+  try {
+    dirIds = (await fs.promises.readdir(projectsDir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+  } catch {
+    return []
+  }
+
+  const owner = new Map<string, { id: string; name: string }>()
+  for (const project of projects) {
+    const ref = { id: project.id, name: project.name }
+    owner.set(project.id, ref)
+    for (const session of project.sessions) owner.set(session.projectId, ref)
+  }
+
+  const perDir = await Promise.all(
+    dirIds.map(async (dirId): Promise<MemoryFile[]> => {
+      const project = owner.get(dirId)
+      if (!project) return []
+      const memoryDir = path.join(projectsDir, dirId, 'memory')
+      let names: string[]
+      try {
+        names = (await fs.promises.readdir(memoryDir, { withFileTypes: true }))
+          .filter((e) => e.isFile() && e.name.endsWith('.md'))
+          .map((e) => e.name)
+      } catch {
+        return []
+      }
+      names.sort((a, b) => (a === 'MEMORY.md' ? -1 : b === 'MEMORY.md' ? 1 : a.localeCompare(b)))
+      return Promise.all(
+        names.map(async (name): Promise<MemoryFile> => {
+          const filePath = path.join(memoryDir, name)
+          const [content, stat] = await Promise.all([
+            readTextFile(filePath),
+            fs.promises.stat(filePath).catch(() => null),
+          ])
+          return {
+            id: `memory:${dirId}:${name}`,
+            label: name.replace(/\.md$/, ''),
+            sublabel: 'auto-memory',
+            path: filePath,
+            content: content ?? undefined,
+            sizeBytes: stat?.size,
+            modifiedAt: stat?.mtime.toISOString(),
+            projectId: project.id,
+            projectName: project.name,
+          }
+        })
+      )
+    })
+  )
+
+  // The project's own folder before its worktree folders, then by folder name.
+  const folderOf = (f: MemoryFile): string => path.basename(path.dirname(path.dirname(f.path)))
+  const isOwnFolder = (f: MemoryFile): number => (folderOf(f) === f.projectId ? 0 : 1)
+  return perDir
+    .filter((files) => files.length > 0)
+    .sort(
+      (a, b) =>
+        (a[0].projectName ?? '').localeCompare(b[0].projectName ?? '') ||
+        isOwnFolder(a[0]) - isOwnFolder(b[0]) ||
+        folderOf(a[0]).localeCompare(folderOf(b[0]))
+    )
+    .flat()
 }
 
 // ─── readRawSettings ──────────────────────────────────────────────────────────
