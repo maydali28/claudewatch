@@ -48,7 +48,6 @@ export const ExportSchema = z.object({
   sessionId,
   projectId,
   format: z.enum(['json', 'csv', 'markdown']),
-  outputPath: z.string().min(1).max(1000),
 })
 
 // ─── Analytics ────────────────────────────────────────────────────────────────

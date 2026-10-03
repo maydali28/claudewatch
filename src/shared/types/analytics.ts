@@ -1,6 +1,5 @@
 import type { EffortLevel, EffortDistribution } from './session'
 import type { LintCheckId, LintSeverity } from './lint'
-import type { AgentTypeSummary, McpServerSummary, ToolSummary } from '../utils/tool-usage-summary'
 
 // ─── Daily Usage ──────────────────────────────────────────────────────────────
 
@@ -376,6 +375,36 @@ export interface AnalyticsData {
 }
 
 // ─── Tools and MCPs ───────────────────────────────────────────────────────────
+
+export interface ToolSummary {
+  tool: string
+  mcpServer?: string
+  calls: number
+  /** Of `calls`, the ones made by sub-agents. */
+  subagentCalls: number
+  errors: number
+  resultChars: number
+  costUsd: number
+}
+
+export interface McpServerSummary {
+  /** The server name as tool names spell it. */
+  server: string
+  calls: number
+  errors: number
+  costUsd: number
+  /** Distinct tools of this server that were called. */
+  toolsUsed: number
+  /** Found in the MCP configuration that applies here. */
+  configured: boolean
+}
+
+export interface AgentTypeSummary {
+  agentType: string
+  runs: number
+  costUsd: number
+  durationMs: number
+}
 
 /** Tool calls across the selected range and projects, parent and sub-agents. */
 export interface ToolUsageAnalytics {

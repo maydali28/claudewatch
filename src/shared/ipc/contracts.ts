@@ -66,7 +66,7 @@ export interface IPCContracts {
   }
   'sessions:export': {
     request: ExportRequest
-    response: Result<string> // file path written
+    response: Result<string | null> // file path written, or null when the dialog was cancelled
   }
   'analytics:get': {
     request: { dateRange: DateRange; projectIds?: string[] }

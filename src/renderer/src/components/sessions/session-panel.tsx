@@ -1,15 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
-import {
-  Search,
-  X,
-  Download,
-  RefreshCw,
-  ArrowDown,
-  Info,
-  ShieldAlert,
-  GitBranch,
-  Layers,
-} from 'lucide-react'
+import { Search, X, RefreshCw, ArrowDown, Info, ShieldAlert, GitBranch, Layers } from 'lucide-react'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import { windowAfterScroll, windowAfterAppend, scrollTopAfterPrepend } from './render-window'
 import { sessionPanelView } from './session-panel-state'
@@ -28,6 +18,7 @@ import {
 } from '@renderer/components/ui/tooltip'
 import MessageBubble from './message-bubble'
 import SessionDetailsPanel from './session-details-panel'
+import { ExportMenu } from './export-menu'
 import type { LintCheckId, LintSeverity, SessionSummary } from '@shared/types'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80
@@ -182,7 +173,6 @@ export default function SessionPanel(): React.JSX.Element | null {
   } = useSessionsStore()
   const { setView } = useUIStore()
   const lintEnabled = useFeatureFlags((s) => s.lint)
-  const sessionExportEnabled = useFeatureFlags((s) => s.sessionExport)
 
   const activeSessionSummary = React.useMemo(() => {
     if (!activeSessionId) return null
@@ -574,14 +564,7 @@ export default function SessionPanel(): React.JSX.Element | null {
               >
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
               </button>
-              {sessionExportEnabled && (
-                <button
-                  className="p-1.5 rounded hover:bg-accent transition-colors"
-                  title="Export session"
-                >
-                  <Download className="h-3.5 w-3.5 text-muted-foreground" />
-                </button>
-              )}
+              <ExportMenu sessionId={parsedSession.id} projectId={parsedSession.projectId} />
             </div>
           </div>
 

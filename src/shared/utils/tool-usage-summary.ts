@@ -1,35 +1,6 @@
 import type { SubagentSummary, ToolUsageRow } from '@shared/types/session'
+import type { AgentTypeSummary, McpServerSummary, ToolSummary } from '@shared/types/analytics'
 import { mcpToolServerName } from './mcp-tool-name'
-
-export interface ToolSummary {
-  tool: string
-  mcpServer?: string
-  calls: number
-  /** Of `calls`, the ones made by sub-agents. */
-  subagentCalls: number
-  errors: number
-  resultChars: number
-  costUsd: number
-}
-
-export interface McpServerSummary {
-  /** The server name as tool names spell it. */
-  server: string
-  calls: number
-  errors: number
-  costUsd: number
-  /** Distinct tools of this server that were called. */
-  toolsUsed: number
-  /** Found in the MCP configuration that applies here. */
-  configured: boolean
-}
-
-export interface AgentTypeSummary {
-  agentType: string
-  runs: number
-  costUsd: number
-  durationMs: number
-}
 
 /** One row per tool across days and sides, most-called first. */
 export function summarizeTools(rows: readonly ToolUsageRow[]): ToolSummary[] {
@@ -110,3 +81,5 @@ export function summarizeAgentTypes(subagents: readonly SubagentSummary[]): Agen
   }
   return [...byType.values()].sort((a, b) => b.costUsd - a.costUsd || b.runs - a.runs)
 }
+
+export type { AgentTypeSummary, McpServerSummary, ToolSummary }

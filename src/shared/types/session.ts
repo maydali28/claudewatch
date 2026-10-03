@@ -835,9 +835,9 @@ export interface SessionSearchResult {
 
 export type ExportFormat = 'json' | 'csv' | 'markdown'
 
+/** The file is chosen in a save dialog main shows; the renderer never names a path. */
 export interface ExportRequest {
   sessionId: string
   projectId: string
   format: ExportFormat
-  outputPath?: string
 }
