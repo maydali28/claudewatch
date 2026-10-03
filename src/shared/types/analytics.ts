@@ -1,5 +1,6 @@
 import type { EffortLevel, EffortDistribution } from './session'
 import type { LintCheckId, LintSeverity } from './lint'
+import type { AgentTypeSummary, McpServerSummary, ToolSummary } from '../utils/tool-usage-summary'
 
 // ─── Daily Usage ──────────────────────────────────────────────────────────────
 
@@ -356,6 +357,7 @@ export interface AnalyticsData {
   parallelToolAnalytics: ParallelToolAnalytics
   sessionHealthSummary: SessionHealthSummary
   sessionRows: SessionPeriodRow[]
+  toolUsage: ToolUsageAnalytics
   /**
    * Activity with no parsable timestamp (`UNDATED_DAY` in `date-ranges.ts`),
    * reported regardless of which preset is selected. `messages`/`responses`
@@ -371,6 +373,22 @@ export interface AnalyticsData {
     responses: number
     includedInTotals: boolean
   }
+}
+
+// ─── Tools and MCPs ───────────────────────────────────────────────────────────
+
+/** Tool calls across the selected range and projects, parent and sub-agents. */
+export interface ToolUsageAnalytics {
+  totalCalls: number
+  totalErrors: number
+  /** `costUsd` of every tool row summed; the rest of the period's cost went to responses that called no tool. */
+  toolCost: number
+  /** Each tool's `costUsd` over the period's `totalCost`, 0 when the period cost nothing. */
+  tools: Array<ToolSummary & { costShare: number }>
+  /** Called servers only; the renderer adds the configured ones nobody called. */
+  mcpServers: McpServerSummary[]
+  /** Sub-agent runs by type, each attributed to the day it started. */
+  agentTypes: AgentTypeSummary[]
 }
 
 // ─── Session Health ───────────────────────────────────────────────────────────

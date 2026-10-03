@@ -159,8 +159,10 @@ interface CacheFile {
 // v15: each `SessionSummary.subagents[]` entry gained the meta file's
 // `agentType`, `description`, `toolUseId`, `parentAgentId`, `spawnDepth` and
 // `isBackground`, plus `durationMs`/`durationSource` and `stoppedAt` from the
-// parent's Agent tool results and task notifications. A v14 entry has none of
-// them. Tokens, cost and counts are unaffected.
+// parent's Agent tool results and task notifications; and `SessionSummary`
+// gained `toolUsage`, its tool calls per day, tool and side. A v14 entry has
+// none of them, and would show no tool calls at all. Tokens, cost and counts
+// are unaffected.
 //
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.

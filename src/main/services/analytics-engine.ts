@@ -1,4 +1,9 @@
-import type { SessionSummary, EffortLevel } from '@shared/types/session'
+import type {
+  SessionSummary,
+  EffortLevel,
+  SubagentSummary,
+  ToolUsageRow,
+} from '@shared/types/session'
 import type { Project } from '@shared/types/project'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import type {
@@ -25,7 +30,13 @@ import type {
   SessionHealthSummary,
   SessionHealthEntry,
   SessionPeriodRow,
+  ToolUsageAnalytics,
 } from '@shared/types/analytics'
+import {
+  summarizeAgentTypes,
+  summarizeMcpServers,
+  summarizeTools,
+} from '@shared/utils/tool-usage-summary'
 import type { SessionDayUsage } from '@shared/types/session'
 import type { LintCheckId, LintSeverity } from '@shared/types/lint'
 import { getModelFamily } from '@shared/constants/models'
@@ -1185,6 +1196,42 @@ function computeParallelToolAnalytics(
   }
 }
 
+// ─── computeToolUsageAnalytics ────────────────────────────────────────────────
+
+/**
+ * Tool calls in the range, from each session's per-day `toolUsage` rows, so a
+ * session spanning the range edge contributes only its in-range days.
+ * Sub-agent runs are attributed to the day they started: a run rarely
+ * crosses midnight, and the summary keeps no per-day split for it.
+ */
+function computeToolUsageAnalytics(
+  sessions: SessionSummary[],
+  fromKey: string,
+  toKey: string,
+  includeUndated: boolean,
+  totalCost: number
+): ToolUsageAnalytics {
+  const inRange = (day: string): boolean =>
+    (day >= fromKey && day <= toKey) || (includeUndated && day === UNDATED_DAY)
+  const rows: ToolUsageRow[] = []
+  const subagents: SubagentSummary[] = []
+  for (const s of sessions) {
+    for (const row of s.toolUsage ?? []) if (inRange(row.day)) rows.push(row)
+    for (const sub of s.subagents ?? []) {
+      if (inRange(toDayKeyOrUndated(sub.firstTimestamp))) subagents.push(sub)
+    }
+  }
+  const tools = summarizeTools(rows)
+  return {
+    totalCalls: tools.reduce((sum, t) => sum + t.calls, 0),
+    totalErrors: tools.reduce((sum, t) => sum + t.errors, 0),
+    toolCost: tools.reduce((sum, t) => sum + t.costUsd, 0),
+    tools: tools.map((t) => ({ ...t, costShare: totalCost > 0 ? t.costUsd / totalCost : 0 })),
+    mcpServers: summarizeMcpServers(rows),
+    agentTypes: summarizeAgentTypes(subagents),
+  }
+}
+
 // ─── computeSessionHealthSummary ─────────────────────────────────────────────
 
 const SES001_COST_THRESHOLD = 25.0
@@ -1483,6 +1530,7 @@ export function computeAnalytics(
       }
     : sessionHealthSummaryRaw
   const sessionRows = buildSessionPeriodRows(filtered, fromKey, toKey, includeUndated)
+  const toolUsage = computeToolUsageAnalytics(filtered, fromKey, toKey, includeUndated, totalCost)
 
   // Reported regardless of `includeUndated`: a calendar-scoped range excludes
   // this activity from every total above but must still disclose that it
@@ -1519,6 +1567,7 @@ export function computeAnalytics(
     parallelToolAnalytics,
     sessionHealthSummary,
     sessionRows,
+    toolUsage,
     undatedActivity,
   }
 }
