@@ -197,7 +197,7 @@ Every conversation Claude Code still has on disk, fully accessible and searchabl
 - **Full transcript view** — browse the complete conversation including user messages, assistant responses, thinking blocks, tool calls, file reads, and bash output
 - **In-session search** — press `Cmd+F` to find anything inside the open session; collapsed blocks auto-expand on match
 - **Session detail panel** — tokens, cost, compaction count, subagent usage, thinking effort distribution, and error flags beside the conversation
-- **Sub-agents tab** — every run titled with its task, with its agent type, run time and cost, cost by agent type, and a live marker on the ones still running; open any run to read its own conversation: the prompt it was given, its reasoning and tool calls, and the report it sent back
+- **Sub-agents tab** — every run titled with its task, with its agent type, run time and cost, cost by agent type, and a live marker on the ones still running; open any run, or the report card it sent back in the chat, to read its own conversation in a dialog: the prompt it was given, its reasoning and tool calls, and the report it sent back
 - **Tools & MCPs tab** — calls, errors, result size and cost per tool and per MCP server (including configured servers the session never called), with cumulative cost and the context size of every response over time
 
 **How far back does history go?** Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default), so "All" covers roughly the last month unless you raise that setting.

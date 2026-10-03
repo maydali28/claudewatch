@@ -28,7 +28,7 @@ import SessionDetailsPanel from './session-details-panel'
 import { ExportMenu } from './export-menu'
 import { SessionSubagentsTab } from './insights/session-subagents-tab'
 import { SessionToolsTab } from './insights/session-tools-tab'
-import { SubagentTranscript } from './insights/subagent-transcript'
+import { SubagentConversationDialog } from './insights/subagent-transcript'
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 
 /** Overview is the conversation with its details panel; the others replace the conversation. */
@@ -213,7 +213,7 @@ export default function SessionPanel(): React.JSX.Element | null {
   const [detailsWidth, setDetailsWidth] = useState(256)
   // Kept when another session is opened, so sessions can be compared tab by tab.
   const [tab, setTab] = useState<SessionTab>('overview')
-  // The sub-agent whose conversation the Sub-agents tab shows; null lists them all.
+  // The sub-agent whose conversation is open in the dialog, if any.
   const [openAgentId, setOpenAgentId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_BATCH)
   const searchInputRef = useRef<HTMLInputElement>(null)
@@ -322,13 +322,8 @@ export default function SessionPanel(): React.JSX.Element | null {
     setTab(next)
   }, [])
 
-  const openSubagentConversation = useCallback(
-    (agentId: string) => {
-      setOpenAgentId(agentId)
-      changeTab('subagents')
-    },
-    [changeTab]
-  )
+  // Opens over whichever tab is showing, so the reader keeps their place.
+  const openSubagentConversation = setOpenAgentId
 
   // Reset state when switching sessions / when the search query changes.
   // Using the "store prev prop, compare during render" pattern instead of a
@@ -657,25 +652,14 @@ export default function SessionPanel(): React.JSX.Element | null {
           )}
         </div>
 
-        {tab === 'subagents' &&
-          (openSubagent ? (
-            <div className="flex-1 min-h-0">
-              <SubagentTranscript
-                sessionId={parsedSession.id}
-                projectId={parsedSession.projectId}
-                subagent={openSubagent}
-                subagents={activeSessionSummary?.subagents ?? []}
-                onBack={() => setOpenAgentId(null)}
-              />
-            </div>
-          ) : (
-            <div className="flex-1 min-h-0 overflow-y-auto p-4">
-              <SessionSubagentsTab
-                subagents={activeSessionSummary?.subagents ?? []}
-                onOpen={setOpenAgentId}
-              />
-            </div>
-          ))}
+        {tab === 'subagents' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <SessionSubagentsTab
+              subagents={activeSessionSummary?.subagents ?? []}
+              onOpen={setOpenAgentId}
+            />
+          </div>
+        )}
         {tab === 'tools' && (
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             <SessionToolsTab
@@ -763,6 +747,13 @@ export default function SessionPanel(): React.JSX.Element | null {
           </div>
         </div>
       )}
+      <SubagentConversationDialog
+        sessionId={parsedSession.id}
+        projectId={parsedSession.projectId}
+        subagent={openSubagent}
+        subagents={activeSessionSummary?.subagents ?? []}
+        onClose={() => setOpenAgentId(null)}
+      />
     </div>
   )
 }

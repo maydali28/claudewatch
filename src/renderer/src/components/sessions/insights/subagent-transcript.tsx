@@ -1,11 +1,17 @@
 import React from 'react'
-import { ArrowLeft, Clock } from 'lucide-react'
+import { Clock } from 'lucide-react'
 import { formatCost, formatTokens } from '@shared/utils'
 import { isSubagentRunning } from '@shared/utils/live-session'
 import { ipc } from '@renderer/lib/ipc-client'
 import { useNow } from '@renderer/hooks/use-now'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@renderer/components/ui/dialog'
 import MessageBubble from '@renderer/components/sessions/message-bubble'
 import { groupResponses } from '@renderer/components/sessions/assistant-response'
 import {
@@ -21,6 +27,31 @@ import {
 } from '@renderer/components/sessions/render-window'
 import type { ParsedSession, SubagentSummary } from '@shared/types'
 
+/** A sub-agent's conversation in a dialog over the session. */
+export function SubagentConversationDialog({
+  subagent,
+  onClose,
+  ...props
+}: {
+  sessionId: string
+  projectId: string
+  /** The sub-agent to show; null keeps the dialog closed. */
+  subagent: SubagentSummary | null
+  subagents: SubagentSummary[]
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <Dialog open={subagent !== null} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex h-[85vh] w-[92vw] max-w-5xl flex-col overflow-hidden p-0">
+        <DialogDescription className="sr-only">
+          The sub-agent’s prompt, reasoning, tool calls and report
+        </DialogDescription>
+        {subagent && <SubagentTranscript subagent={subagent} {...props} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /**
  * One sub-agent's own conversation: the prompt its parent gave it, its
  * reasoning and tool calls, and the report it returned. Re-read whenever the
@@ -31,14 +62,12 @@ export function SubagentTranscript({
   projectId,
   subagent,
   subagents,
-  onBack,
 }: {
   sessionId: string
   projectId: string
   subagent: SubagentSummary
   /** Every sub-agent of the session, for nested runs started from this one. */
   subagents: SubagentSummary[]
-  onBack: () => void
 }): React.JSX.Element {
   const [parsed, setParsed] = React.useState<ParsedSession | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -146,18 +175,11 @@ export function SubagentTranscript({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-border/50 px-4 py-3">
-        <button
-          type="button"
-          onClick={onBack}
-          className="mb-2 inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ArrowLeft className="h-3 w-3" />
-          All sub-agents
-        </button>
+      {/* Right padding leaves room for the dialog's close button. */}
+      <div className="shrink-0 border-b border-border/50 py-3 pl-4 pr-12">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+            <DialogTitle className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
               {running && (
                 <span
                   className="block h-2 w-2 shrink-0 rounded-full bg-green-500 animate-pulse"
@@ -165,7 +187,7 @@ export function SubagentTranscript({
                 />
               )}
               {subagent.description ?? subagent.agentId}
-            </h3>
+            </DialogTitle>
             <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{subagent.agentId}</p>
           </div>
           {meta && (
