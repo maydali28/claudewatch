@@ -585,6 +585,11 @@ export interface SessionSummary {
   recordedEffortDistribution: Record<string, number>
   /** Distinct `service_tier` values reported across this session's responses. */
   serviceTiers: string[]
+  /**
+   * Tool calls per day, tool and side (parent or sub-agents). Feeds the
+   * session's Tools tab and the Analytics Tools tab. Added in metadata cache v15.
+   */
+  toolUsage: ToolUsageRow[]
 }
 
 /**
@@ -768,34 +773,52 @@ export interface ParsedSession {
    * already does for `metadata.totalOutputTokens`.
    */
   responseUsage: Record<string, ResolvedResponseUsage>
+  /** Every dated response, parent and sub-agents, oldest first. */
+  responseTimeline: ResponseTimelinePoint[]
 }
 
 // ─── Tool Call Entry (for Tools rail) ────────────────────────────────────────
 
 export type ToolCategory = 'read' | 'write' | 'edit' | 'exec' | 'mcp' | 'other'
 
-export interface ToolCallEntry {
-  id: string
-  toolName: string
-  category: ToolCategory
-  input: Record<string, AnyCodableValue>
-  primaryArg?: string
-  resultContent?: string
-  isError: boolean
-  turnIndex: number
-  sessionId: string
-  timestamp?: string
+/**
+ * Tool calls of one tool on one day, from one side of the session (the parent
+ * transcript or its sub-agents). Built by `parsers/tool-usage.ts`.
+ */
+export interface ToolUsageRow {
+  /** Local calendar day of the response that made the calls, `YYYY-MM-DD` or `UNDATED_DAY`. */
+  day: string
+  /** Tool name as Claude Code wrote it (`Read`, `mcp__github__get_me`, …). */
+  tool: string
+  /** For `mcp__<server>__<method>` tools, the server part. */
   mcpServer?: string
-  mcpMethod?: string
+  source: 'parent' | 'subagent'
+  calls: number
+  /** Calls whose tool result was marked `is_error`. */
+  errors: number
+  /** Characters of tool result text returned to the model. */
+  resultChars: number
+  /**
+   * Estimated cost of the responses that made these calls, a response's cost
+   * split evenly across the tool calls it made. Unpriced responses add 0.
+   */
+  costUsd: number
 }
 
-export interface ToolAnalytics {
-  totalCalls: number
-  errorCount: number
-  errorRate: number
-  uniqueFilesTouched: number
-  callsByTool: Array<{ tool: string; count: number }>
-  callsByCategory: Array<{ category: ToolCategory; count: number }>
+/**
+ * One API response on the session's timeline: the parent's and every
+ * sub-agent's, from the ledger. Built by `full-parser.ts`.
+ */
+export interface ResponseTimelinePoint {
+  timestamp: string
+  source: 'parent' | 'subagent'
+  agentId?: string
+  model?: string
+  /** Prompt size of this request: fresh input + cache read + cache write. */
+  contextTokens: number
+  outputTokens: number
+  /** Null when the model could not be priced. */
+  costUsd: number | null
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────

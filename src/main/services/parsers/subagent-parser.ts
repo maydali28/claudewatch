@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as readline from 'readline'
-import type { RawRecord, SubagentSummary } from '@shared/types/session'
+import type { RawRecord, SubagentSummary, ToolUsageRow } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { pLimit } from '@main/lib/p-limit'
 import { SUBAGENT_PARSE_CONCURRENCY } from '@shared/constants/tuning'
@@ -12,6 +12,7 @@ import {
 } from '@main/services/accounting/ledger'
 import { projectUsage } from '@main/services/accounting/projection'
 import { createActivityAccumulator, type DayActivity } from './activity-reducer'
+import { createToolUsageAccumulator, mergeToolUsage } from './tool-usage'
 
 /**
  * See `SessionSummary.diagnostics` — this is that shape, scoped to subagents.
@@ -48,6 +49,8 @@ export interface SubagentParseResult {
   childActivityByDay: Map<string, DayActivity>
   /** Summed across every subagent file discovered, readable or not. */
   diagnostics: SubagentDiagnostics
+  /** Every subagent's tool calls, merged per day and tool. */
+  toolUsage: ToolUsageRow[]
 }
 
 /**
@@ -80,6 +83,7 @@ export async function parseSubagents(
       summaries: [],
       entries: [],
       childActivityByDay: new Map(),
+      toolUsage: [],
       diagnostics: {
         malformedLines: 0,
         unreadableChildren: 0,
@@ -111,6 +115,7 @@ export async function parseSubagents(
   // Summed rather than kept per-child: the parent only needs one figure per
   // day, and a child's own byDay map is not otherwise exposed anywhere.
   const childActivityByDay = new Map<string, DayActivity>()
+  const toolUsage: ToolUsageRow[] = []
   const diagnostics: SubagentDiagnostics = {
     malformedLines: 0,
     unreadableChildren: 0,
@@ -138,6 +143,7 @@ export async function parseSubagents(
     if (!result.summary) continue
     summaries.push(result.summary)
     entries.push(...result.entries)
+    mergeToolUsage(toolUsage, result.toolUsage)
     for (const [day, activity] of result.activityByDay) {
       const existing = childActivityByDay.get(day)
       childActivityByDay.set(
@@ -151,7 +157,7 @@ export async function parseSubagents(
       )
     }
   }
-  return { summaries, entries, childActivityByDay, diagnostics }
+  return { summaries, entries, childActivityByDay, diagnostics, toolUsage }
 }
 
 type SubagentMeta = Pick<
@@ -202,6 +208,7 @@ async function parseSingleSubagent(
   entries: ResponseEntry[]
   activityByDay: Map<string, DayActivity>
   diagnostics: SubagentDiagnostics
+  toolUsage: ToolUsageRow[]
 }> {
   const agentId = fileName.replace(/^agent-/, '').replace(/\.jsonl$/, '')
   const source: SourceIdentity = { kind: 'subagent', projectId, sessionId, agentId }
@@ -210,6 +217,7 @@ async function parseSingleSubagent(
   // Message counts come from the same response-grouping the ledger uses for
   // usage, so a block-split child response counts once for both.
   const activity = createActivityAccumulator()
+  const tools = createToolUsageAccumulator('subagent')
   let firstTimestamp: string | undefined
   let lastTimestamp: string | undefined
   let malformedLines = 0
@@ -235,6 +243,7 @@ async function parseSingleSubagent(
 
       activity.add(raw)
       accumulator.add(raw)
+      tools.add(raw)
     }
   } catch {
     // The file exists (it came from `readdir`) but could not be read — a
@@ -245,6 +254,7 @@ async function parseSingleSubagent(
       summary: null,
       entries: [],
       activityByDay: new Map(),
+      toolUsage: [],
       diagnostics: {
         malformedLines,
         unreadableChildren: 1,
@@ -281,7 +291,7 @@ async function parseSingleSubagent(
     serverToolRequests: usage.combined.serverToolRequests,
   }
   if (activityCounts.total === 0) {
-    return { summary: null, entries: [], activityByDay: new Map(), diagnostics }
+    return { summary: null, entries: [], activityByDay: new Map(), diagnostics, toolUsage: [] }
   }
 
   return {
@@ -310,5 +320,6 @@ async function parseSingleSubagent(
     entries,
     activityByDay: activityCounts.byDay,
     diagnostics,
+    toolUsage: tools.rows(entries),
   }
 }

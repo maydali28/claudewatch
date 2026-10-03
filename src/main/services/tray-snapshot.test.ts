@@ -96,6 +96,7 @@ function session(id: string, projectId: string, dailyUsage: SessionDayUsage[]): 
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
   }
 }
 

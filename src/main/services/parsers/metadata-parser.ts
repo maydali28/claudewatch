@@ -26,6 +26,7 @@ import {
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
 import { createAgentResultCollector } from './agent-results'
+import { createToolUsageAccumulator, mergeToolUsage } from './tool-usage'
 import { createResponseAccumulator } from '@main/services/accounting/ledger'
 import { projectUsage, type UsageProjection } from '@main/services/accounting/projection'
 import {
@@ -534,6 +535,7 @@ function buildSessionSummary(
     thinkingTokens,
     recordedEffortDistribution: usage.recordedEffortDistribution,
     serviceTiers: usage.serviceTiers,
+    toolUsage: [],
   }
 }
 
@@ -642,6 +644,7 @@ export async function parseSessionMetadata(
   const skills = createSkillListingCollector()
   // How long each sub-agent ran and when it stopped, as the parent recorded it.
   const agentResults = createAgentResultCollector()
+  const tools = createToolUsageAccumulator('parent')
   // Counted, not swallowed — see `SessionSummary.diagnostics`.
   let malformedLines = 0
 
@@ -666,6 +669,7 @@ export async function parseSessionMetadata(
 
     skills.add(raw)
     agentResults.add(raw)
+    tools.add(raw)
     if (raw.slug && !acc.slug) acc.slug = raw.slug
     if (raw.type === 'ai-title') {
       const title = raw.aiTitle?.trim()
@@ -735,9 +739,11 @@ export async function parseSessionMetadata(
     entries: childEntries,
     childActivityByDay,
     diagnostics: childDiagnostics,
+    toolUsage: childToolUsage,
   } = await parseSubagents(filePath, sessionId, projectId, pricingTable)
 
-  const usage = projectUsage([...ledger.entries(), ...childEntries])
+  const parentEntries = ledger.entries()
+  const usage = projectUsage([...parentEntries, ...childEntries])
   // A tripwire, not an expected condition — see `ResponseEntry.usageIncomplete`.
   // Logged once per parse rather than per response so a session with many such
   // responses does not flood the log. Goes through the shared logger (not
@@ -797,6 +803,9 @@ export async function parseSessionMetadata(
 
   agentResults.apply(summaries)
   summary.subagents = summaries
+  const toolUsage = tools.rows(parentEntries)
+  mergeToolUsage(toolUsage, childToolUsage)
+  summary.toolUsage = toolUsage
   const skillListing = skills.resultOrUndefined()
   if (skillListing) summary.skillListing = skillListing
   summary.parentMessageCount = activityCounts.total

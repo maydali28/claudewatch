@@ -250,7 +250,7 @@ export default function SessionPanel(): React.JSX.Element | null {
       const container = scrollRef.current?.closest('.session-panel-root') as HTMLElement | null
       if (!container) return
       const right = container.getBoundingClientRect().right
-      const newWidth = Math.min(480, Math.max(200, right - ev.clientX))
+      const newWidth = Math.min(640, Math.max(200, right - ev.clientX))
       detailsPanelRef.current?.style.setProperty('width', `${newWidth}px`)
     }
 
@@ -262,7 +262,7 @@ export default function SessionPanel(): React.JSX.Element | null {
       const container = scrollRef.current?.closest('.session-panel-root') as HTMLElement | null
       if (container) {
         const right = container.getBoundingClientRect().right
-        setDetailsWidth(Math.min(480, Math.max(200, right - ev.clientX)))
+        setDetailsWidth(Math.min(640, Math.max(200, right - ev.clientX)))
       }
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)

@@ -77,6 +77,7 @@ function makeSession(over: Partial<ParsedSession> = {}): ParsedSession {
     subagentTotals: { inputTokens: 0, outputTokens: 0, messageCount: 0, estimatedCost: 0 },
     diagnostics: diagnostics(),
     responseUsage: {},
+    responseTimeline: [],
     ...over,
   }
 }

@@ -12,10 +12,16 @@ import type {
   SessionErrorDetail,
   EffortDistribution,
   ResolvedResponseUsage,
+  ResponseTimelinePoint,
 } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { ERROR_SNIPPET_MAX_CHARS } from '@shared/constants/tuning'
-import { toDayKeyOrUndated, UNDATED_DAY } from '@shared/utils/date-ranges'
+import {
+  compareTimestampsAscending,
+  parseInstant,
+  toDayKeyOrUndated,
+  UNDATED_DAY,
+} from '@shared/utils/date-ranges'
 import {
   classifyUserRecord,
   getRawBlocks,
@@ -410,12 +416,11 @@ export async function parseSessionFull(
   const userMessageCount = activityCounts.userMessages
   const assistantMessageCount = activityCounts.assistantResponses
 
-  const { summaries: subagents, diagnostics: childDiagnostics } = await parseSubagents(
-    filePath,
-    sessionId,
-    projectId,
-    pricingTable
-  )
+  const {
+    summaries: subagents,
+    entries: childEntries,
+    diagnostics: childDiagnostics,
+  } = await parseSubagents(filePath, sessionId, projectId, pricingTable)
 
   const totalMalformedLines = malformedLines + childDiagnostics.malformedLines
   const negativeCounters = ledger.negativeCounters() + childDiagnostics.negativeCounters
@@ -454,6 +459,23 @@ export async function parseSessionFull(
       costUsd: entry.costUsd,
     }
   }
+
+  // Every dated response, parent and sub-agents, for the Timeline tab. An
+  // undated response has no place on a time axis and is left out.
+  const responseTimeline: ResponseTimelinePoint[] = []
+  for (const entry of [...parentEntries, ...childEntries]) {
+    if (!entry.tsUtc || parseInstant(entry.tsUtc) === null) continue
+    responseTimeline.push({
+      timestamp: entry.tsUtc,
+      source: entry.kind,
+      ...(entry.agentId ? { agentId: entry.agentId } : {}),
+      ...(entry.modelRaw ? { model: entry.modelRaw } : {}),
+      contextTokens: entry.inputTokens + entry.cacheReadTokens + effectiveCacheWriteTotal(entry),
+      outputTokens: entry.outputTokens,
+      costUsd: entry.costUsd,
+    })
+  }
+  responseTimeline.sort((a, b) => compareTimestampsAscending(a.timestamp, b.timestamp))
 
   // Mirrors `metadata-parser.ts`'s `diagnostics` build in shape — same ten
   // counts — but not for free: metadata-parser's `usage` already projects
@@ -537,5 +559,6 @@ export async function parseSessionFull(
     },
     diagnostics,
     responseUsage,
+    responseTimeline,
   }
 }

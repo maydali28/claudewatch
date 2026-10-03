@@ -103,6 +103,7 @@ function session(id: string, dailyUsage: SessionDayUsage[]): SessionSummary {
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
   }
 }
 

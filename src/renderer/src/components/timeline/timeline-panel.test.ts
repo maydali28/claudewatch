@@ -54,6 +54,7 @@ function makeSummary(id: string, projectId: string, timestamp: string): SessionS
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
   }
 }
 
