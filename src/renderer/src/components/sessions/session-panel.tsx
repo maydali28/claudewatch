@@ -1,7 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import { Search, X, RefreshCw, ArrowDown, Info, ShieldAlert, GitBranch, Layers } from 'lucide-react'
 import { EmptyState } from '@renderer/components/shared/empty-state'
-import { windowAfterScroll, windowAfterAppend, scrollTopAfterPrepend } from './render-window'
+import {
+  INCREMENT_RENDER_BATCH,
+  INITIAL_RENDER_BATCH,
+  RENDER_AHEAD_PX,
+  windowAfterScroll,
+  windowAfterAppend,
+  scrollTopAfterPrepend,
+} from './render-window'
 import { sessionPanelView } from './session-panel-state'
 import { groupResponses } from './assistant-response'
 import { Skeleton } from '@renderer/components/ui/skeleton'
@@ -34,10 +41,7 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 80
 // records, open scrolled to the bottom, and mount older records in
 // INCREMENT_RENDER_BATCH chunks as the reader scrolls within RENDER_AHEAD_PX
 // of the oldest mounted one. Keeps first-paint cheap even on sessions with
-// hundreds of turns. Rules live in `render-window.ts`.
-const INITIAL_RENDER_BATCH = 50
-const INCREMENT_RENDER_BATCH = 50
-const RENDER_AHEAD_PX = 1500
+// hundreds of turns. Rules and sizes live in `render-window.ts`.
 
 // ─── Session lint flag evaluation (mirrors SES001–SES006 thresholds) ──────────
 

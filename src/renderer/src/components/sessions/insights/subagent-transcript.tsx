@@ -12,6 +12,13 @@ import {
   formatAgentDuration,
   subagentDurationMs,
 } from '@renderer/components/sessions/subagent-card'
+import {
+  INCREMENT_RENDER_BATCH,
+  INITIAL_RENDER_BATCH,
+  RENDER_AHEAD_PX,
+  prefixWindowAfterAppend,
+  windowAfterScroll,
+} from '@renderer/components/sessions/render-window'
 import type { ParsedSession, SubagentSummary } from '@shared/types'
 
 /**
@@ -37,6 +44,11 @@ export function SubagentTranscript({
   const [error, setError] = React.useState<string | null>(null)
   const now = useNow()
   const running = isSubagentRunning(subagent, now)
+  // Progressive rendering from the prompt down: the first INITIAL_RENDER_BATCH
+  // records, then INCREMENT_RENDER_BATCH more each time the reader comes
+  // within RENDER_AHEAD_PX of the last mounted one. See `render-window.ts`.
+  const [visibleCount, setVisibleCount] = React.useState(INITIAL_RENDER_BATCH)
+  const scrollRef = React.useRef<HTMLDivElement>(null)
 
   React.useEffect(() => {
     let cancelled = false
@@ -66,6 +78,7 @@ export function SubagentTranscript({
     setShownAgentId(subagent.agentId)
     setParsed(null)
     setError(null)
+    setVisibleCount(INITIAL_RENDER_BATCH)
   }
 
   const records = React.useMemo(
@@ -81,6 +94,36 @@ export function SubagentTranscript({
         : [],
     [parsed]
   )
+  // A re-read after the agent wrote more: keep up with the tail only if the
+  // reader already had all of it mounted.
+  const [prevTotal, setPrevTotal] = React.useState(records.length)
+  if (prevTotal !== records.length) {
+    setPrevTotal(records.length)
+    setVisibleCount((c) => prefixWindowAfterAppend(c, prevTotal, records.length))
+  }
+
+  const growTowardBottom = React.useCallback(() => {
+    const el = scrollRef.current
+    if (!el) return
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setVisibleCount((c) =>
+      windowAfterScroll(
+        c,
+        records.length,
+        distanceFromBottom,
+        INCREMENT_RENDER_BATCH,
+        RENDER_AHEAD_PX
+      )
+    )
+  }, [records.length])
+
+  // A first batch shorter than the viewport cannot be scrolled, so keep
+  // mounting until the window reaches past the look-ahead or runs out.
+  // Bounded: each pass either grows the window or leaves it unchanged.
+  React.useLayoutEffect(() => {
+    growTowardBottom()
+  }, [growTowardBottom, visibleCount, parsed])
+
   const turnDurationByTimestamp = React.useMemo(
     () =>
       new Map(
@@ -159,7 +202,11 @@ export function SubagentTranscript({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto py-2">
+      <div
+        ref={scrollRef}
+        onScroll={growTowardBottom}
+        className="min-h-0 flex-1 overflow-y-auto py-2"
+      >
         {error ? (
           <p className="px-4 py-8 text-center text-sm text-destructive">
             Could not read this sub-agent’s transcript: {error}
@@ -175,18 +222,25 @@ export function SubagentTranscript({
             This sub-agent’s transcript has no messages.
           </p>
         ) : (
-          records.map((record) => (
-            <MessageBubble
-              key={record.uuid}
-              record={record}
-              toolResultMap={parsed.toolResultMap}
-              turnDuration={
-                record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
-              }
-              subagents={children}
-              promptAuthor={promptAuthor}
-            />
-          ))
+          records
+            .slice(0, visibleCount)
+            .map((record) => (
+              <MessageBubble
+                key={record.uuid}
+                record={record}
+                toolResultMap={parsed.toolResultMap}
+                turnDuration={
+                  record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
+                }
+                subagents={children}
+                promptAuthor={promptAuthor}
+              />
+            ))
+        )}
+        {parsed && visibleCount < records.length && (
+          <div className="flex items-center justify-center py-4 text-[11px] text-muted-foreground/60">
+            Loading more messages…
+          </div>
         )}
       </div>
     </div>

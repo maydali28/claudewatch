@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { windowAfterScroll, windowAfterAppend, scrollTopAfterPrepend } from './render-window'
+import {
+  windowAfterScroll,
+  windowAfterAppend,
+  scrollTopAfterPrepend,
+  prefixWindowAfterAppend,
+} from './render-window'
 
 const BATCH = 50
 const AHEAD = 1500
@@ -72,5 +77,25 @@ describe('scrollTopAfterPrepend', () => {
 
   it('is a no-op when nothing was inserted', () => {
     expect(scrollTopAfterPrepend(120, 4_000, 4_000)).toBe(120)
+  })
+})
+
+describe('prefixWindowAfterAppend', () => {
+  it('follows the tail when every record was mounted', () => {
+    expect(prefixWindowAfterAppend(40, 40, 45)).toBe(45)
+    expect(prefixWindowAfterAppend(50, 40, 45)).toBe(50)
+  })
+
+  it('keeps a partial window where it is', () => {
+    expect(prefixWindowAfterAppend(50, 120, 130)).toBe(50)
+  })
+
+  it('keeps the window when a transcript loads or is swapped out', () => {
+    expect(prefixWindowAfterAppend(50, 0, 400)).toBe(50)
+    expect(prefixWindowAfterAppend(50, 400, 0)).toBe(50)
+  })
+
+  it('never exceeds a shrunken record set', () => {
+    expect(prefixWindowAfterAppend(50, 120, 30)).toBe(30)
   })
 })
