@@ -62,16 +62,6 @@ export function buildMemoryOwners(
   ]
 }
 
-/** "CLAUDE.md · 3 notes", "2 notes" or "CLAUDE.md". */
-export function memoryOwnerSummary(owner: MemoryOwner): string {
-  const notes = owner.files.filter((f) => memoryKindOf(f) === 'auto').length
-  const hasClaudeMd = owner.files.some((f) => memoryKindOf(f) !== 'auto')
-  return [
-    ...(hasClaudeMd ? ['CLAUDE.md'] : []),
-    ...(notes > 0 ? [`${notes} note${notes === 1 ? '' : 's'}`] : []),
-  ].join(' · ')
-}
-
 /**
  * The owners the sidebar shows for a kind filter and a search: each keeps
  * only its files of that kind, and owners left with none are dropped. The

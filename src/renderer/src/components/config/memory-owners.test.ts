@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildMemoryOwners, memoryOwnerSummary, visibleMemoryOwners } from './memory-owners'
+import { buildMemoryOwners, visibleMemoryOwners } from './memory-owners'
 import type { MemoryFile } from '@shared/types'
 import type { ProjectClaudeMd } from '@shared/types/project'
 
@@ -59,15 +59,6 @@ describe('buildMemoryOwners', () => {
       path: '/repos/dali/CLAUDE.md',
       content: '# rules',
     })
-  })
-
-  it('summarises what each owner holds', () => {
-    expect(owners.map(memoryOwnerSummary)).toEqual([
-      'CLAUDE.md',
-      '2 notes',
-      'CLAUDE.md · 1 note',
-      'CLAUDE.md',
-    ])
   })
 
   it('has no Global owner when there is no global CLAUDE.md', () => {
