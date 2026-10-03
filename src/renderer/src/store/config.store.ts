@@ -28,6 +28,8 @@ interface ConfigState {
   selectedSkillId: string | null
   selectedMcpId: string | null
   selectedMemoryId: string | null
+  /** The Memory tab's selected owner: 'global' or a project id. */
+  selectedMemoryOwnerId: string | null
   selectedHookId: string | null
   selectedPluginId: string | null
 
@@ -36,6 +38,8 @@ interface ConfigState {
   setSelectedSkill(id: string | null): void
   setSelectedMcp(id: string | null): void
   setSelectedMemory(id: string | null): void
+  /** Selects an owner and closes any open file. */
+  setSelectedMemoryOwner(id: string | null): void
   setSelectedHook(id: string | null): void
   setSelectedPlugin(id: string | null): void
 }
@@ -57,6 +61,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   selectedSkillId: null,
   selectedMcpId: null,
   selectedMemoryId: null,
+  selectedMemoryOwnerId: null,
   selectedHookId: null,
   selectedPluginId: null,
 
@@ -103,6 +108,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   setSelectedSkill: (id) => set({ selectedSkillId: id }),
   setSelectedMcp: (id) => set({ selectedMcpId: id }),
   setSelectedMemory: (id) => set({ selectedMemoryId: id }),
+  setSelectedMemoryOwner: (id) => set({ selectedMemoryOwnerId: id, selectedMemoryId: null }),
   setSelectedHook: (id) => set({ selectedHookId: id }),
   setSelectedPlugin: (id) => set({ selectedPluginId: id }),
 }))

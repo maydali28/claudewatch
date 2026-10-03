@@ -1,120 +1,36 @@
 import React, { useState } from 'react'
-import { Brain, RefreshCw, Search, X, FolderOpen, Globe, Sparkles } from 'lucide-react'
+import { Brain, FolderOpen, Globe, RefreshCw, Search, X } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
 import { useUIStore } from '@renderer/store/ui.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { SourceChips } from './source-chips'
-import {
-  countMemoryByKind,
-  memoryKindOf,
-  type MemoryFilter,
-  type MemoryKind,
-} from './memory-filter'
-import type { MemoryFile } from '@shared/types'
-import type { ProjectClaudeMd } from '@shared/types/project'
-
-function projectClaudeMdId(entry: ProjectClaudeMd): string {
-  return `project-claude-md:${entry.projectId}`
-}
-
-const KIND_ICON: Record<MemoryKind, React.ElementType> = {
-  global: Globe,
-  project: FolderOpen,
-  auto: Sparkles,
-}
-
-/** One memory file as a card: its name, then where it belongs (Global, a project, Auto memory). */
-function MemoryItem({
-  id,
-  label,
-  kind,
-  owner,
-  sizeBytes,
-  selectedId,
-  onSelect,
-}: {
-  id: string
-  label: string
-  kind: MemoryKind
-  owner: string
-  sizeBytes?: number
-  selectedId: string | null
-  onSelect: (id: string) => void
-}): React.JSX.Element {
-  const Icon = KIND_ICON[kind]
-  return (
-    <button
-      onClick={() => onSelect(id)}
-      className={cn(
-        'w-full rounded-md px-2.5 py-2 text-left transition-colors',
-        selectedId === id ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
-      )}
-    >
-      <p
-        className={cn(
-          'text-xs font-medium truncate',
-          selectedId === id ? 'text-primary' : 'text-foreground'
-        )}
-      >
-        {label}
-      </p>
-      <p className="flex items-center gap-1 text-[10px] text-muted-foreground mt-0.5 min-w-0">
-        <Icon
-          className={cn(
-            'h-3 w-3 shrink-0',
-            kind === 'project' ? 'text-amber-500' : 'text-muted-foreground/70'
-          )}
-        />
-        <span className="truncate">{owner}</span>
-      </p>
-      {sizeBytes !== undefined && (
-        <p className="text-[10px] text-muted-foreground/50 mt-0.5">
-          {(sizeBytes / 1024).toFixed(1)} KB
-        </p>
-      )}
-    </button>
-  )
-}
-
-/** The second line of a card: Global, the project, or the project an auto-memory note belongs to. */
-function ownerOf(kind: MemoryKind, file: MemoryFile): string {
-  if (kind === 'global') return 'Global'
-  if (kind === 'auto') return file.projectName ? `${file.projectName} · auto memory` : 'Auto memory'
-  return file.sublabel
-}
+import { countMemoryByKind, type MemoryFilter } from './memory-filter'
+import { buildMemoryOwners, memoryOwnerSummary, visibleMemoryOwners } from './memory-owners'
 
 export default function MemorySidebar(): React.JSX.Element {
   const isLoading = useConfigStore((s) => s.isLoading)
   const memoryFiles = useConfigStore((s) => s.memoryFiles)
   const projectClaudeMds = useConfigStore((s) => s.projectClaudeMds)
   const loadAll = useConfigStore((s) => s.loadAll)
-  const selectedMemoryId = useConfigStore((s) => s.selectedMemoryId)
-  const setSelectedMemory = useConfigStore((s) => s.setSelectedMemory)
+  const selectedOwnerId = useConfigStore((s) => s.selectedMemoryOwnerId)
+  const setSelectedOwner = useConfigStore((s) => s.setSelectedMemoryOwner)
   const [search, setSearch] = useState('')
   const kindFilter = (useUIStore((s) => s.sourceFilters.memory) ?? 'all') as MemoryFilter
   const setSourceFilter = useUIStore((s) => s.setSourceFilter)
 
-  const q = search.toLowerCase()
-
-  const searchedFiles = memoryFiles.filter(
-    (f) =>
-      f.label.toLowerCase().includes(q) ||
-      f.sublabel.toLowerCase().includes(q) ||
-      (f.projectName ?? '').toLowerCase().includes(q)
+  const owners = buildMemoryOwners(memoryFiles, projectClaudeMds)
+  const searched = visibleMemoryOwners(owners, 'all', search)
+  const counts = countMemoryByKind(
+    searched.flatMap((o) => o.files),
+    0
   )
-  const searchedProjectMds = projectClaudeMds.filter(
-    (p) => p.projectName.toLowerCase().includes(q) || 'claude.md'.includes(q)
-  )
-  const counts = countMemoryByKind(searchedFiles, searchedProjectMds.length)
-
-  const filteredFiles = searchedFiles.filter(
-    (f) => kindFilter === 'all' || memoryKindOf(f) === kindFilter
-  )
-  const filteredProjectMds =
-    kindFilter === 'all' || kindFilter === 'project' ? searchedProjectMds : []
-
-  const total = memoryFiles.length + projectClaudeMds.length
+  const visible = visibleMemoryOwners(owners, kindFilter, search)
+  // The panel shows the first owner until one is chosen; highlight the same one.
+  const activeId = visible.some((o) => o.id === selectedOwnerId)
+    ? selectedOwnerId
+    : (visible[0]?.id ?? null)
+  const total = owners.reduce((n, o) => n + o.files.length, 0)
 
   return (
     <div className="flex flex-col h-full">
@@ -147,7 +63,7 @@ export default function MemorySidebar(): React.JSX.Element {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Filter memory files…"
+            placeholder="Filter projects or files…"
             className="flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
           />
           {search && (
@@ -175,7 +91,7 @@ export default function MemorySidebar(): React.JSX.Element {
         />
       )}
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
         {isLoading && total === 0 && (
           <div className="flex flex-col gap-2 p-2">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -194,47 +110,54 @@ export default function MemorySidebar(): React.JSX.Element {
           </div>
         )}
 
-        {!isLoading &&
-          total > 0 &&
-          filteredFiles.length === 0 &&
-          filteredProjectMds.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-12 text-center px-3">
-              <p className="text-xs text-muted-foreground">
-                {search ? <>No matches for &quot;{search}&quot;</> : 'No memory files of this kind'}
-              </p>
-            </div>
-          )}
+        {!isLoading && total > 0 && visible.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-12 text-center px-3">
+            <p className="text-xs text-muted-foreground">
+              {search ? <>No matches for &quot;{search}&quot;</> : 'No memory files of this kind'}
+            </p>
+          </div>
+        )}
 
-        {filteredFiles.map((file) => {
-          const kind = memoryKindOf(file)
+        {visible.map((owner) => {
+          const selected = owner.id === activeId
+          const Icon = owner.kind === 'global' ? Globe : FolderOpen
           return (
-            <MemoryItem
-              key={file.id}
-              id={file.id}
-              label={kind === 'auto' ? `${file.label}.md` : file.label}
-              kind={kind}
-              owner={ownerOf(kind, file)}
-              sizeBytes={file.sizeBytes}
-              selectedId={selectedMemoryId}
-              onSelect={setSelectedMemory}
-            />
+            <button
+              key={owner.id}
+              onClick={() => setSelectedOwner(owner.id)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors',
+                selected ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
+              )}
+            >
+              <Icon
+                className={cn(
+                  'h-3.5 w-3.5 shrink-0',
+                  owner.kind === 'project' ? 'text-amber-500' : 'text-muted-foreground'
+                )}
+              />
+              <span className="flex-1 min-w-0">
+                <span
+                  // Cut a long name at its start: folder names of projects
+                  // without transcripts share a long prefix and differ at the end.
+                  className={cn(
+                    'block text-xs font-medium truncate [direction:rtl] text-left',
+                    selected ? 'text-primary' : 'text-foreground'
+                  )}
+                  title={owner.label}
+                >
+                  <span className="[direction:ltr] [unicode-bidi:embed]">{owner.label}</span>
+                </span>
+                <span className="block text-[10px] text-muted-foreground/70 truncate">
+                  {memoryOwnerSummary(owner)}
+                </span>
+              </span>
+              <span className="text-[10px] tabular-nums text-muted-foreground/50 shrink-0">
+                {owner.files.length}
+              </span>
+            </button>
           )
         })}
-
-        {[...filteredProjectMds]
-          .sort((a, b) => a.projectName.toLowerCase().localeCompare(b.projectName.toLowerCase()))
-          .map((p) => (
-            <MemoryItem
-              key={p.projectId}
-              id={projectClaudeMdId(p)}
-              label="CLAUDE.md"
-              kind="project"
-              owner={p.projectName}
-              sizeBytes={p.sizeBytes}
-              selectedId={selectedMemoryId}
-              onSelect={setSelectedMemory}
-            />
-          ))}
       </div>
     </div>
   )
