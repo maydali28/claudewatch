@@ -11,7 +11,12 @@ import {
   subagentDurationMs,
 } from '@renderer/components/sessions/subagent-card'
 import type { SubagentSummary } from '@shared/types'
+import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 import { InsightSection, StatTiles, TH, percent } from './insight-section'
+import { buildSubagentTree } from './subagent-tree'
+import { SubagentTreeView } from './subagent-tree-view'
+
+type RunsView = 'list' | 'tree'
 
 /** The session's Sub-agents view: totals, cost by agent type, then every run. */
 export function SessionSubagentsTab({
@@ -23,6 +28,9 @@ export function SessionSubagentsTab({
   onOpen: (agentId: string) => void
 }): React.JSX.Element {
   const now = useNow(subagents.length > 0)
+  const [view, setView] = React.useState<RunsView>('list')
+  const tree = React.useMemo(() => buildSubagentTree(subagents), [subagents])
+  const nested = tree.levels.length > 1
   const byType = React.useMemo(() => summarizeAgentTypes(subagents), [subagents])
   // Newest first: the one that just started or is still running is on top.
   const ordered = React.useMemo(
@@ -99,18 +107,40 @@ export function SessionSubagentsTab({
 
       <InsightSection
         title={`Runs (${subagents.length})`}
-        note="Newest first. Open a run to read its conversation."
+        note={
+          view === 'list'
+            ? 'Newest first. Open a run to read its conversation.'
+            : nested
+              ? 'Each sub-agent under the one that started it, oldest first. Open a run to read its conversation.'
+              : 'The session started every sub-agent itself; none started sub-agents of its own.'
+        }
+        action={
+          <Tabs value={view} onValueChange={(v) => setView(v as RunsView)}>
+            <TabsList className="h-7">
+              <TabsTrigger value="list" className="px-2.5 py-0.5 text-[11px]">
+                List
+              </TabsTrigger>
+              <TabsTrigger value="tree" className="px-2.5 py-0.5 text-[11px]">
+                Tree
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        }
       >
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
-          {ordered.map((sub) => (
-            <SubagentCard
-              key={sub.agentId}
-              subagent={sub}
-              running={isSubagentRunning(sub, now)}
-              onOpen={() => onOpen(sub.agentId)}
-            />
-          ))}
-        </div>
+        {view === 'tree' ? (
+          <SubagentTreeView tree={tree} now={now} onOpen={onOpen} />
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
+            {ordered.map((sub) => (
+              <SubagentCard
+                key={sub.agentId}
+                subagent={sub}
+                running={isSubagentRunning(sub, now)}
+                onOpen={() => onOpen(sub.agentId)}
+              />
+            ))}
+          </div>
+        )}
       </InsightSection>
     </div>
   )

@@ -6,16 +6,24 @@ export function InsightSection({
   note,
   children,
   className,
+  action,
 }: {
   title: string
   note?: string
   children: React.ReactNode
   className?: string
+  /** A control at the top right, such as a view toggle. */
+  action?: React.ReactNode
 }): React.JSX.Element {
   return (
     <section className={cn('rounded-lg border border-border/60 bg-card p-4', className)}>
-      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
-      {note && <p className="mt-0.5 text-xs text-muted-foreground">{note}</p>}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          {note && <p className="mt-0.5 text-xs text-muted-foreground">{note}</p>}
+        </div>
+        {action}
+      </div>
       <div className="mt-3">{children}</div>
     </section>
   )
