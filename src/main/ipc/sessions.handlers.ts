@@ -6,6 +6,7 @@ import {
   validate,
   GetSummaryListSchema,
   GetParsedSchema,
+  GetSubagentSchema,
   SearchSchema,
   TagSchema,
 } from '@shared/ipc/schemas'
@@ -89,6 +90,32 @@ export function registerSessionsHandlers(): void {
       )
       sessionCache.set(projectId, sessionId, parsedSession)
       return ok(parsedSession)
+    } catch (e) {
+      captureHandlerException(e)
+      return err(toSafeError(e), 'PARSE_FAILED')
+    }
+  })
+
+  // ── sessions:get-subagent ──────────────────────────────────────────────────
+  // Not cached: a running sub-agent's transcript changes with every write, and
+  // the panel only asks again when the session summary says it did.
+  ipcMain.handle(CHANNELS.SESSIONS_GET_SUBAGENT, async (_event, payload) => {
+    try {
+      const { sessionId, projectId, agentId } = validate(GetSubagentSchema, payload)
+      const filePath = assertSafePath(
+        getProjectsDirPath(),
+        projectId,
+        sessionId,
+        'subagents',
+        `agent-${agentId}.jsonl`
+      )
+      const parsed = await parseSessionFull(
+        filePath,
+        sessionId,
+        projectId,
+        getActivePricingTable(Preferences.get())
+      )
+      return ok(parsed)
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'PARSE_FAILED')

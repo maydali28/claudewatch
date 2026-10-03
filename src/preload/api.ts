@@ -36,6 +36,9 @@ export const api = {
     getParsed: (sessionId: string, projectId: string) =>
       invoke(CHANNELS.SESSIONS_GET_PARSED, { sessionId, projectId }),
 
+    getSubagent: (sessionId: string, projectId: string, agentId: string) =>
+      invoke(CHANNELS.SESSIONS_GET_SUBAGENT, { sessionId, projectId, agentId }),
+
     search: (query: string, projectIds?: string[]) =>
       invoke(CHANNELS.SESSIONS_SEARCH, { query, projectIds }),
 

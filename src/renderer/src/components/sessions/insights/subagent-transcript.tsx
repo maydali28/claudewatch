@@ -1,0 +1,194 @@
+import React from 'react'
+import { ArrowLeft, Clock } from 'lucide-react'
+import { formatCost, formatTokens } from '@shared/utils'
+import { isSubagentRunning } from '@shared/utils/live-session'
+import { ipc } from '@renderer/lib/ipc-client'
+import { useNow } from '@renderer/hooks/use-now'
+import { getModelMeta } from '@renderer/lib/model-meta'
+import { Skeleton } from '@renderer/components/ui/skeleton'
+import MessageBubble from '@renderer/components/sessions/message-bubble'
+import { groupResponses } from '@renderer/components/sessions/assistant-response'
+import {
+  formatAgentDuration,
+  subagentDurationMs,
+} from '@renderer/components/sessions/subagent-card'
+import type { ParsedSession, SubagentSummary } from '@shared/types'
+
+/**
+ * One sub-agent's own conversation: the prompt its parent gave it, its
+ * reasoning and tool calls, and the report it returned. Re-read whenever the
+ * session summary says the sub-agent wrote more.
+ */
+export function SubagentTranscript({
+  sessionId,
+  projectId,
+  subagent,
+  subagents,
+  onBack,
+}: {
+  sessionId: string
+  projectId: string
+  subagent: SubagentSummary
+  /** Every sub-agent of the session, for nested runs started from this one. */
+  subagents: SubagentSummary[]
+  onBack: () => void
+}): React.JSX.Element {
+  const [parsed, setParsed] = React.useState<ParsedSession | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+  const now = useNow()
+  const running = isSubagentRunning(subagent, now)
+
+  React.useEffect(() => {
+    let cancelled = false
+    ipc.sessions
+      .getSubagent(sessionId, projectId, subagent.agentId)
+      .then((result) => {
+        if (cancelled) return
+        if (result.ok) {
+          setParsed(result.data)
+          setError(null)
+        } else {
+          setError(result.error)
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      })
+    return () => {
+      cancelled = true
+    }
+    // lastTimestamp and messageCount move on every write the watcher reports.
+  }, [sessionId, projectId, subagent.agentId, subagent.lastTimestamp, subagent.messageCount])
+
+  // Opened on a different agent: drop the previous one's transcript at once.
+  const [shownAgentId, setShownAgentId] = React.useState(subagent.agentId)
+  if (shownAgentId !== subagent.agentId) {
+    setShownAgentId(subagent.agentId)
+    setParsed(null)
+    setError(null)
+  }
+
+  const records = React.useMemo(
+    () =>
+      parsed
+        ? groupResponses(parsed.records).filter(
+            (r) =>
+              r.isCompactionBoundary ||
+              r.role === 'user' ||
+              r.role === 'assistant' ||
+              r.role === 'system'
+          )
+        : [],
+    [parsed]
+  )
+  const turnDurationByTimestamp = React.useMemo(
+    () =>
+      new Map(
+        (parsed?.metadata.turnDurations ?? [])
+          .filter((t) => t.assistantTimestamp)
+          .map((t) => [t.assistantTimestamp!, t])
+      ),
+    [parsed]
+  )
+  const children = React.useMemo(
+    () => subagents.filter((s) => s.parentAgentId === subagent.agentId),
+    [subagents, subagent.agentId]
+  )
+
+  const meta = subagent.primaryModel ? getModelMeta(subagent.primaryModel) : null
+  const durationMs = subagentDurationMs(subagent)
+  const promptAuthor = subagent.parentAgentId
+    ? `Prompt from sub-agent ${subagent.parentAgentId}`
+    : 'Prompt from the session'
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="shrink-0 border-b border-border/50 px-4 py-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="mb-2 inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ArrowLeft className="h-3 w-3" />
+          All sub-agents
+        </button>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+              {running && (
+                <span
+                  className="block h-2 w-2 shrink-0 rounded-full bg-green-500 animate-pulse"
+                  aria-label="Running"
+                />
+              )}
+              {subagent.description ?? subagent.agentId}
+            </h3>
+            <p className="mt-0.5 font-mono text-[10px] text-muted-foreground">{subagent.agentId}</p>
+          </div>
+          {meta && (
+            <span
+              className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}
+            >
+              {meta.label}
+            </span>
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          {subagent.agentType && (
+            <span className="rounded-sm bg-violet-500/15 px-1 py-0.5 font-medium text-violet-500">
+              {subagent.agentType}
+            </span>
+          )}
+          {subagent.isBackground && <span>background</span>}
+          {durationMs > 0 && (
+            <span className="inline-flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {running ? 'running · ' : ''}
+              {formatAgentDuration(durationMs)}
+              {subagent.durationSource === 'span' && '~'}
+            </span>
+          )}
+          <span>{subagent.messageCount} messages</span>
+          <span>{formatTokens(subagent.totalInputTokens + subagent.totalOutputTokens)} tokens</span>
+          <span>{formatCost(subagent.estimatedCost)}</span>
+          {children.length > 0 && (
+            <span>
+              started {children.length} sub-agent{children.length === 1 ? '' : 's'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto py-2">
+        {error ? (
+          <p className="px-4 py-8 text-center text-sm text-destructive">
+            Could not read this sub-agent’s transcript: {error}
+          </p>
+        ) : !parsed ? (
+          <div className="space-y-3 p-4">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-16" />
+            ))}
+          </div>
+        ) : records.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+            This sub-agent’s transcript has no messages.
+          </p>
+        ) : (
+          records.map((record) => (
+            <MessageBubble
+              key={record.uuid}
+              record={record}
+              toolResultMap={parsed.toolResultMap}
+              turnDuration={
+                record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
+              }
+              subagents={children}
+              promptAuthor={promptAuthor}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  )
+}

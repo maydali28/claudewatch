@@ -29,9 +29,12 @@ export function subagentDurationMs(sub: SubagentSummary): number {
 export function SubagentCard({
   subagent,
   running,
+  onOpen,
 }: {
   subagent: SubagentSummary
   running: boolean
+  /** Open this sub-agent's conversation. Without it the card is not clickable. */
+  onOpen?: () => void
 }): React.JSX.Element {
   const meta = subagent.primaryModel ? getModelMeta(subagent.primaryModel) : null
   const totalTokens = subagent.totalInputTokens + subagent.totalOutputTokens
@@ -41,11 +44,16 @@ export function SubagentCard({
       ? 'Run time reported by Claude Code'
       : 'First to last write of the sub-agent transcript; overstates an agent that was resumed later'
 
+  const Root = onOpen ? 'button' : 'div'
   return (
-    <div
+    <Root
+      {...(onOpen
+        ? { type: 'button' as const, onClick: onOpen, title: 'Open this sub-agent’s conversation' }
+        : {})}
       className={cn(
-        'rounded-md border bg-muted/20 px-2.5 py-2',
-        running ? 'border-green-500/40' : 'border-border/50'
+        'block w-full rounded-md border bg-muted/20 px-2.5 py-2 text-left',
+        running ? 'border-green-500/40' : 'border-border/50',
+        onOpen && 'transition-colors hover:border-primary/40 hover:bg-accent/40'
       )}
     >
       <div className="flex items-start justify-between gap-1.5">
@@ -113,6 +121,6 @@ export function SubagentCard({
         <span>{subagent.messageCount} msgs</span>
         <span>{formatCost(subagent.estimatedCost)}</span>
       </div>
-    </div>
+    </Root>
   )
 }

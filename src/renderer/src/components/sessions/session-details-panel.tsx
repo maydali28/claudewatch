@@ -15,6 +15,8 @@ import { SubagentCard } from './subagent-card'
 
 interface SessionDetailsPanelProps {
   onClose: () => void
+  /** Open a sub-agent's conversation in the Sub-agents tab. */
+  onOpenSubagent?: (agentId: string) => void
 }
 
 function durationLabel(ms: number): string {
@@ -80,6 +82,7 @@ function SectionHeader({
 
 export default function SessionDetailsPanel({
   onClose,
+  onOpenSubagent,
 }: SessionDetailsPanelProps): React.JSX.Element {
   const { parsedSession, projects } = useSessionsStore()
   // Active rates, not the built-in constant — an override left this panel's
@@ -751,6 +754,7 @@ export default function SessionDetailsPanel({
                     key={sub.agentId}
                     subagent={sub}
                     running={isSubagentRunning(sub, now)}
+                    onOpen={onOpenSubagent ? () => onOpenSubagent(sub.agentId) : undefined}
                   />
                 ))}
               </div>

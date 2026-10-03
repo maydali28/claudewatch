@@ -56,6 +56,11 @@ export interface IPCContracts {
     request: { sessionId: string; projectId: string }
     response: Result<ParsedSession>
   }
+  /** One sub-agent's own transcript, parsed like a session. */
+  'sessions:get-subagent': {
+    request: { sessionId: string; projectId: string; agentId: string }
+    response: Result<ParsedSession>
+  }
   'sessions:search': {
     request: { query: string; projectIds?: string[] }
     response: Result<SessionSearchResult[]>

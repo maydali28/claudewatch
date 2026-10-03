@@ -8,6 +8,7 @@ export const CHANNELS = {
   SESSIONS_LIST_PROJECTS: 'sessions:list-projects',
   SESSIONS_GET_SUMMARY_LIST: 'sessions:get-summary-list',
   SESSIONS_GET_PARSED: 'sessions:get-parsed',
+  SESSIONS_GET_SUBAGENT: 'sessions:get-subagent',
   SESSIONS_SEARCH: 'sessions:search',
   SESSIONS_TAG: 'sessions:tag',
   SESSIONS_EXPORT: 'sessions:export',

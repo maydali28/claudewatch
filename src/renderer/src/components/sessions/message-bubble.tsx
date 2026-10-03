@@ -51,6 +51,13 @@ interface MessageBubbleProps {
   searchQuery?: string
   turnDuration?: TurnDuration
   subagents?: SubagentSummary[]
+  /**
+   * Who wrote the prompts in this transcript, when it is not the person: a
+   * sub-agent's prompt comes from the session (or sub-agent) that started it.
+   */
+  promptAuthor?: string
+  /** Open a sub-agent's conversation from its hand-back card. */
+  onOpenSubagent?: (agentId: string) => void
 }
 
 // `preTokens` is the context size recorded just before this compaction, not a
@@ -202,11 +209,17 @@ function TaskNotificationCard({
 function AgentMessageCard({
   text,
   agentId,
+  title,
   searchQuery,
+  onOpen,
 }: {
   text: string
   agentId?: string
+  /** The sub-agent's task description, when its meta file named one. */
+  title?: string
   searchQuery: string
+  /** Open the sub-agent's own conversation. */
+  onOpen?: () => void
 }): React.JSX.Element {
   const report = agentMessageBody(text)
   const [open, toggle] = useCardOpen(report, searchQuery)
@@ -227,10 +240,16 @@ function AgentMessageCard({
             <ChevronRight className="h-3 w-3 shrink-0" />
           )}
           <span className="font-medium">{AGENT_MESSAGE_LABEL}</span>
-          {shortId && (
-            <span className="font-mono text-muted-foreground/70" title={agentId}>
-              {shortId}
+          {title ? (
+            <span className="truncate text-muted-foreground/80" title={agentId}>
+              {title}
             </span>
+          ) : (
+            shortId && (
+              <span className="font-mono text-muted-foreground/70" title={agentId}>
+                {shortId}
+              </span>
+            )
           )}
           {!open && (
             <span className="ml-auto text-muted-foreground/70">
@@ -242,6 +261,15 @@ function AgentMessageCard({
           <div className="px-3 pb-3 pt-2 border-t border-border/50">
             <MarkdownRenderer content={highlightMatches(report, searchQuery)} className="text-sm" />
           </div>
+        )}
+        {onOpen && (
+          <button
+            type="button"
+            onClick={onOpen}
+            className="w-full border-t border-border/50 px-3 py-1.5 text-left text-[11px] font-medium text-primary hover:bg-accent/40 transition-colors"
+          >
+            Open this sub-agent’s conversation →
+          </button>
         )}
       </div>
     </div>
@@ -489,6 +517,8 @@ export default function MessageBubble({
   searchQuery = '',
   turnDuration,
   subagents,
+  promptAuthor,
+  onOpenSubagent,
 }: MessageBubbleProps): React.JSX.Element {
   if (record.isCompactionBoundary) {
     return <CompactionBoundary preTokens={record.compactionPreTokens} />
@@ -507,14 +537,20 @@ export default function MessageBubble({
     switch (userRecordVariant(record.userKind)) {
       case 'task-notification':
         return <TaskNotificationCard body={rawText} searchQuery={searchQuery} />
-      case 'agent-message':
+      case 'agent-message': {
+        const sender = record.originAgentId
+          ? subagents?.find((s) => s.agentId === record.originAgentId)
+          : undefined
         return (
           <AgentMessageCard
             text={rawText}
             agentId={record.originAgentId}
+            title={sender?.description}
             searchQuery={searchQuery}
+            onOpen={sender && onOpenSubagent ? () => onOpenSubagent(sender.agentId) : undefined}
           />
         )
+      }
       case 'injected-context':
         return <InjectedContextPill text={rawText} searchQuery={searchQuery} />
       case 'bubble':
@@ -529,6 +565,9 @@ export default function MessageBubble({
 
     return (
       <div className="flex flex-col items-end px-4 py-1 gap-1.5">
+        {promptAuthor && (
+          <span className="text-[10px] font-medium text-muted-foreground">{promptAuthor}</span>
+        )}
         {/* Context tag pills — rendered above the bubble */}
         {contextTags.length > 0 && (
           <div className="flex flex-col gap-1 w-full max-w-[80%] items-end">

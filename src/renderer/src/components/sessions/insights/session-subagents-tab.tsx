@@ -16,8 +16,11 @@ import { InsightSection, StatTiles, TH, percent } from './insight-section'
 /** The session's Sub-agents view: totals, cost by agent type, then every run. */
 export function SessionSubagentsTab({
   subagents,
+  onOpen,
 }: {
   subagents: SubagentSummary[]
+  /** Open a sub-agent's conversation. */
+  onOpen: (agentId: string) => void
 }): React.JSX.Element {
   const now = useNow(subagents.length > 0)
   const byType = React.useMemo(() => summarizeAgentTypes(subagents), [subagents])
@@ -94,10 +97,18 @@ export function SessionSubagentsTab({
         </table>
       </InsightSection>
 
-      <InsightSection title={`Runs (${subagents.length})`} note="Newest first">
+      <InsightSection
+        title={`Runs (${subagents.length})`}
+        note="Newest first. Open a run to read its conversation."
+      >
         <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
           {ordered.map((sub) => (
-            <SubagentCard key={sub.agentId} subagent={sub} running={isSubagentRunning(sub, now)} />
+            <SubagentCard
+              key={sub.agentId}
+              subagent={sub}
+              running={isSubagentRunning(sub, now)}
+              onOpen={() => onOpen(sub.agentId)}
+            />
           ))}
         </div>
       </InsightSection>

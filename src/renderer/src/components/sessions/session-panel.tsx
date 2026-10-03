@@ -21,6 +21,7 @@ import SessionDetailsPanel from './session-details-panel'
 import { ExportMenu } from './export-menu'
 import { SessionSubagentsTab } from './insights/session-subagents-tab'
 import { SessionToolsTab } from './insights/session-tools-tab'
+import { SubagentTranscript } from './insights/subagent-transcript'
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 
 /** Overview is the conversation with its details panel; the others replace the conversation. */
@@ -208,6 +209,8 @@ export default function SessionPanel(): React.JSX.Element | null {
   const [detailsWidth, setDetailsWidth] = useState(256)
   // Kept when another session is opened, so sessions can be compared tab by tab.
   const [tab, setTab] = useState<SessionTab>('overview')
+  // The sub-agent whose conversation the Sub-agents tab shows; null lists them all.
+  const [openAgentId, setOpenAgentId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_BATCH)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -315,6 +318,14 @@ export default function SessionPanel(): React.JSX.Element | null {
     setTab(next)
   }, [])
 
+  const openSubagentConversation = useCallback(
+    (agentId: string) => {
+      setOpenAgentId(agentId)
+      changeTab('subagents')
+    },
+    [changeTab]
+  )
+
   // Reset state when switching sessions / when the search query changes.
   // Using the "store prev prop, compare during render" pattern instead of a
   // post-render effect so resets happen synchronously with the prop change —
@@ -327,6 +338,7 @@ export default function SessionPanel(): React.JSX.Element | null {
     setShowScrollButton(false)
     setDetailsOpen(false)
     setVisibleCount(INITIAL_RENDER_BATCH)
+    setOpenAgentId(null)
   }
   const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery)
   if (prevSearchQuery !== searchQuery) {
@@ -501,6 +513,9 @@ export default function SessionPanel(): React.JSX.Element | null {
 
   const totalTokens = metadata.totalInputTokens + metadata.totalOutputTokens
   const subagentCount = activeSessionSummary?.subagents.length ?? 0
+  const openSubagent = openAgentId
+    ? (activeSessionSummary?.subagents.find((s) => s.agentId === openAgentId) ?? null)
+    : null
 
   return (
     <div className="flex h-full session-panel-root">
@@ -638,11 +653,25 @@ export default function SessionPanel(): React.JSX.Element | null {
           )}
         </div>
 
-        {tab === 'subagents' && (
-          <div className="flex-1 min-h-0 overflow-y-auto p-4">
-            <SessionSubagentsTab subagents={activeSessionSummary?.subagents ?? []} />
-          </div>
-        )}
+        {tab === 'subagents' &&
+          (openSubagent ? (
+            <div className="flex-1 min-h-0">
+              <SubagentTranscript
+                sessionId={parsedSession.id}
+                projectId={parsedSession.projectId}
+                subagent={openSubagent}
+                subagents={activeSessionSummary?.subagents ?? []}
+                onBack={() => setOpenAgentId(null)}
+              />
+            </div>
+          ) : (
+            <div className="flex-1 min-h-0 overflow-y-auto p-4">
+              <SessionSubagentsTab
+                subagents={activeSessionSummary?.subagents ?? []}
+                onOpen={setOpenAgentId}
+              />
+            </div>
+          ))}
         {tab === 'tools' && (
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             <SessionToolsTab
@@ -686,6 +715,7 @@ export default function SessionPanel(): React.JSX.Element | null {
                       record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
                     }
                     subagents={activeSessionSummary?.subagents}
+                    onOpenSubagent={openSubagentConversation}
                   />
                 ))}
             </div>
@@ -722,7 +752,10 @@ export default function SessionPanel(): React.JSX.Element | null {
             className="w-1 cursor-col-resize hover:bg-primary/40 transition-colors shrink-0"
           />
           <div className="flex-1 min-w-0">
-            <SessionDetailsPanel onClose={() => setDetailsOpen(false)} />
+            <SessionDetailsPanel
+              onClose={() => setDetailsOpen(false)}
+              onOpenSubagent={openSubagentConversation}
+            />
           </div>
         </div>
       )}

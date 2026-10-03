@@ -31,6 +31,13 @@ export const GetSummaryListSchema = z.object({ projectId })
 /** sessions:get-parsed */
 export const GetParsedSchema = z.object({ sessionId, projectId })
 
+/** sessions:get-subagent — the id is the `agent-<id>.jsonl` file's, so no path characters. */
+export const GetSubagentSchema = z.object({
+  sessionId,
+  projectId,
+  agentId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, 'agentId must be a plain id'),
+})
+
 /** sessions:search */
 export const SearchSchema = z.object({
   query: z.string().min(1).max(500),
