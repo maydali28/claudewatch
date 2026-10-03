@@ -943,39 +943,37 @@ describe('readAllAutoMemory', () => {
     return file
   }
 
-  it('reads every project’s memory folder, naming each file’s project', async () => {
+  it('reads the memory folders of the scanned projects, naming each file’s project', async () => {
     const appIndex = writeMemory('-tmp-demo-app', 'MEMORY.md', '- [note](note.md)')
     writeMemory('-tmp-demo-app', 'note.md', 'remember this')
     // A worktree folder of the same project, merged into it by the scan.
     writeMemory('-tmp-demo-app--claude-worktrees-feat', 'MEMORY.md', '- [wt](wt.md)')
-    // A folder the scan does not know (its transcripts were deleted): named
-    // after the folder minus the encoded home directory, not decoded — '-'
-    // could stand for '/', '.' or '-', so decoding would guess.
+    writeMemory('-tmp-zeta', 'MEMORY.md', 'zeta')
+    // A folder the scan does not know — its transcripts were deleted, so the
+    // Sessions tab does not list the project either: left out.
     writeMemory('-Users-me-Workspace-other-app', 'MEMORY.md', 'other')
     // Not memory: no folder, or not markdown.
     fs.mkdirSync(path.join(dirs.claudeDir, 'projects', '-tmp-no-memory'), { recursive: true })
     writeMemory('-tmp-demo-app', 'notes.txt', 'ignored')
 
-    const files = await readAllAutoMemory(
-      [
-        {
-          id: '-tmp-demo-app',
-          name: 'demo-app',
-          sessions: [
-            { projectId: '-tmp-demo-app' },
-            { projectId: '-tmp-demo-app--claude-worktrees-feat' },
-          ],
-        },
-      ],
-      '/Users/me'
-    )
+    const files = await readAllAutoMemory([
+      { id: '-tmp-zeta', name: 'zeta', sessions: [{ projectId: '-tmp-zeta' }] },
+      {
+        id: '-tmp-demo-app',
+        name: 'demo-app',
+        sessions: [
+          { projectId: '-tmp-demo-app' },
+          { projectId: '-tmp-demo-app--claude-worktrees-feat' },
+        ],
+      },
+    ])
 
     // Sorted by project, then folder, with each folder's MEMORY.md index first.
     expect(files.map((f) => [f.projectName, f.label])).toEqual([
       ['demo-app', 'MEMORY'],
       ['demo-app', 'note'],
       ['demo-app', 'MEMORY'],
-      ['Workspace-other-app', 'MEMORY'],
+      ['zeta', 'MEMORY'],
     ])
     expect(files.find((f) => f.path === appIndex)).toMatchObject({
       id: 'memory:-tmp-demo-app:MEMORY.md',
