@@ -6,6 +6,7 @@ import { useSessionsStore } from '@renderer/store/sessions.store'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
 import { useConfigStore } from '@renderer/store/config.store'
 import { useUIStore } from '@renderer/store/ui.store'
+import { useSettingsStore } from '@renderer/store/settings.store'
 
 /**
  * Subscribe to push events from the main process.
@@ -54,6 +55,13 @@ export function useFileEvents(): void {
       refreshAnalytics()
     })
 
+    // Redaction is applied in main on the way out; a new setting needs a refetch.
+    const unsubRedaction = useSettingsStore.subscribe((state, prev) => {
+      if (state.prefs.redactionLevel !== prev.prefs.redactionLevel) {
+        useSessionsStore.getState().handleRedactionChanged()
+      }
+    })
+
     const unsubConfig = ipc.on(CHANNELS.PUSH_CONFIG_CHANGED, () => {
       loadAllConfig()
     })
@@ -78,6 +86,7 @@ export function useFileEvents(): void {
     )
 
     return () => {
+      unsubRedaction()
       unsubUpdated()
       unsubCreated()
       unsubDeleted()

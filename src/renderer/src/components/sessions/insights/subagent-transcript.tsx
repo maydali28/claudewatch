@@ -3,6 +3,7 @@ import { Clock } from 'lucide-react'
 import { formatCost, formatTokens } from '@shared/utils'
 import { isSubagentRunning } from '@shared/utils/live-session'
 import { ipc } from '@renderer/lib/ipc-client'
+import { useSettingsStore } from '@renderer/store/settings.store'
 import { useNow } from '@renderer/hooks/use-now'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import { Skeleton } from '@renderer/components/ui/skeleton'
@@ -73,6 +74,8 @@ export function SubagentTranscript({
   const [error, setError] = React.useState<string | null>(null)
   const now = useNow()
   const running = isSubagentRunning(subagent, now)
+  // Main redacts on the way out; a new setting needs a refetch.
+  const redactionLevel = useSettingsStore((st) => st.prefs.redactionLevel)
   // Progressive rendering from the prompt down: the first INITIAL_RENDER_BATCH
   // records, then INCREMENT_RENDER_BATCH more each time the reader comes
   // within RENDER_AHEAD_PX of the last mounted one. See `render-window.ts`.
@@ -99,7 +102,14 @@ export function SubagentTranscript({
       cancelled = true
     }
     // lastTimestamp and messageCount move on every write the watcher reports.
-  }, [sessionId, projectId, subagent.agentId, subagent.lastTimestamp, subagent.messageCount])
+  }, [
+    sessionId,
+    projectId,
+    subagent.agentId,
+    subagent.lastTimestamp,
+    subagent.messageCount,
+    redactionLevel,
+  ])
 
   // Opened on a different agent: drop the previous one's transcript at once.
   const [shownAgentId, setShownAgentId] = React.useState(subagent.agentId)

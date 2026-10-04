@@ -20,6 +20,7 @@ import { getActivePricingTable } from '@main/services/pricing-engine'
 import { scanCache } from '@main/services/scan-cache'
 import { searchSessions } from '@main/services/session-search'
 import { createLogger } from '@main/lib/logger'
+import { redactParsedSession } from '@main/services/redact-session'
 
 const log = createLogger('sessions')
 
@@ -75,8 +76,10 @@ export function registerSessionsHandlers(): void {
     try {
       const { sessionId, projectId } = validate(GetParsedSchema, payload)
       // Check LRU cache first
+      // The cache holds the raw parse; redaction is applied on the way out.
+      const redactionLevel = Preferences.get().redactionLevel
       const cached = sessionCache.get(projectId, sessionId)
-      if (cached) return ok(cached)
+      if (cached) return ok(redactParsedSession(cached, redactionLevel))
 
       const projectsDir = getProjectsDirPath()
       const sessionFilePath = assertSafePath(projectsDir, projectId, `${sessionId}.jsonl`)
@@ -89,7 +92,7 @@ export function registerSessionsHandlers(): void {
         pricingTable
       )
       sessionCache.set(projectId, sessionId, parsedSession)
-      return ok(parsedSession)
+      return ok(redactParsedSession(parsedSession, redactionLevel))
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'PARSE_FAILED')
@@ -115,7 +118,7 @@ export function registerSessionsHandlers(): void {
         projectId,
         getActivePricingTable(Preferences.get())
       )
-      return ok(parsed)
+      return ok(redactParsedSession(parsed, Preferences.get().redactionLevel))
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'PARSE_FAILED')

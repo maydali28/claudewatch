@@ -12,6 +12,7 @@ import { getActivePricingTable } from '@main/services/pricing-engine'
 import { Preferences } from '@main/store/preferences'
 import { sessionCache } from '@shared/utils'
 import { exportFileName, writeExport } from '@main/services/export-service'
+import { redactParsedSession } from '@main/services/redact-session'
 import type { ExportFormat } from '@shared/types'
 
 const FILTERS: Record<ExportFormat, Electron.FileFilter> = {
@@ -50,7 +51,9 @@ export function registerExportHandlers(): void {
         : await dialog.showSaveDialog(options)
       if (choice.canceled || !choice.filePath) return ok(null)
 
-      const writtenPath = await writeExport(parsedSession, format, choice.filePath)
+      // An export leaves the app, so it follows the same redaction setting as the viewer.
+      const redacted = redactParsedSession(parsedSession, Preferences.get().redactionLevel)
+      const writtenPath = await writeExport(redacted, format, choice.filePath)
       return ok(writtenPath)
     } catch (e) {
       captureHandlerException(e)
