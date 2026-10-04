@@ -35,7 +35,15 @@ const REDACTION_OPTIONS: {
 ]
 
 export default function SecuritySettings(): React.JSX.Element {
-  const { prefs, updatePref } = useSettingsStore()
+  const { prefs, updatePref, updatePrefs } = useSettingsStore()
+  // Turning scanning on here is an explicit answer, the same as the prompt's.
+  const setScanning = (on: boolean): void => {
+    void updatePrefs(
+      on
+        ? { secretScanEnabled: true, secretScanConsent: 'granted' }
+        : { secretScanEnabled: false, secretScanConsent: 'declined' }
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -45,17 +53,18 @@ export default function SecuritySettings(): React.JSX.Element {
           <Shield className="h-5 w-5 mt-0.5 text-primary shrink-0" />
           <div>
             <Label htmlFor="secret-scan-toggle" className="text-sm font-medium cursor-pointer">
-              Real-time secret scanning
+              Scan new transcript content for secrets
             </Label>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Scan session files for leaked API keys, tokens, and credentials as they are written.
+              Warns you when an API key, token, password or private key lands in a session or one of
+              its sub-agents. Runs on this machine and keeps only masked values.
             </p>
           </div>
         </div>
         <Switch
           id="secret-scan-toggle"
-          checked={prefs.secretScanEnabled}
-          onCheckedChange={(v) => updatePref('secretScanEnabled', v)}
+          checked={prefs.secretScanEnabled && prefs.secretScanConsent === 'granted'}
+          onCheckedChange={setScanning}
         />
       </div>
 
@@ -63,7 +72,8 @@ export default function SecuritySettings(): React.JSX.Element {
       <div>
         <Label className="text-sm font-medium mb-1 block">Secret redaction level</Label>
         <p className="text-xs text-muted-foreground mb-3">
-          How detected secrets are displayed in the session viewer.
+          How secrets are shown in the session viewer, sub-agent conversations and exports. Applies
+          whether or not scanning is on.
         </p>
         <RadioGroup
           value={prefs.redactionLevel}

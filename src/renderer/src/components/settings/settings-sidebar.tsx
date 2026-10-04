@@ -19,7 +19,7 @@ const ALL_SECTIONS: {
 }[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette className="h-4 w-4" /> },
   { id: 'pricing', label: 'Pricing', icon: <DollarSign className="h-4 w-4" /> },
-  { id: 'security', label: 'Security', icon: <Shield className="h-4 w-4" />, flag: 'lint' },
+  { id: 'security', label: 'Security', icon: <Shield className="h-4 w-4" /> },
   { id: 'alerts', label: 'Alerts', icon: <Bell className="h-4 w-4" />, flag: 'costAlerts' },
   { id: 'privacy', label: 'Privacy', icon: <Lock className="h-4 w-4" /> },
   { id: 'about', label: 'About', icon: <Info className="h-4 w-4" /> },

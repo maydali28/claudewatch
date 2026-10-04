@@ -38,13 +38,9 @@ function SectionContent({ section }: { section: SettingsSection }) {
 }
 
 export default function SettingsPanel(): React.JSX.Element {
-  const lintEnabled = useFeatureFlags((s) => s.lint)
   const costAlertsEnabled = useFeatureFlags((s) => s.costAlerts)
   const [section, setSection] = useState<SettingsSection>('appearance')
-  const activeSection =
-    (section === 'security' && !lintEnabled) || (section === 'alerts' && !costAlertsEnabled)
-      ? 'appearance'
-      : section
+  const activeSection = section === 'alerts' && !costAlertsEnabled ? 'appearance' : section
   const sidebarWidth = useUIStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
   const [isResizing, setIsResizing] = useState(false)

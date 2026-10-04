@@ -15,6 +15,7 @@ const log = createLogger('Preferences')
 type ElectronStoreCtor = new <T>(opts: { name: string; defaults: T }) => {
   store: T
   set(value: Record<string, unknown>): void
+  delete(key: string): void
   clear(): void
   path: string
 }
@@ -46,6 +47,7 @@ const AppPreferencesSchema = z.object({
     .default({}),
   costAlertThreshold: z.number().optional(),
   secretScanEnabled: z.boolean(),
+  secretScanConsent: z.enum(['unasked', 'granted', 'declined']),
   redactionLevel: z.enum(['none', 'mask', 'remove']),
   launchAtLogin: z.boolean(),
   trayTipDismissed: z.boolean(),
@@ -59,7 +61,6 @@ const AppPreferencesSchema = z.object({
       y: z.number().optional(),
     })
     .optional(),
-  alertedSecrets: z.array(z.string()).max(500),
   sessionTags: z.record(z.string(), z.array(z.string())).optional().default({}),
   lastSeenVersion: z.string().optional(),
   sentryEnabled: z.boolean(),
@@ -77,6 +78,7 @@ type StoreSchema = AppPreferences & {
 interface ElectronStoreInstance<T> {
   store: T
   set(value: Record<string, unknown>): void
+  delete(key: string): void
   clear(): void
   path: string
 }
@@ -92,6 +94,22 @@ function requireStore(): ElectronStoreInstance<StoreSchema> {
     throw new Error('Preferences accessed before Preferences.load() completed')
   }
   return store
+}
+
+/**
+ * Scanning is only on with recorded consent. 1.5.0 scanned by default and
+ * may have stored `secretScanEnabled: true` without ever asking; electron-store
+ * fills a missing `secretScanConsent` with its default, `unasked`, so such a
+ * store reads as "enabled but never asked". That is not consent: switch
+ * scanning off so the prompt appears. Also delete `alertedSecrets`, the
+ * masked fingerprints 1.5.0 collected along the way; nothing reads it now.
+ */
+function migrateSecretScanConsent(activeStore: ElectronStoreInstance<StoreSchema>): void {
+  const raw = activeStore.store as unknown as Record<string, unknown>
+  if (raw.secretScanConsent !== 'granted' && raw.secretScanEnabled === true) {
+    activeStore.set({ secretScanEnabled: false })
+  }
+  if ('alertedSecrets' in raw) activeStore.delete('alertedSecrets')
 }
 
 // ─── Preferences singleton ────────────────────────────────────────────────────
@@ -121,14 +139,8 @@ export const Preferences = {
     })
 
     try {
+      migrateSecretScanConsent(store)
       const raw = store.store
-      // Older stores predate the 500-entry cap on `alertedSecrets`; truncate
-      // to the most recent entries before validation so a legitimately
-      // oversized array is capped instead of failing schema validation and
-      // wiping the whole preferences file.
-      if (Array.isArray(raw.alertedSecrets) && raw.alertedSecrets.length > 500) {
-        raw.alertedSecrets = raw.alertedSecrets.slice(-500)
-      }
       const parsed = AppPreferencesSchema.safeParse(raw)
       if (!parsed.success) {
         log.error('Preferences failed schema validation:', parsed.error.issues)

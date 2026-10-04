@@ -110,13 +110,13 @@ export const SettingsSetSchema = z
     ),
     costAlertThreshold: z.number().nonnegative(),
     secretScanEnabled: z.boolean(),
+    secretScanConsent: z.enum(['unasked', 'granted', 'declined']),
     redactionLevel: RedactionSchema,
     launchAtLogin: z.boolean(),
     trayTipDismissed: z.boolean(),
     theme: ThemeSchema,
     sidebarWidth: z.number().int().min(160).max(600),
     windowBounds: WindowBoundsSchema,
-    alertedSecrets: z.array(z.string()).max(500),
     sentryEnabled: z.boolean(),
   })
   .partial()

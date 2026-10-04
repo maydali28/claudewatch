@@ -10,6 +10,8 @@ interface SettingsState {
 
   loadPrefs(): Promise<void>
   updatePref<K extends keyof AppPreferences>(key: K, value: AppPreferences[K]): Promise<void>
+  /** Several preferences in one write, for settings that must change together. */
+  updatePrefs(patch: Partial<AppPreferences>): Promise<void>
   applyExternalPrefs(next: AppPreferences): void
 }
 
@@ -35,6 +37,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ prefs: next })
     try {
       await ipc.settings.set({ [key]: value } as Partial<typeof next>)
+    } catch {
+      set({ prefs: prev })
+    }
+  },
+
+  async updatePrefs(patch) {
+    const prev = get().prefs
+    set({ prefs: { ...prev, ...patch } })
+    try {
+      await ipc.settings.set(patch)
     } catch {
       set({ prefs: prev })
     }

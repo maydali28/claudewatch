@@ -107,7 +107,7 @@ const BASE_PREFS = {
   trayTipDismissed: false,
   theme: 'system',
   sidebarWidth: 280,
-  alertedSecrets: [],
+  secretScanConsent: 'unasked',
   sentryEnabled: false,
 }
 

@@ -32,7 +32,7 @@ const BASE_PREFS: AppPreferences = {
   trayTipDismissed: false,
   theme: 'system',
   sidebarWidth: 280,
-  alertedSecrets: [],
+  secretScanConsent: 'unasked',
   sentryEnabled: false,
 }
 

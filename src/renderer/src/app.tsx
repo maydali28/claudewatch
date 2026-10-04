@@ -9,6 +9,7 @@ import DashboardShell from './components/layout/dashboard-shell'
 import { ErrorBoundary } from './components/shared/error-boundary'
 import { ToastProvider } from './components/shared/toast-host'
 import { WhatsNewModal } from './components/shared/whats-new-modal'
+import { SecretScanConsentPrompt } from './components/shared/secret-scan-consent'
 import { ipc } from './lib/ipc-client'
 
 // Forward renderer-side unhandled errors to the main process for Sentry capture.
@@ -50,6 +51,7 @@ function AppContent(): React.JSX.Element {
     <>
       <DashboardShell />
       <WhatsNewModal />
+      <SecretScanConsentPrompt />
     </>
   )
 }

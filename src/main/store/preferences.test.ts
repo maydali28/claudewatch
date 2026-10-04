@@ -32,6 +32,11 @@ vi.mock('electron-store', () => {
     set(value: Record<string, unknown>): void {
       this.store = { ...this.store, ...value }
     }
+    delete(key: string): void {
+      const next = { ...this.store }
+      delete next[key]
+      this.store = next
+    }
     clear(): void {
       this.store = {}
     }
@@ -50,32 +55,33 @@ const VALID_BASE = {
   sentryEnabled: false,
 }
 
-describe('Preferences.load — alertedSecrets truncation', () => {
+describe('Preferences.load — secret scan consent', () => {
   beforeEach(() => {
     vi.resetModules()
     storedData = {}
   })
 
-  it('truncates an oversized stored alertedSecrets array to the last 500 entries before validation', async () => {
-    const oversized = Array.from({ length: 600 }, (_, i) => `secret-${i}`)
-    storedData = { ...VALID_BASE, alertedSecrets: oversized }
+  it('does not take a 1.5.0 "enabled" as consent, and drops what it collected', async () => {
+    storedData = { ...VALID_BASE, secretScanEnabled: true, alertedSecrets: ['SEC007:ghp_****abcd'] }
 
     const { Preferences } = await import('./preferences')
     await Preferences.load()
 
-    const prefs = Preferences.get()
-    expect(prefs.alertedSecrets).toHaveLength(500)
-    expect(prefs.alertedSecrets).toEqual(oversized.slice(-500))
+    const prefs = Preferences.get() as unknown as Record<string, unknown>
+    expect(prefs.secretScanEnabled).toBe(false)
+    expect(prefs.secretScanConsent).toBe('unasked')
+    expect(prefs.alertedSecrets).toBeUndefined()
   })
 
-  it('leaves an array at or under the cap untouched', async () => {
-    const withinCap = Array.from({ length: 500 }, (_, i) => `secret-${i}`)
-    storedData = { ...VALID_BASE, alertedSecrets: withinCap }
+  it('keeps a recorded answer', async () => {
+    storedData = { ...VALID_BASE, secretScanEnabled: true, secretScanConsent: 'granted' }
 
     const { Preferences } = await import('./preferences')
     await Preferences.load()
 
-    const prefs = Preferences.get()
-    expect(prefs.alertedSecrets).toEqual(withinCap)
+    expect(Preferences.get()).toMatchObject({
+      secretScanEnabled: true,
+      secretScanConsent: 'granted',
+    })
   })
 })
