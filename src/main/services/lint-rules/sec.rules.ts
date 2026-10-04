@@ -1,8 +1,7 @@
 import * as path from 'path'
 import type { LintResult, LintContext } from '@shared/types/lint'
-import type { SessionSummary } from '@shared/types/session'
-import { scanFileLines } from '@main/services/secret-scanner'
-import { compareTimestampsAscending } from '@shared/utils/date-ranges'
+import type { SecretFindingRecord } from '@shared/types/secrets'
+import { getSecretFindingsStore } from '@main/services/secret-scan-service'
 
 function makeId(): string {
   return Math.random().toString(36).slice(2)
@@ -10,103 +9,55 @@ function makeId(): string {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const LOOKBACK_SECRETS_DAYS = 30
-// Halved when message counting moved from records to API responses: the old
-// value of 10 was calibrated against counts inflated ~2.09x.
-export const SEC_MIN_MESSAGES = 5
 const SEC_MAX_TOTAL = 20
-const LINES_TO_SCAN = 50
-const SEC_MAX_SESSIONS_SCANNED = 200
-
-// ─── Eligibility ──────────────────────────────────────────────────────────────
-
-/**
- * Whether a session is recent and substantial enough to be worth scanning for
- * leaked secrets.
- *
- * This previously summed `userMessageCount` and `assistantMessageCount`, which
- * are not fields on SessionSummary. Both read as undefined, so the count was
- * always zero, no session ever cleared the threshold, and the scan silently did
- * nothing. `messageCount` is the real field and already covers both roles.
- */
-/**
- * Eligible sessions, newest first, capped at SEC_MAX_SESSIONS_SCANNED.
- *
- * The rule reads the head of every session it returns, on a code path that did
- * no I/O at all while the eligibility filter was broken. The cap keeps lint
- * bounded on a large history; ordering by recency means the bound discards the
- * least relevant sessions rather than arbitrary ones.
- */
-export function selectSessionsToScan(
-  sessions: SessionSummary[],
-  now: number = Date.now()
-): SessionSummary[] {
-  // `isSecretScanEligible` already rejects an unparsable `lastTimestamp`
-  // (see its `Number.isNaN` guard below), so this sort never actually sees
-  // one on the current eligibility rule — but it uses
-  // `compareTimestampsAscending` (arguments swapped for descending order)
-  // rather than a raw `getTime()` subtraction anyway, so it stays correct on
-  // its own even if that upstream guard is ever loosened.
-  return sessions
-    .filter((s) => isSecretScanEligible(s, now))
-    .sort((a, b) => compareTimestampsAscending(b.lastTimestamp, a.lastTimestamp))
-    .slice(0, SEC_MAX_SESSIONS_SCANNED)
-}
-
-export function isSecretScanEligible(
-  session: Pick<SessionSummary, 'lastTimestamp' | 'messageCount'>,
-  now: number = Date.now()
-): boolean {
-  const lastActive = new Date(session.lastTimestamp).getTime()
-  if (Number.isNaN(lastActive)) return false
-  const cutoff = now - LOOKBACK_SECRETS_DAYS * 24 * 60 * 60 * 1000
-  return lastActive >= cutoff && session.messageCount >= SEC_MIN_MESSAGES
-}
 
 // ─── secRules ─────────────────────────────────────────────────────────────────
 
+export interface SecRulesDeps {
+  /** The findings secret scanning has recorded, live or by a history scan. */
+  findings: () => readonly SecretFindingRecord[]
+}
+
+const defaultDeps: SecRulesDeps = {
+  findings: () => getSecretFindingsStore()?.list() ?? [],
+}
+
+/**
+ * Health's secret checks report what secret scanning has already found. They
+ * used to read the end of every recent transcript on their own each time
+ * Health ran, with no consent, and handed the raw line (secret included) to
+ * the window. Now no transcript is read here: scanning happens only with the
+ * user's consent (live) or on request (history), and only masked values
+ * leave main. Dismissed findings are left out; newest first, capped.
+ */
 export async function secRules(
   context: LintContext,
-  sessions: SessionSummary[]
+  deps: SecRulesDeps = defaultDeps
 ): Promise<LintResult[]> {
-  const results: LintResult[] = []
   const { claudeDir, settings } = context
+  const active = deps
+    .findings()
+    .filter((f) => !f.dismissed)
+    .sort((a, b) => (b.occurredAt ?? b.foundAt).localeCompare(a.occurredAt ?? a.foundAt))
+    .slice(0, SEC_MAX_TOTAL)
 
-  const eligibleSessions = selectSessionsToScan(sessions)
-
-  // Track per-pattern counts across all files for global cap
-  const countPerPattern: Record<string, number> = {}
-  const MAX_PER_PATTERN_FILE = 3
-
-  for (const session of eligibleSessions) {
-    if (results.length >= SEC_MAX_TOTAL) break
-
-    const filePath = path.join(claudeDir, 'projects', session.projectId, `${session.id}.jsonl`)
-
-    const findings = await scanFileLines(filePath, LINES_TO_SCAN)
-
-    for (const finding of findings) {
-      if (results.length >= SEC_MAX_TOTAL) break
-
-      const patternCount = countPerPattern[finding.checkId] ?? 0
-      if (patternCount >= MAX_PER_PATTERN_FILE) continue
-
-      results.push({
-        id: makeId(),
-        checkId: finding.checkId,
-        severity: finding.severity,
-        filePath,
-        line: finding.lineNumber,
-        message: `${finding.patternName} found in session`,
-        contextLines: [finding.lineText],
-        maskedSecret: finding.maskedValue,
-        subagentFileName: session.id,
-        detectedAt: new Date().toISOString(),
-      })
-
-      countPerPattern[finding.checkId] = patternCount + 1
+  const results: LintResult[] = active.map((f) => {
+    const sessionDir = path.join(claudeDir, 'projects', f.projectId)
+    const filePath = f.agentId
+      ? path.join(sessionDir, f.sessionId, 'subagents', `agent-${f.agentId}.jsonl`)
+      : path.join(sessionDir, `${f.sessionId}.jsonl`)
+    return {
+      id: makeId(),
+      checkId: f.checkId,
+      severity: f.severity,
+      filePath,
+      ...(f.lineNumber !== undefined ? { line: f.lineNumber } : {}),
+      message: `${f.patternName} found in a ${f.agentId ? 'sub-agent transcript' : 'session'}`,
+      maskedSecret: f.maskedValue,
+      subagentFileName: f.agentId ?? f.sessionId,
+      detectedAt: f.foundAt,
     }
-  }
+  })
 
   // SEC008 — if CFG006 not set AND any SEC001–SEC007 found
   const hasCfg006 =
@@ -115,9 +66,7 @@ export async function secRules(
       'CLAUDE_CODE_SUBPROCESS_ENV_SCRUB'
     ] !== undefined
 
-  const hasSecrets = results.some((r) => r.checkId !== 'SEC008' && r.checkId.startsWith('SEC'))
-
-  if (!hasCfg006 && hasSecrets && results.length < SEC_MAX_TOTAL) {
+  if (!hasCfg006 && results.length > 0 && results.length < SEC_MAX_TOTAL) {
     results.push({
       id: makeId(),
       checkId: 'SEC008',

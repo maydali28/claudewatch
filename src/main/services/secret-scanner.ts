@@ -37,29 +37,3 @@ export async function scanFileDelta(
 
   return { findings, newOffset: fileSize }
 }
-
-// ─── scanFileLines ────────────────────────────────────────────────────────────
-
-/**
- * Read the last `maxLines` lines from a file and scan them for secrets.
- */
-export async function scanFileLines(filePath: string, maxLines = 50): Promise<SecretFinding[]> {
-  const lines: string[] = []
-
-  try {
-    const stream = fs.createReadStream(filePath, { encoding: 'utf-8' })
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
-
-    for await (const line of rl) {
-      lines.push(line)
-      if (lines.length > maxLines * 2) {
-        lines.splice(0, lines.length - maxLines)
-      }
-    }
-  } catch {
-    return []
-  }
-
-  const tail = lines.slice(-maxLines)
-  return scanLines(tail)
-}
