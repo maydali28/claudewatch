@@ -100,8 +100,11 @@ const WindowBoundsSchema = z.object({
 })
 
 /** settings:set — partial patch; every key is optional */
+// Strict: a key this schema does not list is rejected, not silently dropped.
+// Dropping it made a setting look broken with no error anywhere (the window
+// kept a value main never stored, then main pushed the old one back).
 export const SettingsSetSchema = z
-  .object({
+  .strictObject({
     pricingProvider: PricingProviderSchema,
     pricingOverrides: z.record(
       z.string(),
@@ -123,6 +126,7 @@ export const SettingsSetSchema = z
     sidebarWidth: z.number().int().min(160).max(600),
     windowBounds: WindowBoundsSchema,
     sentryEnabled: z.boolean(),
+    lastSeenVersion: z.string().min(1).max(50),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Patch must not be empty' })
