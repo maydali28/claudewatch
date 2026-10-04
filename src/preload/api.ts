@@ -48,6 +48,12 @@ export const api = {
       invoke(CHANNELS.SESSIONS_EXPORT, request),
   },
 
+  secrets: {
+    list: () => invoke(CHANNELS.SECRETS_LIST),
+    dismiss: (ids: string[]) => invoke(CHANNELS.SECRETS_DISMISS, { ids }),
+    scanHistory: () => invoke(CHANNELS.SECRETS_SCAN_HISTORY),
+  },
+
   // ─── Analytics ──────────────────────────────────────────────────────────────
   analytics: {
     get: (request: IPCRequest<typeof CHANNELS.ANALYTICS_GET>) =>

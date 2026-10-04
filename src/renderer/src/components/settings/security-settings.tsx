@@ -5,6 +5,7 @@ import { Label } from '@renderer/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@renderer/components/ui/radio-group'
 import { useSettingsStore } from '@renderer/store/settings.store'
 import type { AppPreferences } from '@shared/types'
+import { SecretFindingsList } from './secret-findings-list'
 
 type RedactionLevel = AppPreferences['redactionLevel']
 
@@ -23,13 +24,13 @@ const REDACTION_OPTIONS: {
   {
     value: 'mask',
     label: 'Mask',
-    description: 'Show first/last 4 chars with ●●●● in between.',
+    description: 'Keep the first and last 4 characters: sk-a****9f3c.',
     icon: <EyeOff className="h-4 w-4 text-amber-500" />,
   },
   {
     value: 'remove',
     label: 'Remove',
-    description: 'Replace entire secret value with [REDACTED].',
+    description: 'Replace the whole secret with [REDACTED]. A private key is hidden whole.',
     icon: <Trash2 className="h-4 w-4 text-green-500" />,
   },
 ]
@@ -67,6 +68,8 @@ export default function SecuritySettings(): React.JSX.Element {
           onCheckedChange={setScanning}
         />
       </div>
+
+      <SecretFindingsList />
 
       {/* Redaction level */}
       <div>

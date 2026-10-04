@@ -37,6 +37,13 @@ export interface FileWatcherDeps {
    * off as that need comes and goes.
    */
   getMainWindow: () => BrowserWindow | null
+  /**
+   * Every transcript a job covered (the parent and whichever sub-agents
+   * changed), after the session was re-parsed. The secret scanner reads what
+   * was appended to each; it cannot be coalesced onto the parent the way the
+   * parse is, since it reads each file from its own offset.
+   */
+  onTranscriptsChanged?: (files: ReadonlySet<string>) => void
 }
 
 export class FileWatcher {
@@ -58,7 +65,7 @@ export class FileWatcher {
     this.projectsDir = path.join(claudeDir, 'projects')
     this.deps = deps
     this.scheduler = new ReparseScheduler(
-      (parentKey) => this.processFileChange(parentKey),
+      (parentKey, contributingFiles) => this.processFileChange(parentKey, contributingFiles),
       FILE_WATCHER_DEBOUNCE_MS,
       (parentKey, error) => log.error(`Failed to re-parse ${path.basename(parentKey)}:`, error)
     )
@@ -156,7 +163,10 @@ export class FileWatcher {
     return path.join(projectsDir, location.projectId, `${location.sessionId}.jsonl`)
   }
 
-  private async processFileChange(filePath: string): Promise<void> {
+  private async processFileChange(
+    filePath: string,
+    contributingFiles: ReadonlySet<string> = new Set([filePath])
+  ): Promise<void> {
     const isNewFile = this.newFiles.delete(filePath)
     if (filePath.endsWith('settings.json')) {
       this.deps.broadcast(CHANNELS.PUSH_CONFIG_CHANGED, { filePath })
@@ -171,6 +181,7 @@ export class FileWatcher {
 
     // A subagent write updates the parent session; it never creates one.
     await this.processSessionFileChange(filePath, location, isNewFile && !location.isSubagent)
+    this.deps.onTranscriptsChanged?.(contributingFiles)
   }
 
   private async processSessionFileChange(
@@ -218,9 +229,6 @@ export class FileWatcher {
 
       const channel = isNewFile ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
       this.deps.broadcast(channel, sessionSummary)
-
-      // Live secret scanning was removed for 1.5.x; it returns with a visible
-      // alert and a toggle in roadmap #4.
     } catch (error) {
       log.error('Failed to re-parse session:', sessionId, error)
     }

@@ -17,6 +17,7 @@ import type {
 } from '@shared/types/config'
 import type { LintResult, LintSummary } from '@shared/types/lint'
 import type { AppPreferences } from '@shared/types/preferences'
+import type { SecretFindingRecord, SecretHistoryScanResult } from '@shared/types/secrets'
 
 // ─── Result Wrapper ───────────────────────────────────────────────────────────
 // Never throw across IPC — error objects lose type information over serialization.
@@ -68,6 +69,18 @@ export interface IPCContracts {
   'sessions:tag': {
     request: { sessionId: string; tags: string[] }
     response: Result<void>
+  }
+  'secrets:list': {
+    request: void
+    response: Result<SecretFindingRecord[]>
+  }
+  'secrets:dismiss': {
+    request: { ids: string[] }
+    response: Result<void>
+  }
+  'secrets:scan-history': {
+    request: void
+    response: Result<SecretHistoryScanResult>
   }
   'sessions:export': {
     request: ExportRequest

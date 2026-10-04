@@ -51,6 +51,11 @@ export const TagSchema = z.object({
 })
 
 /** sessions:export */
+/** secrets:dismiss — ids as the findings list gives them. */
+export const SecretsDismissSchema = z.object({
+  ids: z.array(z.string().min(1).max(200)).min(1).max(1000),
+})
+
 export const ExportSchema = z.object({
   sessionId,
   projectId,

@@ -13,6 +13,11 @@ export const CHANNELS = {
   SESSIONS_TAG: 'sessions:tag',
   SESSIONS_EXPORT: 'sessions:export',
 
+  // Secrets
+  SECRETS_LIST: 'secrets:list',
+  SECRETS_DISMISS: 'secrets:dismiss',
+  SECRETS_SCAN_HISTORY: 'secrets:scan-history',
+
   // Analytics
   ANALYTICS_GET: 'analytics:get',
 
@@ -101,6 +106,8 @@ export const CHANNELS = {
    * something went sideways instead of staring at a frozen UI.
    */
   PUSH_MAIN_ERROR: 'push:main-error',
+  /** Secrets found that were not in the list before; masked values only. */
+  PUSH_SECRETS_FOUND: 'push:secrets-found',
 } as const
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS]
@@ -118,4 +125,5 @@ export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_SHOW_ONBOARDING'
   | 'PUSH_PREFERENCES_CHANGED'
   | 'PUSH_PRICING_CHANGED'
-  | 'PUSH_MAIN_ERROR']
+  | 'PUSH_MAIN_ERROR'
+  | 'PUSH_SECRETS_FOUND']

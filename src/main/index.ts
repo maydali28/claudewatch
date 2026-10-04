@@ -13,7 +13,7 @@ import { registerTrayHandlers } from './ipc/tray.handlers'
 import { Preferences } from './store/preferences'
 import { FileWatcher } from './services/file-watcher'
 import { accountingWorker } from './services/accounting/worker-client'
-import { getClaudeDir } from '@main/lib/claude-paths'
+import { getClaudeDir, getProjectsDirPath } from '@main/lib/claude-paths'
 import { initUpdateService } from './services/update-service'
 import { isAppQuitting, registerUpdateQuitHandlers, onUpdateQuitDisarmed } from './lib/update-quit'
 import { rootLogger as log } from './lib/logger'
@@ -21,6 +21,8 @@ import { CHANNELS } from '@shared/ipc/channels'
 import { initSentryEarly, initSentry, captureException } from './services/sentry'
 import { handleSquirrelEvent } from './lib/squirrel-events'
 import { setAutostart } from './services/autostart'
+import { initSecretScanService } from './services/secret-scan-service'
+import { createSecretFindingsStore } from './services/secret-findings-store'
 
 app.setName('ClaudeWatch')
 
@@ -227,10 +229,26 @@ function bootstrap(): void {
     // pushes PUSH_UPDATE_AVAILABLE to the renderer when an update is found.
     initUpdateService()
 
+    // Secret scanning, with the user's consent: findings are kept beside the
+    // preferences, masked; live scanning starts only if it was turned on.
+    const secretScan = initSecretScanService({
+      projectsDir: getProjectsDirPath(),
+      store: createSecretFindingsStore(app.getPath('userData')),
+      isEnabled: () => {
+        const prefs = Preferences.get()
+        return prefs.secretScanEnabled && prefs.secretScanConsent === 'granted'
+      },
+      onNewFindings: (findings) => broadcastToRenderers(CHANNELS.PUSH_SECRETS_FOUND, findings),
+    })
+    void secretScan.sync()
+
     // Start file watcher after handlers are registered and the window exists.
     fileWatcher = new FileWatcher(getClaudeDir(), {
       broadcast: broadcastToRenderers,
       getMainWindow: () => mainWindow,
+      onTranscriptsChanged: (files) => {
+        secretScan.scanChanged(files).catch((error) => log.error('Secret scan failed:', error))
+      },
     })
     fileWatcher.start()
     log.info('FileWatcher started')

@@ -2,15 +2,22 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
 
 export type ToastVariant = 'error' | 'warning' | 'info' | 'success'
 
+/** A button on the toast; clicking it also dismisses the toast. */
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
+
 interface Toast {
   id: number
   message: string
   variant: ToastVariant
   ttlMs: number
+  action?: ToastAction
 }
 
 interface ToastContextValue {
-  push: (message: string, variant?: ToastVariant, ttlMs?: number) => void
+  push: (message: string, variant?: ToastVariant, ttlMs?: number, action?: ToastAction) => void
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null)
@@ -31,10 +38,13 @@ export function ToastProvider({ children }: { children: React.ReactNode }): Reac
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
-  const push = useCallback<ToastContextValue['push']>((message, variant = 'info', ttlMs = 5000) => {
-    const id = nextId++
-    setToasts((prev) => [...prev, { id, message, variant, ttlMs }])
-  }, [])
+  const push = useCallback<ToastContextValue['push']>(
+    (message, variant = 'info', ttlMs = 5000, action) => {
+      const id = nextId++
+      setToasts((prev) => [...prev, { id, message, variant, ttlMs, action }])
+    },
+    []
+  )
 
   const value = useMemo(() => ({ push }), [push])
 
@@ -81,6 +91,18 @@ function ToastItem({
       className={`pointer-events-auto flex max-w-sm items-start gap-3 rounded-md border px-3 py-2 text-sm shadow-lg backdrop-blur ${VARIANT_STYLES[toast.variant]}`}
     >
       <span className="flex-1">{toast.message}</span>
+      {toast.action && (
+        <button
+          type="button"
+          onClick={() => {
+            toast.action?.onClick()
+            onDismiss(toast.id)
+          }}
+          className="shrink-0 text-xs font-semibold underline underline-offset-2 hover:opacity-80"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={() => onDismiss(toast.id)}
@@ -103,7 +125,12 @@ export function useToast(): ToastContextValue {
  * Push a toast from non-React code. Safe to call at any time — it's a no-op
  * if the provider hasn't mounted yet.
  */
-export function toast(message: string, variant: ToastVariant = 'info', ttlMs = 5000): void {
+export function toast(
+  message: string,
+  variant: ToastVariant = 'info',
+  ttlMs = 5000,
+  action?: ToastAction
+): void {
   const fn = (window as unknown as { __toast?: ToastContextValue['push'] }).__toast
-  fn?.(message, variant, ttlMs)
+  fn?.(message, variant, ttlMs, action)
 }

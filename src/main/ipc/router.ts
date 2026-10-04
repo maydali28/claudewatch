@@ -6,6 +6,7 @@ import { registerLintHandlers } from './lint.handlers'
 import { registerSettingsHandlers } from './settings.handlers'
 import { registerUpdateHandlers } from './update.handlers'
 import { registerExportHandlers } from './export.handlers'
+import { registerSecretsHandlers } from './secrets.handlers'
 import { registerAppHandlers } from './app.handlers'
 import { registerFeedbackHandlers } from './feedback.handlers'
 import { registerSentryHandlers } from './sentry.handlers'
@@ -23,6 +24,7 @@ export function registerAllHandlers(): void {
   registerSettingsHandlers()
   registerUpdateHandlers()
   registerExportHandlers()
+  registerSecretsHandlers()
   registerPlansHandlers()
   registerAppHandlers()
   registerFeedbackHandlers()

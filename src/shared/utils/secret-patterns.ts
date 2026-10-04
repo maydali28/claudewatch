@@ -228,6 +228,42 @@ export function scanLines(lines: string[]): SecretFinding[] {
   return findings
 }
 
+// ─── createLineScanner ───────────────────────────────────────────────────────
+
+/**
+ * `scanLines` for a stream: feed one line at a time, with the per-pattern cap
+ * kept across calls, so a large transcript need not be held in memory.
+ */
+export function createLineScanner(maxPerPattern = SECRET_SCAN_MAX_PER_PATTERN): {
+  scan(line: string, lineNumber: number): SecretFinding[]
+} {
+  const countPerPattern: Record<string, number> = {}
+  return {
+    scan(line, lineNumber) {
+      const found: SecretFinding[] = []
+      for (const pattern of PATTERNS) {
+        const count = countPerPattern[pattern.id] ?? 0
+        if (count >= maxPerPattern) continue
+        const match = line.match(pattern.regex)
+        if (!match) continue
+        const rawValue = extractValue(match, pattern.captureGroup)
+        if (!passesChecks(pattern, rawValue, line)) continue
+        found.push({
+          checkId: pattern.id,
+          severity: pattern.severity,
+          patternName: pattern.name,
+          rawValue,
+          maskedValue: maskSecret(rawValue),
+          lineNumber,
+          lineText: line.slice(0, 200),
+        })
+        countPerPattern[pattern.id] = count + 1
+      }
+      return found
+    },
+  }
+}
+
 // ─── Redaction ────────────────────────────────────────────────────────────────
 
 export type RedactionLevel = 'none' | 'mask' | 'remove'

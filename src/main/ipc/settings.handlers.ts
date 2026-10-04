@@ -9,6 +9,7 @@ import { broadcastToRenderers } from '@main/window-manager'
 import { scanCache } from '@main/services/scan-cache'
 import { sessionCache } from '@shared/utils'
 import { createLogger } from '@main/lib/logger'
+import { getSecretScanService } from '@main/services/secret-scan-service'
 
 const log = createLogger('Settings')
 
@@ -33,6 +34,11 @@ export function registerSettingsHandlers(): void {
 
       if (typeof settingsPatch.sentryEnabled === 'boolean') {
         setSentryEnabled(settingsPatch.sentryEnabled)
+      }
+
+      // Start or stop live secret scanning to match the switch and consent.
+      if ('secretScanEnabled' in settingsPatch || 'secretScanConsent' in settingsPatch) {
+        void getSecretScanService()?.sync()
       }
 
       // A rate change leaves every already-scanned session's cost stale: the
