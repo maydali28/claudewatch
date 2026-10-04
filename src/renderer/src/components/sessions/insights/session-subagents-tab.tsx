@@ -15,8 +15,9 @@ import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 import { InsightSection, StatTiles, TH, percent } from './insight-section'
 import { buildSubagentTree } from './subagent-tree'
 import { SubagentTreeView, type SessionNodeInfo } from './subagent-tree-view'
+import { SubagentTraceView } from './subagent-trace-view'
 
-type RunsView = 'list' | 'tree'
+type RunsView = 'list' | 'tree' | 'timeline'
 
 /** The session's Sub-agents view: totals, cost by agent type, then every run. */
 export function SessionSubagentsTab({
@@ -113,9 +114,11 @@ export function SessionSubagentsTab({
         note={
           view === 'list'
             ? 'Newest first. Open a run to read its conversation.'
-            : nested
-              ? 'Who started whom, oldest first in each column. Open a run to read its conversation.'
-              : 'The session started every sub-agent itself; none started sub-agents of its own.'
+            : view === 'timeline'
+              ? 'When each sub-agent ran, in tree order. Open a run to read its conversation.'
+              : nested
+                ? 'Who started whom, oldest first in each column. Open a run to read its conversation.'
+                : 'The session started every sub-agent itself; none started sub-agents of its own.'
         }
         action={
           <Tabs value={view} onValueChange={(v) => setView(v as RunsView)}>
@@ -126,11 +129,16 @@ export function SessionSubagentsTab({
               <TabsTrigger value="tree" className="px-2.5 py-0.5 text-[11px]">
                 Tree
               </TabsTrigger>
+              <TabsTrigger value="timeline" className="px-2.5 py-0.5 text-[11px]">
+                Timeline
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         }
       >
-        {view === 'tree' ? (
+        {view === 'timeline' ? (
+          <SubagentTraceView tree={tree} now={now} onOpen={onOpen} />
+        ) : view === 'tree' ? (
           <SubagentTreeView tree={tree} session={session} now={now} onOpen={onOpen} />
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
