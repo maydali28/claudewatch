@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { SubagentSummary } from '@shared/types'
-import { buildSubagentTree } from './subagent-tree'
+import { buildSubagentTree, layoutSubagentGraph } from './subagent-tree'
 
 function sub(
   agentId: string,
@@ -50,5 +50,43 @@ describe('buildSubagentTree', () => {
   it('breaks a parent cycle instead of looping', () => {
     const tree = buildSubagentTree([sub('p', 1, 1, 'q'), sub('q', 2, 1, 'p')])
     expect(tree.roots.reduce((s, n) => s + n.subtreeRuns, 0)).toBe(2)
+  })
+})
+
+describe('layoutSubagentGraph', () => {
+  const size = { nodeWidth: 100, nodeHeight: 20, columnGap: 40, rowGap: 10 }
+
+  it('puts depths in columns and each parent level with its first child', () => {
+    const tree = buildSubagentTree([
+      sub('a', 1, 1),
+      sub('a1', 2, 1, 'a'),
+      sub('a2', 3, 1, 'a'),
+      sub('b', 4, 1),
+    ])
+    const g = layoutSubagentGraph(tree.roots, new Set(), size)
+    const at = (id: string | null) =>
+      g.nodes.find((n) => (n.node ? n.node.sub.agentId : null) === id)!
+    // Leaves take rows 0, 1, 2 (30px apart); a sits level with a1.
+    expect(at('a1')).toMatchObject({ x: 280, y: 0 })
+    expect(at('a2')).toMatchObject({ x: 280, y: 30 })
+    expect(at('a')).toMatchObject({ x: 140, y: 0 })
+    expect(at('b')).toMatchObject({ x: 140, y: 60 })
+    // The session sits level with its first child, a.
+    expect(at(null)).toMatchObject({ x: 0, y: 0 })
+    expect(g.edges).toHaveLength(4)
+    expect(g).toMatchObject({ width: 380, height: 80 })
+  })
+
+  it('lays a collapsed parent out as a leaf and drops its branch', () => {
+    const tree = buildSubagentTree([sub('a', 1, 1), sub('a1', 2, 1, 'a')])
+    const g = layoutSubagentGraph(tree.roots, new Set(['a']), size)
+    expect(g.nodes.map((n) => n.node?.sub.agentId ?? 'session').sort()).toEqual(['a', 'session'])
+    expect(g.edges).toHaveLength(1)
+  })
+
+  it('still places the session with no sub-agents', () => {
+    const g = layoutSubagentGraph([], new Set(), size)
+    expect(g.nodes).toEqual([{ node: null, x: 0, y: 0 }])
+    expect(g.edges).toEqual([])
   })
 })

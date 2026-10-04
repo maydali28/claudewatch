@@ -656,6 +656,14 @@ export default function SessionPanel(): React.JSX.Element | null {
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             <SessionSubagentsTab
               subagents={activeSessionSummary?.subagents ?? []}
+              session={{
+                title: activeSessionSummary?.title ?? parsedSession.slug ?? parsedSession.id,
+                model: activeSessionSummary?.latestModel ?? activeSessionSummary?.dominantModel,
+                cost: activeSessionSummary
+                  ? activeSessionSummary.estimatedCost -
+                    activeSessionSummary.subagents.reduce((s, a) => s + a.estimatedCost, 0)
+                  : undefined,
+              }}
               onOpen={setOpenAgentId}
             />
           </div>
@@ -663,7 +671,6 @@ export default function SessionPanel(): React.JSX.Element | null {
         {tab === 'tools' && (
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             <SessionToolsTab
-              projectId={parsedSession.projectId}
               toolUsage={activeSessionSummary?.toolUsage ?? []}
               timeline={parsedSession.responseTimeline ?? []}
             />

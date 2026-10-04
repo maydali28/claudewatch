@@ -14,16 +14,19 @@ import type { SubagentSummary } from '@shared/types'
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
 import { InsightSection, StatTiles, TH, percent } from './insight-section'
 import { buildSubagentTree } from './subagent-tree'
-import { SubagentTreeView } from './subagent-tree-view'
+import { SubagentTreeView, type SessionNodeInfo } from './subagent-tree-view'
 
 type RunsView = 'list' | 'tree'
 
 /** The session's Sub-agents view: totals, cost by agent type, then every run. */
 export function SessionSubagentsTab({
   subagents,
+  session,
   onOpen,
 }: {
   subagents: SubagentSummary[]
+  /** The session, for the tree's left-most box. */
+  session: SessionNodeInfo
   /** Open a sub-agent's conversation. */
   onOpen: (agentId: string) => void
 }): React.JSX.Element {
@@ -111,7 +114,7 @@ export function SessionSubagentsTab({
           view === 'list'
             ? 'Newest first. Open a run to read its conversation.'
             : nested
-              ? 'Each sub-agent under the one that started it, oldest first. Open a run to read its conversation.'
+              ? 'Who started whom, oldest first in each column. Open a run to read its conversation.'
               : 'The session started every sub-agent itself; none started sub-agents of its own.'
         }
         action={
@@ -128,7 +131,7 @@ export function SessionSubagentsTab({
         }
       >
         {view === 'tree' ? (
-          <SubagentTreeView tree={tree} now={now} onOpen={onOpen} />
+          <SubagentTreeView tree={tree} session={session} now={now} onOpen={onOpen} />
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(260px,1fr))] gap-2">
             {ordered.map((sub) => (

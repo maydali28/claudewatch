@@ -1,5 +1,5 @@
 import React from 'react'
-import { ChevronDown, ChevronRight, Clock, MessageSquare } from 'lucide-react'
+import { Minus, Plus } from 'lucide-react'
 import { formatCost } from '@shared/utils'
 import { isSubagentRunning } from '@shared/utils/live-session'
 import { getModelMeta } from '@renderer/lib/model-meta'
@@ -8,166 +8,140 @@ import {
   formatAgentDuration,
   subagentDurationMs,
 } from '@renderer/components/sessions/subagent-card'
-import type { SubagentTree, SubagentTreeNode } from './subagent-tree'
+import {
+  layoutSubagentGraph,
+  type GraphSize,
+  type SubagentTree,
+  type SubagentTreeNode,
+} from './subagent-tree'
 
-/** Pixels each level is indented by. */
-const INDENT_PX = 20
+const SIZE: GraphSize = { nodeWidth: 232, nodeHeight: 58, columnGap: 40, rowGap: 12 }
+/** Room around the graph so the outermost boxes' borders and shadows show. */
+const PAD = 8
 
-function TreeRow({
+/** What the left-most box says about the session itself. */
+export interface SessionNodeInfo {
+  title: string
+  model?: string
+  /** Estimated cost of the session's own responses, sub-agents excluded. */
+  cost?: number
+}
+
+function nodeSubtitle(sub: SubagentTreeNode['sub']): string {
+  const parts: string[] = []
+  if (sub.agentType) parts.push(sub.agentType)
+  const model = sub.primaryModel ? getModelMeta(sub.primaryModel).label : undefined
+  if (model) parts.push(model)
+  const ms = subagentDurationMs(sub)
+  if (ms > 0) parts.push(`${formatAgentDuration(ms)}${sub.durationSource === 'span' ? '~' : ''}`)
+  parts.push(formatCost(sub.estimatedCost))
+  return parts.join(' · ')
+}
+
+function AgentBox({
   node,
-  now,
+  running,
   collapsed,
   onToggle,
   onOpen,
 }: {
   node: SubagentTreeNode
-  now: number
-  collapsed: Set<string>
-  onToggle: (agentId: string) => void
-  onOpen: (agentId: string) => void
+  running: boolean
+  collapsed: boolean
+  onToggle: () => void
+  onOpen: () => void
 }): React.JSX.Element {
   const { sub } = node
   const hasChildren = node.children.length > 0
-  const isCollapsed = collapsed.has(sub.agentId)
-  const running = isSubagentRunning(sub, now)
-  const meta = sub.primaryModel ? getModelMeta(sub.primaryModel) : null
-  const durationMs = subagentDurationMs(sub)
-
+  const title = sub.description ?? sub.agentId
   return (
-    <li>
-      <div
-        className="group relative flex items-center gap-1.5 rounded-md py-1.5 pr-2 hover:bg-accent/50"
-        style={{ paddingLeft: (node.depth - 1) * INDENT_PX + 4 }}
-      >
-        {/* Guide line from the parent down to this row. */}
-        {node.depth > 1 && (
-          <span
-            aria-hidden
-            className="absolute top-0 bottom-0 border-l border-border"
-            style={{ left: (node.depth - 2) * INDENT_PX + 12 }}
-          />
+    <div className="relative h-full">
+      <button
+        type="button"
+        onClick={onOpen}
+        title={`${title}\n${nodeSubtitle(sub)}${hasChildren ? ` · branch ${formatCost(node.subtreeCost)} over ${node.subtreeRuns} runs` : ''}\nOpen this sub-agent’s conversation`}
+        className={cn(
+          'flex h-full w-full flex-col justify-center gap-0.5 rounded-lg border bg-card px-3 text-left shadow-sm transition-colors',
+          'hover:border-primary/60 hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+          running ? 'border-green-500/60' : 'border-border',
+          node.orphan && 'border-dashed border-amber-500/60'
         )}
-        <button
-          type="button"
-          onClick={() => onToggle(sub.agentId)}
-          disabled={!hasChildren}
-          aria-label={
-            isCollapsed ? 'Show the sub-agents it started' : 'Hide the sub-agents it started'
-          }
-          aria-expanded={hasChildren ? !isCollapsed : undefined}
-          className={cn(
-            'flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground',
-            hasChildren ? 'hover:bg-accent hover:text-foreground' : 'invisible'
-          )}
-        >
-          {isCollapsed ? (
-            <ChevronRight className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronDown className="h-3.5 w-3.5" />
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onOpen(sub.agentId)}
-          title="Open this sub-agent’s conversation"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        >
-          {running && (
-            <span
-              className="block h-1.5 w-1.5 shrink-0 rounded-full bg-green-500 animate-pulse"
-              aria-label="Running"
-            />
-          )}
-          <span className="truncate text-xs font-medium text-foreground">
-            {sub.description ?? sub.agentId}
-          </span>
-          {sub.agentType && (
-            <span className="shrink-0 rounded-sm bg-violet-500/15 px-1 py-0.5 text-[10px] font-medium text-violet-500">
-              {sub.agentType}
-            </span>
-          )}
-          {sub.isBackground && (
-            <span className="shrink-0 rounded-sm bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">
-              background
-            </span>
-          )}
-          {node.orphan && (
-            <span
-              className="shrink-0 rounded-sm bg-amber-500/15 px-1 py-0.5 text-[10px] text-amber-600"
-              title={`Started by sub-agent ${sub.parentAgentId}, whose transcript is gone`}
-            >
-              parent missing
-            </span>
-          )}
-          {meta && (
-            <span
-              className={`shrink-0 rounded-sm px-1 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}
-            >
-              {meta.label}
-            </span>
-          )}
-        </button>
-
-        <div className="flex shrink-0 items-center gap-3 text-[11px] tabular-nums text-muted-foreground">
-          {durationMs > 0 && (
-            <span className="inline-flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {formatAgentDuration(durationMs)}
-              {sub.durationSource === 'span' && '~'}
-            </span>
-          )}
-          <span className="inline-flex items-center gap-1">
-            <MessageSquare className="h-3 w-3" />
-            {sub.messageCount}
-          </span>
-          <span className="w-14 text-right text-foreground">{formatCost(sub.estimatedCost)}</span>
-          {/* Descendants' cost only matters when there are descendants. */}
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
           <span
-            className="w-24 text-right"
-            title={hasChildren ? `${node.subtreeRuns} runs in this branch` : undefined}
-          >
-            {hasChildren ? `${formatCost(node.subtreeCost)} branch` : ''}
-          </span>
-        </div>
-      </div>
-      {hasChildren && !isCollapsed && (
-        <ul>
-          {node.children.map((child) => (
-            <TreeRow
-              key={child.sub.agentId}
-              node={child}
-              now={now}
-              collapsed={collapsed}
-              onToggle={onToggle}
-              onOpen={onOpen}
-            />
-          ))}
-        </ul>
+            className={cn(
+              'block h-2 w-2 shrink-0 rounded-full',
+              running ? 'bg-green-500 animate-pulse' : 'bg-muted-foreground/40'
+            )}
+            aria-label={running ? 'Running' : undefined}
+          />
+          <span className="truncate text-xs font-medium text-foreground">{title}</span>
+          {sub.isBackground && (
+            <span className="shrink-0 rounded-sm bg-muted px-1 text-[9px] text-muted-foreground">
+              bg
+            </span>
+          )}
+        </span>
+        <span className="truncate pl-3.5 text-[10px] tabular-nums text-muted-foreground">
+          {nodeSubtitle(sub)}
+          {hasChildren && ` · branch ${formatCost(node.subtreeCost)}`}
+          {node.orphan && ' · parent missing'}
+        </span>
+      </button>
+      {hasChildren && (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+          aria-label={
+            collapsed
+              ? `Show the ${node.subtreeRuns - 1} sub-agents it started`
+              : 'Hide the sub-agents it started'
+          }
+          className="absolute -right-2.5 top-1/2 flex h-5 min-w-5 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-background px-1 text-[10px] tabular-nums text-muted-foreground shadow-sm hover:text-foreground"
+        >
+          {collapsed ? (
+            <>
+              <Plus className="h-2.5 w-2.5" />
+              {node.subtreeRuns - 1}
+            </>
+          ) : (
+            <Minus className="h-2.5 w-2.5" />
+          )}
+        </button>
       )}
-    </li>
+    </div>
   )
 }
 
-/** Sub-agents nested under the agent that started them, oldest first. */
+/**
+ * The session and its sub-agents as a left-to-right graph: each sub-agent in
+ * the column after the agent that started it, joined by a connector.
+ */
 export function SubagentTreeView({
   tree,
+  session,
   now,
   onOpen,
 }: {
   tree: SubagentTree
+  session: SessionNodeInfo
   now: number
   onOpen: (agentId: string) => void
 }): React.JSX.Element {
   const [collapsed, setCollapsed] = React.useState<Set<string>>(() => new Set())
-  const toggle = React.useCallback((agentId: string) => {
+  const layout = React.useMemo(
+    () => layoutSubagentGraph(tree.roots, collapsed, SIZE),
+    [tree, collapsed]
+  )
+  const toggle = (agentId: string): void =>
     setCollapsed((prev) => {
       const next = new Set(prev)
       if (next.has(agentId)) next.delete(agentId)
       else next.add(agentId)
       return next
     })
-  }, [])
+  const sessionModel = session.model ? getModelMeta(session.model).label : undefined
 
   return (
     <div>
@@ -184,18 +158,70 @@ export function SubagentTreeView({
           </span>
         ))}
       </div>
-      <ul aria-label="Sub-agents by who started them" className="space-y-0.5">
-        {tree.roots.map((node) => (
-          <TreeRow
-            key={node.sub.agentId}
-            node={node}
-            now={now}
-            collapsed={collapsed}
-            onToggle={toggle}
-            onOpen={onOpen}
-          />
-        ))}
-      </ul>
+
+      <div className="max-h-[70vh] overflow-auto rounded-lg border border-border/60 bg-muted/20">
+        <div
+          className="relative"
+          style={{ width: layout.width + PAD * 2, height: layout.height + PAD * 2 }}
+        >
+          <svg
+            aria-hidden
+            className="absolute inset-0 text-border"
+            width={layout.width + PAD * 2}
+            height={layout.height + PAD * 2}
+          >
+            {layout.edges.map((e, i) => {
+              const midX = (e.from.x + e.to.x) / 2
+              return (
+                <path
+                  key={i}
+                  d={`M ${e.from.x + PAD} ${e.from.y + PAD} H ${midX + PAD} V ${e.to.y + PAD} H ${e.to.x + PAD}`}
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={1.5}
+                />
+              )
+            })}
+          </svg>
+
+          {layout.nodes.map(({ node, x, y }) => (
+            <div
+              key={node ? node.sub.agentId : '__session'}
+              className="absolute"
+              style={{
+                left: x + PAD,
+                top: y + PAD,
+                width: SIZE.nodeWidth,
+                height: SIZE.nodeHeight,
+              }}
+            >
+              {node ? (
+                <AgentBox
+                  node={node}
+                  running={isSubagentRunning(node.sub, now)}
+                  collapsed={collapsed.has(node.sub.agentId)}
+                  onToggle={() => toggle(node.sub.agentId)}
+                  onOpen={() => onOpen(node.sub.agentId)}
+                />
+              ) : (
+                <div className="flex h-full flex-col justify-center gap-0.5 rounded-lg border border-border bg-background px-3 shadow-sm">
+                  <span
+                    className="truncate text-xs font-semibold text-foreground"
+                    title={session.title}
+                  >
+                    {session.title}
+                  </span>
+                  <span className="truncate text-[10px] tabular-nums text-muted-foreground">
+                    Session
+                    {sessionModel && ` · ${sessionModel}`}
+                    {session.cost !== undefined && ` · ${formatCost(session.cost)} own`}
+                  </span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
