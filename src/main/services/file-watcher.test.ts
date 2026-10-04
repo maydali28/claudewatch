@@ -108,6 +108,7 @@ const BASE_PREFS = {
   theme: 'system',
   sidebarWidth: 280,
   secretScanConsent: 'unasked',
+  secretScanNotify: true,
   sentryEnabled: false,
 }
 

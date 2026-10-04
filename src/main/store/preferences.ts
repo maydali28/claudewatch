@@ -48,6 +48,7 @@ const AppPreferencesSchema = z.object({
   costAlertThreshold: z.number().optional(),
   secretScanEnabled: z.boolean(),
   secretScanConsent: z.enum(['unasked', 'granted', 'declined']),
+  secretScanNotify: z.boolean(),
   redactionLevel: z.enum(['none', 'mask', 'remove']),
   launchAtLogin: z.boolean(),
   trayTipDismissed: z.boolean(),

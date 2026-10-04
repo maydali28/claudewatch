@@ -75,6 +75,7 @@ const BASE_PREFS: AppPreferences = {
   theme: 'system',
   sidebarWidth: 280,
   secretScanConsent: 'unasked',
+  secretScanNotify: true,
   sentryEnabled: false,
 }
 

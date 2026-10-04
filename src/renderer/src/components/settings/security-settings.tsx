@@ -37,6 +37,7 @@ const REDACTION_OPTIONS: {
 
 export default function SecuritySettings(): React.JSX.Element {
   const { prefs, updatePref, updatePrefs } = useSettingsStore()
+  const scanningOn = prefs.secretScanEnabled && prefs.secretScanConsent === 'granted'
   // Turning scanning on here is an explicit answer, the same as the prompt's.
   const setScanning = (on: boolean): void => {
     void updatePrefs(
@@ -49,7 +50,7 @@ export default function SecuritySettings(): React.JSX.Element {
   return (
     <div className="space-y-6">
       {/* Secret scanning toggle */}
-      <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+      <div className="flex items-start justify-between gap-4 rounded-t-lg border p-4">
         <div className="flex gap-3">
           <Shield className="h-5 w-5 mt-0.5 text-primary shrink-0" />
           <div>
@@ -62,10 +63,27 @@ export default function SecuritySettings(): React.JSX.Element {
             </p>
           </div>
         </div>
+        <Switch id="secret-scan-toggle" checked={scanningOn} onCheckedChange={setScanning} />
+      </div>
+
+      <div className="-mt-6 flex items-start justify-between gap-4 rounded-b-lg border border-t-0 px-4 py-3 pl-12">
+        <div>
+          <Label
+            htmlFor="secret-notify-toggle"
+            className={`text-sm cursor-pointer ${scanningOn ? '' : 'text-muted-foreground'}`}
+          >
+            Also show a system notification
+          </Label>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            When ClaudeWatch is in the background. It names the session and the kind of secret,
+            never the value.
+          </p>
+        </div>
         <Switch
-          id="secret-scan-toggle"
-          checked={prefs.secretScanEnabled && prefs.secretScanConsent === 'granted'}
-          onCheckedChange={setScanning}
+          id="secret-notify-toggle"
+          checked={scanningOn && prefs.secretScanNotify}
+          disabled={!scanningOn}
+          onCheckedChange={(v) => updatePref('secretScanNotify', v)}
         />
       </div>
 

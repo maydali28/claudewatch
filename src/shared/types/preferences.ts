@@ -21,6 +21,8 @@ export interface AppPreferences {
    * `granted`, "Not now" records `declined`.
    */
   secretScanConsent: SecretScanConsent
+  /** Also show a system notification for a new finding while ClaudeWatch is not focused. */
+  secretScanNotify: boolean
   redactionLevel: 'none' | 'mask' | 'remove'
   launchAtLogin: boolean
   trayTipDismissed: boolean
@@ -38,6 +40,7 @@ export const DEFAULT_PREFERENCES: AppPreferences = {
   pricingOverrides: {},
   secretScanEnabled: false,
   secretScanConsent: 'unasked',
+  secretScanNotify: true,
   redactionLevel: 'mask',
   launchAtLogin: false,
   trayTipDismissed: false,

@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import { BrowserWindow, Notification } from 'electron'
 import { app, autoUpdater as squirrelUpdater, session } from 'electron'
 import { spawn } from 'child_process'
 
@@ -23,6 +23,8 @@ import { handleSquirrelEvent } from './lib/squirrel-events'
 import { setAutostart } from './services/autostart'
 import { initSecretScanService } from './services/secret-scan-service'
 import { createSecretFindingsStore } from './services/secret-findings-store'
+import { notifySecretFindings } from './services/secret-notifier'
+import { peekCachedSessionsForProject } from '@main/ipc/sessions.handlers'
 
 app.setName('ClaudeWatch')
 
@@ -238,7 +240,28 @@ function bootstrap(): void {
         const prefs = Preferences.get()
         return prefs.secretScanEnabled && prefs.secretScanConsent === 'granted'
       },
-      onNewFindings: (findings) => broadcastToRenderers(CHANNELS.PUSH_SECRETS_FOUND, findings),
+      onNewFindings: (findings) => {
+        broadcastToRenderers(CHANNELS.PUSH_SECRETS_FOUND, findings)
+        notifySecretFindings(findings, {
+          isEnabled: () => Preferences.get().secretScanNotify && Notification.isSupported(),
+          isAppFocused: () => BrowserWindow.getFocusedWindow() !== null,
+          titleOf: (projectId, sessionId) =>
+            peekCachedSessionsForProject(projectId).find((s) => s.id === sessionId)?.title,
+          show: ({ title, body, onClick }) => {
+            log.info('Secret notification:', body)
+            const note = new Notification({ title, body })
+            note.on('click', onClick)
+            note.show()
+          },
+          openSession: (projectId, sessionId) => {
+            const win = mainWindow
+            if (!win) return
+            win.show()
+            win.focus()
+            win.webContents.send(CHANNELS.PUSH_NAVIGATE_SESSION, { sessionId, projectId })
+          },
+        })
+      },
     })
     void secretScan.sync()
 
