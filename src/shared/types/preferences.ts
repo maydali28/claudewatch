@@ -18,7 +18,10 @@ export interface AppPreferences {
    * as gateway aliases, Bedrock ARNs and Foundry deployment names.
    */
   modelPreferences: ModelPreferences
+  /** Settings › Alerts daily budget in USD; 0 or unset is off. */
   costAlertThreshold?: number
+  /** Settings › Alerts per-session limit in USD; 0 or unset is off. */
+  sessionCostAlertThreshold?: number
   /**
    * The Settings › Security switch for scanning transcripts for leaked
    * secrets. Scanning runs only while this is on AND `secretScanConsent` is

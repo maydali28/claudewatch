@@ -141,6 +141,7 @@ export const SettingsSetSchema = z
       })
     ),
     costAlertThreshold: z.number().nonnegative(),
+    sessionCostAlertThreshold: z.number().nonnegative(),
     secretScanEnabled: z.boolean(),
     secretScanConsent: z.enum(['unasked', 'granted', 'declined']),
     secretScanNotify: z.boolean(),

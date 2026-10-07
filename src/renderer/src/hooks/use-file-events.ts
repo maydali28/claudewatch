@@ -9,7 +9,7 @@ import { useUIStore } from '@renderer/store/ui.store'
 import { useSettingsStore } from '@renderer/store/settings.store'
 import { useSecretsStore } from '@renderer/store/secrets.store'
 import { toast } from '@renderer/components/shared/toast-host'
-import type { SecretFindingRecord } from '@shared/types'
+import type { CostAlertNotice, SecretFindingRecord } from '@shared/types'
 
 /**
  * Subscribe to push events from the main process.
@@ -89,6 +89,27 @@ export function useFileEvents(): void {
       }
     })
 
+    // A Settings › Alerts threshold was passed. Main also sends a system
+    // notification when the dashboard is in the background.
+    const unsubCostAlert = ipc.on<CostAlertNotice[]>(CHANNELS.PUSH_COST_ALERT, (notices) => {
+      for (const notice of notices) {
+        toast(
+          notice.message.body,
+          'warning',
+          15_000,
+          notice.kind === 'session'
+            ? {
+                label: 'Open session',
+                onClick: () => {
+                  setView('sessions')
+                  loadParsedSession(notice.sessionId, notice.projectId)
+                },
+              }
+            : { label: 'Open analytics', onClick: () => setView('analytics') }
+        )
+      }
+    })
+
     // Redaction is applied in main on the way out; a new setting needs a refetch.
     const unsubRedaction = useSettingsStore.subscribe((state, prev) => {
       if (state.prefs.redactionLevel !== prev.prefs.redactionLevel) {
@@ -121,6 +142,7 @@ export function useFileEvents(): void {
 
     return () => {
       unsubSecrets()
+      unsubCostAlert()
       unsubRedaction()
       unsubUpdated()
       unsubCreated()

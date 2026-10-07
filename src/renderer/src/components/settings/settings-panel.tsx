@@ -10,7 +10,6 @@ import AlertsSettings from './alerts-settings'
 import PrivacySettings from './privacy-settings'
 import AboutPanel from './about-panel'
 import { useUIStore } from '@renderer/store/ui.store'
-import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 import { cn } from '@renderer/lib/cn'
 
 const SECTION_TITLES: Record<SettingsSection, string> = {
@@ -46,9 +45,7 @@ function SectionContent({ section }: { section: SettingsSection }) {
 }
 
 export default function SettingsPanel(): React.JSX.Element {
-  const costAlertsEnabled = useFeatureFlags((s) => s.costAlerts)
   const [section, setSection] = useState<SettingsSection>('appearance')
-  const activeSection = section === 'alerts' && !costAlertsEnabled ? 'appearance' : section
   const sidebarWidth = useUIStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
   const [isResizing, setIsResizing] = useState(false)
@@ -89,7 +86,7 @@ export default function SettingsPanel(): React.JSX.Element {
         className="relative shrink-0 border-r bg-muted/20 overflow-hidden flex flex-col"
         style={{ width: sidebarWidth }}
       >
-        <SettingsSidebar active={activeSection} onChange={setSection} />
+        <SettingsSidebar active={section} onChange={setSection} />
         <div
           onMouseDown={onMouseDown}
           className={cn(
@@ -104,9 +101,9 @@ export default function SettingsPanel(): React.JSX.Element {
       {/* Content */}
       <ScrollArea className="flex-1">
         <div className="max-w-2xl mx-auto p-6">
-          <h2 className="text-xl font-semibold mb-1">{SECTION_TITLES[activeSection]}</h2>
+          <h2 className="text-xl font-semibold mb-1">{SECTION_TITLES[section]}</h2>
           <div className="h-px bg-border mb-6" />
-          <SectionContent section={activeSection} />
+          <SectionContent section={section} />
         </div>
       </ScrollArea>
     </div>

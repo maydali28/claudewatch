@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { FSWatcher } from 'chokidar'
 import type { BrowserWindow } from 'electron'
+import type { SessionSummary } from '@shared/types/session'
 import chokidar from 'chokidar'
 import { CHANNELS } from '@shared/ipc/channels'
 import { sessionCache } from '@shared/utils'
@@ -44,6 +45,8 @@ export interface FileWatcherDeps {
    * parse is, since it reads each file from its own offset.
    */
   onTranscriptsChanged?: (files: ReadonlySet<string>) => void
+  /** A session was re-parsed; its summary is already in the scan cache. Cost alerts check it. */
+  onSessionUpdated?: (summary: SessionSummary) => void
 }
 
 export class FileWatcher {
@@ -229,6 +232,7 @@ export class FileWatcher {
 
       const channel = isNewFile ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
       this.deps.broadcast(channel, sessionSummary)
+      this.deps.onSessionUpdated?.(sessionSummary)
     } catch (error) {
       log.error('Failed to re-parse session:', sessionId, error)
     }

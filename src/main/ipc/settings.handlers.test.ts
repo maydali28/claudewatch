@@ -156,3 +156,19 @@ describe('settings:set — pricing change cascade', () => {
     expect(result).toEqual({ ok: true, data: undefined })
   })
 })
+
+describe('settings:set — cost alert thresholds', () => {
+  it('accepts both thresholds, and 0 for off', async () => {
+    for (const patch of [
+      { costAlertThreshold: 25 },
+      { sessionCostAlertThreshold: 10 },
+      { costAlertThreshold: 0, sessionCostAlertThreshold: 0 },
+    ]) {
+      expect(await callSettingsSet(patch)).toEqual({ ok: true, data: undefined })
+    }
+  })
+
+  it('refuses a negative threshold', async () => {
+    expect(await callSettingsSet({ sessionCostAlertThreshold: -1 })).toMatchObject({ ok: false })
+  })
+})

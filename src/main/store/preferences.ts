@@ -65,6 +65,7 @@ const AppPreferencesSchema = z.object({
     .optional()
     .default({}),
   costAlertThreshold: z.number().optional(),
+  sessionCostAlertThreshold: z.number().optional(),
   secretScanEnabled: z.boolean(),
   secretScanConsent: z.enum(['unasked', 'granted', 'declined']),
   secretScanNotify: z.boolean(),

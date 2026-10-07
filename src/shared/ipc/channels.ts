@@ -114,6 +114,8 @@ export const CHANNELS = {
   PUSH_MAIN_ERROR: 'push:main-error',
   /** Secrets found that were not in the list before; masked values only. */
   PUSH_SECRETS_FOUND: 'push:secrets-found',
+  /** A Settings › Alerts threshold was just passed (`CostAlertNotice[]`). */
+  PUSH_COST_ALERT: 'push:cost-alert',
 } as const
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS]
@@ -132,4 +134,5 @@ export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_PREFERENCES_CHANGED'
   | 'PUSH_PRICING_CHANGED'
   | 'PUSH_MAIN_ERROR'
-  | 'PUSH_SECRETS_FOUND']
+  | 'PUSH_SECRETS_FOUND'
+  | 'PUSH_COST_ALERT']

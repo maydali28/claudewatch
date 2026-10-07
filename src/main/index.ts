@@ -24,7 +24,9 @@ import { setAutostart } from './services/autostart'
 import { initSecretScanService } from './services/secret-scan-service'
 import { createSecretFindingsStore } from './services/secret-findings-store'
 import { notifySecretFindings } from './services/secret-notifier'
-import { peekCachedSessionsForProject } from '@main/ipc/sessions.handlers'
+import { getOrScanProjects, peekCachedSessionsForProject } from '@main/ipc/sessions.handlers'
+import { CostAlertTracker, describeCostAlert } from './services/cost-alerts'
+import type { CostAlertNotice, CostAlertThresholds, SessionSummary } from '@shared/types'
 import { onClaudeDirChange } from './services/claude-dir-service'
 import { scanCache } from './services/scan-cache'
 import { sessionCache } from '@shared/utils'
@@ -270,6 +272,49 @@ function bootstrap(): void {
     })
     void secretScan.sync()
 
+    // Cost alerts (Settings › Alerts), checked on every re-parsed session.
+    // What is already over at launch is recorded first, so a restart is quiet.
+    const costAlerts = new CostAlertTracker()
+    const costThresholds = (): CostAlertThresholds => {
+      const prefs = Preferences.get()
+      return { daily: prefs.costAlertThreshold, session: prefs.sessionCostAlertThreshold }
+    }
+    const allSessions = async (): Promise<SessionSummary[]> =>
+      (await getOrScanProjects()).flatMap((p) => p.sessions)
+    const costBaseline = allSessions()
+      .then((sessions) => costAlerts.baseline(sessions, costThresholds()))
+      .catch((error) => log.error('Cost alert baseline failed:', error))
+    const checkCostAlerts = async (summary: SessionSummary): Promise<void> => {
+      await costBaseline
+      const others = (await allSessions()).filter((s) => s.id !== summary.id)
+      const alerts = costAlerts.check(summary, [...others, summary], costThresholds())
+      if (alerts.length === 0) return
+      const notices: CostAlertNotice[] = alerts.map((a) => ({
+        ...a,
+        message: describeCostAlert(a),
+      }))
+      broadcastToRenderers(CHANNELS.PUSH_COST_ALERT, notices)
+      // The in-app toast already says it while the dashboard has focus.
+      if (BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
+      for (const notice of notices) {
+        log.info('Cost notification:', notice.message.body)
+        const note = new Notification(notice.message)
+        note.on('click', () => {
+          const win = mainWindow
+          if (!win) return
+          win.show()
+          win.focus()
+          if (notice.kind === 'session') {
+            win.webContents.send(CHANNELS.PUSH_NAVIGATE_SESSION, {
+              sessionId: notice.sessionId,
+              projectId: notice.projectId,
+            })
+          }
+        })
+        note.show()
+      }
+    }
+
     // Start file watcher after handlers are registered and the window exists.
     const startWatcher = (claudeDir: string): void => {
       fileWatcher = new FileWatcher(claudeDir, {
@@ -277,6 +322,9 @@ function bootstrap(): void {
         getMainWindow: () => mainWindow,
         onTranscriptsChanged: (files) => {
           secretScan.scanChanged(files).catch((error) => log.error('Secret scan failed:', error))
+        },
+        onSessionUpdated: (summary) => {
+          checkCostAlerts(summary).catch((error) => log.error('Cost alert check failed:', error))
         },
       })
       fileWatcher.start()
