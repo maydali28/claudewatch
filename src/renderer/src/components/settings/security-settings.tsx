@@ -52,7 +52,7 @@ function TestNotificationButton(): React.JSX.Element {
     if (!result.ok) return
     setStatus(
       result.data.supported
-        ? 'Sent. Nothing showed? Allow notifications for “Electron” in System Settings › Notifications, and check Focus.'
+        ? 'Sent. No banner? Open the notification settings, allow “Electron”, and check that Focus is off.'
         : 'This system does not support notifications.'
     )
   }
@@ -65,20 +65,27 @@ function TestNotificationButton(): React.JSX.Element {
     }
   }
   return (
-    <div className="flex items-center gap-3 pt-2">
-      <Button variant="outline" size="sm" onClick={() => void send()} className="shrink-0 gap-1.5">
-        <BellRing className="h-3.5 w-3.5" />
-        Send test notification
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => void openSettings()}
-        className="shrink-0 gap-1.5"
-      >
-        <Settings2 className="h-3.5 w-3.5" />
-        Open notification settings
-      </Button>
+    <div className="space-y-2 pt-2">
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void send()}
+          className="shrink-0 gap-1.5"
+        >
+          <BellRing className="h-3.5 w-3.5" />
+          Send test notification
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void openSettings()}
+          className="shrink-0 gap-1.5"
+        >
+          <Settings2 className="h-3.5 w-3.5" />
+          Open notification settings
+        </Button>
+      </div>
       {status && <p className="text-xs text-muted-foreground">{status}</p>}
     </div>
   )

@@ -54,6 +54,7 @@ export async function secRules(
       ...(f.lineNumber !== undefined ? { line: f.lineNumber } : {}),
       message: `${f.patternName} found in a ${f.agentId ? 'sub-agent transcript' : 'session'}`,
       maskedSecret: f.maskedValue,
+      fix: 'If the key is real, revoke and replace it where it was issued, then dismiss the finding from the session’s Health tab or Settings › Security.',
       subagentFileName: f.agentId ?? f.sessionId,
       session: { sessionId: f.sessionId, projectId: f.projectId },
       detectedAt: f.foundAt,
