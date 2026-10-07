@@ -17,8 +17,11 @@ export const CHANNELS = {
   SECRETS_LIST: 'secrets:list',
   SECRETS_DISMISS: 'secrets:dismiss',
   SECRETS_SCAN_HISTORY: 'secrets:scan-history',
-  SECRETS_TEST_NOTIFICATION: 'secrets:test-notification',
-  SECRETS_OPEN_NOTIFICATION_SETTINGS: 'secrets:open-notification-settings',
+
+  // System notifications (secret and cost alerts)
+  NOTIFICATIONS_STATUS: 'notifications:status',
+  NOTIFICATIONS_TEST: 'notifications:test',
+  NOTIFICATIONS_OPEN_SETTINGS: 'notifications:open-settings',
 
   // Analytics
   ANALYTICS_GET: 'analytics:get',
@@ -116,6 +119,8 @@ export const CHANNELS = {
   PUSH_SECRETS_FOUND: 'push:secrets-found',
   /** A Settings › Alerts threshold was just passed (`CostAlertNotice[]`). */
   PUSH_COST_ALERT: 'push:cost-alert',
+  /** Whether the OS showed or refused the last system notification (`NotificationStatus`). */
+  PUSH_NOTIFICATION_STATUS: 'push:notification-status',
 } as const
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS]
@@ -135,4 +140,5 @@ export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_PRICING_CHANGED'
   | 'PUSH_MAIN_ERROR'
   | 'PUSH_SECRETS_FOUND'
-  | 'PUSH_COST_ALERT']
+  | 'PUSH_COST_ALERT'
+  | 'PUSH_NOTIFICATION_STATUS']

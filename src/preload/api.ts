@@ -52,8 +52,13 @@ export const api = {
     list: () => invoke(CHANNELS.SECRETS_LIST),
     dismiss: (ids: string[]) => invoke(CHANNELS.SECRETS_DISMISS, { ids }),
     scanHistory: () => invoke(CHANNELS.SECRETS_SCAN_HISTORY),
-    testNotification: () => invoke(CHANNELS.SECRETS_TEST_NOTIFICATION),
-    openNotificationSettings: () => invoke(CHANNELS.SECRETS_OPEN_NOTIFICATION_SETTINGS),
+  },
+
+  // ─── System notifications ───────────────────────────────────────────────────
+  notifications: {
+    status: () => invoke(CHANNELS.NOTIFICATIONS_STATUS),
+    test: () => invoke(CHANNELS.NOTIFICATIONS_TEST),
+    openSettings: () => invoke(CHANNELS.NOTIFICATIONS_OPEN_SETTINGS),
   },
 
   // ─── Analytics ──────────────────────────────────────────────────────────────

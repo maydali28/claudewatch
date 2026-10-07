@@ -20,6 +20,7 @@ import type { AppPreferences } from '@shared/types/preferences'
 import type { ClaudeDirInspection, ClaudeDirSource } from '@shared/types/claude-dir'
 import type { SeenModel } from '@shared/types/pricing'
 import type { SecretFindingRecord, SecretHistoryScanResult } from '@shared/types/secrets'
+import type { NotificationStatus } from '@shared/types/notifications'
 
 // ─── Result Wrapper ───────────────────────────────────────────────────────────
 // Never throw across IPC — error objects lose type information over serialization.
@@ -84,13 +85,17 @@ export interface IPCContracts {
     request: void
     response: Result<SecretHistoryScanResult>
   }
-  // Development builds only: whether the OS supports notifications at all.
-  'secrets:test-notification': {
+  'notifications:status': {
+    request: void
+    response: Result<NotificationStatus>
+  }
+  // Sends a sample notification; the status follows by push once the OS answers.
+  'notifications:test': {
     request: void
     response: Result<{ supported: boolean }>
   }
-  // Development builds only: false where the OS has no settings page to open.
-  'secrets:open-notification-settings': {
+  // False where the OS has no settings page to open.
+  'notifications:open-settings': {
     request: void
     response: Result<{ opened: boolean }>
   }

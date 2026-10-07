@@ -18,10 +18,20 @@ export interface AppPreferences {
    * as gateway aliases, Bedrock ARNs and Foundry deployment names.
    */
   modelPreferences: ModelPreferences
-  /** Settings › Alerts daily budget in USD; 0 or unset is off. */
+  /** Settings › Cost alerts daily budget in USD; 0 or unset uses the default amount. */
   costAlertThreshold?: number
-  /** Settings › Alerts per-session limit in USD; 0 or unset is off. */
+  /** Settings › Cost alerts per-session limit in USD; 0 or unset uses the default amount. */
   sessionCostAlertThreshold?: number
+  /**
+   * Settings › Cost alerts switches. Unset reads through
+   * `resolveCostAlertSettings`, so a daily threshold saved before they
+   * existed keeps its alert on.
+   */
+  costAlertsEnabled?: boolean
+  dailyCostAlertEnabled?: boolean
+  sessionCostAlertEnabled?: boolean
+  /** Also show cost alerts as system notifications; unset is on. */
+  costAlertNotify?: boolean
   /**
    * The Settings › Security switch for scanning transcripts for leaked
    * secrets. Scanning runs only while this is on AND `secretScanConsent` is

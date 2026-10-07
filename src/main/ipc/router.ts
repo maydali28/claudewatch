@@ -7,6 +7,7 @@ import { registerSettingsHandlers } from './settings.handlers'
 import { registerUpdateHandlers } from './update.handlers'
 import { registerExportHandlers } from './export.handlers'
 import { registerSecretsHandlers } from './secrets.handlers'
+import { registerNotificationsHandlers } from './notifications.handlers'
 import { registerAppHandlers } from './app.handlers'
 import { registerFeedbackHandlers } from './feedback.handlers'
 import { registerSentryHandlers } from './sentry.handlers'
@@ -25,6 +26,7 @@ export function registerAllHandlers(): void {
   registerUpdateHandlers()
   registerExportHandlers()
   registerSecretsHandlers()
+  registerNotificationsHandlers()
   registerPlansHandlers()
   registerAppHandlers()
   registerFeedbackHandlers()

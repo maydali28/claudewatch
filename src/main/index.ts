@@ -26,7 +26,9 @@ import { createSecretFindingsStore } from './services/secret-findings-store'
 import { notifySecretFindings } from './services/secret-notifier'
 import { getOrScanProjects, peekCachedSessionsForProject } from '@main/ipc/sessions.handlers'
 import { CostAlertTracker, describeCostAlert } from './services/cost-alerts'
-import type { CostAlertNotice, CostAlertThresholds, SessionSummary } from '@shared/types'
+import { initNotifier } from './services/notifier'
+import { costAlertThresholds, resolveCostAlertSettings } from '@shared/utils/cost-alert-settings'
+import type { CostAlertNotice, SessionSummary } from '@shared/types'
 import { onClaudeDirChange } from './services/claude-dir-service'
 import { scanCache } from './services/scan-cache'
 import { sessionCache } from '@shared/utils'
@@ -238,6 +240,18 @@ function bootstrap(): void {
     // pushes PUSH_UPDATE_AVAILABLE to the renderer when an update is found.
     initUpdateService()
 
+    // Every system notification goes through one notifier, which learns from
+    // each whether the OS shows them and tells the windows (Settings shows a
+    // way to fix it when they are blocked).
+    const notifier = initNotifier({
+      isSupported: () => Notification.isSupported(),
+      create: (options) => new Notification(options),
+      onStatusChange: (status) => {
+        log.info('Notification status:', status)
+        broadcastToRenderers(CHANNELS.PUSH_NOTIFICATION_STATUS, status)
+      },
+    })
+
     // Secret scanning, with the user's consent: findings are kept beside the
     // preferences, masked; live scanning starts only if it was turned on.
     const secretScan = initSecretScanService({
@@ -256,9 +270,7 @@ function bootstrap(): void {
             peekCachedSessionsForProject(projectId).find((s) => s.id === sessionId)?.title,
           show: ({ title, body, onClick }) => {
             log.info('Secret notification:', body)
-            const note = new Notification({ title, body })
-            note.on('click', onClick)
-            note.show()
+            notifier.show({ title, body, onClick })
           },
           openSession: (projectId, sessionId) => {
             const win = mainWindow
@@ -275,10 +287,7 @@ function bootstrap(): void {
     // Cost alerts (Settings › Alerts), checked on every re-parsed session.
     // What is already over at launch is recorded first, so a restart is quiet.
     const costAlerts = new CostAlertTracker()
-    const costThresholds = (): CostAlertThresholds => {
-      const prefs = Preferences.get()
-      return { daily: prefs.costAlertThreshold, session: prefs.sessionCostAlertThreshold }
-    }
+    const costThresholds = () => costAlertThresholds(Preferences.get())
     const allSessions = async (): Promise<SessionSummary[]> =>
       (await getOrScanProjects()).flatMap((p) => p.sessions)
     const costBaseline = allSessions()
@@ -295,23 +304,25 @@ function bootstrap(): void {
       }))
       broadcastToRenderers(CHANNELS.PUSH_COST_ALERT, notices)
       // The in-app toast already says it while the dashboard has focus.
-      if (BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) return
+      if (!resolveCostAlertSettings(Preferences.get()).notify) return
+      if (BrowserWindow.getFocusedWindow() !== null) return
       for (const notice of notices) {
         log.info('Cost notification:', notice.message.body)
-        const note = new Notification(notice.message)
-        note.on('click', () => {
-          const win = mainWindow
-          if (!win) return
-          win.show()
-          win.focus()
-          if (notice.kind === 'session') {
-            win.webContents.send(CHANNELS.PUSH_NAVIGATE_SESSION, {
-              sessionId: notice.sessionId,
-              projectId: notice.projectId,
-            })
-          }
+        notifier.show({
+          ...notice.message,
+          onClick: () => {
+            const win = mainWindow
+            if (!win) return
+            win.show()
+            win.focus()
+            if (notice.kind === 'session') {
+              win.webContents.send(CHANNELS.PUSH_NAVIGATE_SESSION, {
+                sessionId: notice.sessionId,
+                projectId: notice.projectId,
+              })
+            }
+          },
         })
-        note.show()
       }
     }
 

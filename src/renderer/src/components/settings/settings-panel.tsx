@@ -18,7 +18,7 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   pricing: 'Pricing',
   models: 'Models',
   security: 'Security',
-  alerts: 'Alerts',
+  alerts: 'Cost alerts',
   privacy: 'Privacy',
   about: 'About',
 }
