@@ -60,6 +60,8 @@ export interface TrayData {
   updateInfo: UpdateInfo | null
   launchAtLogin: boolean
   trayTipDismissed: boolean
+  /** True once the stored settings have arrived (not the placeholder). */
+  settingsLoaded: boolean
   setLaunchAtLogin: (val: boolean) => Promise<void>
   dismissTrayTip: () => Promise<void>
 }
@@ -214,6 +216,9 @@ export function useTrayData(): TrayData {
     updateInfo: updateInfoQuery.data ?? null,
     launchAtLogin: settingsQuery.data?.launchAtLogin ?? false,
     trayTipDismissed: settingsQuery.data?.trayTipDismissed ?? false,
+    // The stored settings, not the placeholder shown until they arrive: a
+    // decision taken on the placeholder sees "tip not dismissed" every time.
+    settingsLoaded: settingsQuery.isSuccess && !settingsQuery.isPlaceholderData,
     setLaunchAtLogin,
     dismissTrayTip,
   }

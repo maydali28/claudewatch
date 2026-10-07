@@ -168,6 +168,7 @@ export default function TrayPopover(): React.JSX.Element {
     updateInfo,
     launchAtLogin,
     trayTipDismissed,
+    settingsLoaded,
   } = useTrayData()
 
   const hasActivity = activeSessions.length > 0 || recentSessions.length > 0
@@ -180,12 +181,15 @@ export default function TrayPopover(): React.JSX.Element {
     ...[...activeSessions, ...recentSessions].map((s) => s.totalInputTokens + s.totalOutputTokens)
   )
 
-  // Open dedicated onboarding window once loading completes and tip hasn't been dismissed
+  // Open the onboarding window only once the stored settings say the tip was
+  // never dismissed. Gating on the analytics query's loading flag, as before,
+  // read the settings placeholder (`trayTipDismissed: false`) whenever
+  // analytics arrived first, and reopened the window on every launch.
   useEffect(() => {
-    if (!isLoading && !trayTipDismissed) {
+    if (settingsLoaded && !trayTipDismissed) {
       ipc.tray.showOnboarding(launchAtLogin)
     }
-  }, [isLoading, trayTipDismissed, launchAtLogin])
+  }, [settingsLoaded, trayTipDismissed, launchAtLogin])
 
   return (
     <TooltipProvider delayDuration={300}>
