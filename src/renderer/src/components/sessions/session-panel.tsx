@@ -28,11 +28,11 @@ import { ExportMenu } from './export-menu'
 import { SessionSubagentsTab } from './insights/session-subagents-tab'
 import { SessionToolsTab } from './insights/session-tools-tab'
 import { SubagentConversationDialog } from './insights/subagent-transcript'
+import { SessionHealthTab } from './insights/session-health-tab'
 import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
-
-/** Overview is the conversation with its details panel; the others replace the conversation. */
-type SessionTab = 'overview' | 'subagents' | 'tools'
-import type { LintCheckId, LintSeverity, SessionSummary } from '@shared/types'
+import { useSecretsBySession, sessionHealth } from '@renderer/hooks/use-session-health'
+import type { SessionHealth } from '@renderer/hooks/use-session-health'
+import type { SessionTab } from '@renderer/store/ui.store'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80
 
@@ -42,57 +42,9 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 80
 // of the oldest mounted one. Keeps first-paint cheap even on sessions with
 // hundreds of turns. Rules and sizes live in `render-window.ts`.
 
-// ─── Session lint flag evaluation (mirrors SES001–SES006 thresholds) ──────────
-
-const SES_THRESHOLDS = {
-  cost: 25.0,
-  compactions: 5,
-  tokens: 2_000_000,
-  staleDays: 14,
-  // Halved when message counting moved from records to API responses: the old
-  // value of 10 was calibrated against counts inflated ~2.09x.
-  staleMinMessages: 5,
-}
-
-function evaluateSessionLintFlags(session: SessionSummary): {
-  flags: LintCheckId[]
-  severity: LintSeverity | null
-} {
-  const flags: LintCheckId[] = []
-  const totalTokens = session.totalInputTokens + session.totalOutputTokens
-  const staleMs = SES_THRESHOLDS.staleDays * 24 * 60 * 60 * 1000
-
-  if (session.estimatedCost > SES_THRESHOLDS.cost) flags.push('SES001')
-  if (session.compactionCount >= SES_THRESHOLDS.compactions) flags.push('SES002')
-  if (totalTokens > SES_THRESHOLDS.tokens) flags.push('SES003')
-  if (
-    Date.now() - new Date(session.lastTimestamp).getTime() > staleMs &&
-    session.messageCount >= SES_THRESHOLDS.staleMinMessages
-  ) {
-    flags.push('SES004')
-  }
-  if (session.hasError) flags.push('SES005')
-  if (session.observability.hasIdleZombieGap) flags.push('SES006')
-
-  if (flags.length === 0) return { flags, severity: null }
-  const warningFlags: LintCheckId[] = ['SES001', 'SES002', 'SES003', 'SES005', 'SES006']
-  const severity: LintSeverity = flags.some((f) => warningFlags.includes(f)) ? 'warning' : 'info'
-  return { flags, severity }
-}
-
-const FLAG_DESCRIPTIONS: Partial<Record<LintCheckId, string>> = {
-  SES001: 'Cost exceeds $25',
-  SES002: '5+ compaction cycles',
-  SES003: 'More than 2M tokens consumed',
-  SES004: 'Stale session (14+ days)',
-  SES005: 'Error patterns detected',
-  SES006: 'Idle/zombie gap detected',
-}
-
 interface SessionLintBadgeProps {
-  flags: LintCheckId[]
-  severity: LintSeverity
-  onClickLint: () => void
+  health: SessionHealth
+  onClick: () => void
 }
 
 const TAG_META: Record<
@@ -130,41 +82,44 @@ function SessionTagBadge({ tag }: { tag: string }): React.JSX.Element | null {
   )
 }
 
-function SessionLintBadge({
-  flags,
-  severity,
-  onClickLint,
-}: SessionLintBadgeProps): React.JSX.Element {
+function SessionLintBadge({ health, onClick }: SessionLintBadgeProps): React.JSX.Element {
   const colorClass =
-    severity === 'error'
+    health.severity === 'error'
       ? 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20'
-      : severity === 'warning'
+      : health.severity === 'warning'
         ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20'
         : 'border-blue-500/40 bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
+  const secretCount = health.secrets.length
 
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={onClickLint}
+            onClick={onClick}
             className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${colorClass}`}
           >
             <ShieldAlert className="h-3 w-3 shrink-0" />
-            {flags.length} lint {flags.length === 1 ? 'issue' : 'issues'}
+            {health.count} health {health.count === 1 ? 'issue' : 'issues'}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-[220px] text-[10px]">
-          <p className="font-semibold mb-1">{flags.join(', ')}</p>
+        <TooltipContent side="bottom" className="max-w-[240px] text-[10px]">
           <ul className="space-y-0.5">
-            {flags.map((f) => (
-              <li key={f} className="text-muted-foreground">
-                <span className="font-medium text-foreground">{f}:</span>{' '}
-                {FLAG_DESCRIPTIONS[f] ?? f}
+            {health.checks.map((c) => (
+              <li key={c.checkId} className="text-muted-foreground">
+                <span className="font-medium text-foreground">{c.checkId}:</span> {c.title}
               </li>
             ))}
+            {secretCount > 0 && (
+              <li className="text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {secretCount} secret{secretCount === 1 ? '' : 's'}
+                </span>{' '}
+                found in the transcript
+              </li>
+            )}
           </ul>
-          <p className="mt-1.5 text-muted-foreground">Click to open Health</p>
+          <p className="mt-1.5 text-muted-foreground">Click for the session’s Health tab</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -181,7 +136,9 @@ export default function SessionPanel(): React.JSX.Element | null {
     projects,
     closeActiveSession,
   } = useSessionsStore()
-  const { setView } = useUIStore()
+  const sessionTabRequest = useUIStore((s) => s.sessionTabRequest)
+  const clearSessionTabRequest = useUIStore((s) => s.clearSessionTabRequest)
+  const secretsBySession = useSecretsBySession()
 
   const activeSessionSummary = React.useMemo(() => {
     if (!activeSessionId) return null
@@ -192,9 +149,12 @@ export default function SessionPanel(): React.JSX.Element | null {
     return null
   }, [projects, activeSessionId])
 
-  const sessionLint = React.useMemo(
-    () => (activeSessionSummary ? evaluateSessionLintFlags(activeSessionSummary) : null),
-    [activeSessionSummary]
+  const health = React.useMemo(
+    () =>
+      activeSessionSummary
+        ? sessionHealth(activeSessionSummary, secretsBySession.get(activeSessionSummary.id))
+        : null,
+    [activeSessionSummary, secretsBySession]
   )
 
   const sessionTags = React.useMemo(() => {
@@ -319,6 +279,23 @@ export default function SessionPanel(): React.JSX.Element | null {
     }
     setTab(next)
   }, [])
+
+  // A link elsewhere (a health badge, a Health view row) asked for this
+  // session on a given tab.
+  // Applied during render, once the requested session is the open one; the
+  // request object itself marks it as handled.
+  const [handledTabRequest, setHandledTabRequest] = useState<typeof sessionTabRequest>(null)
+  if (
+    sessionTabRequest &&
+    sessionTabRequest !== handledTabRequest &&
+    sessionTabRequest.sessionId === activeSessionId
+  ) {
+    setHandledTabRequest(sessionTabRequest)
+    setTab(sessionTabRequest.tab)
+  }
+  useEffect(() => {
+    if (handledTabRequest) clearSessionTabRequest()
+  }, [handledTabRequest, clearSessionTabRequest])
 
   // Opens over whichever tab is showing, so the reader keeps their place.
   const openSubagentConversation = setOpenAgentId
@@ -563,12 +540,8 @@ export default function SessionPanel(): React.JSX.Element | null {
                 {sessionTags.map((tag) => (
                   <SessionTagBadge key={tag} tag={tag} />
                 ))}
-                {sessionLint && sessionLint.flags.length > 0 && sessionLint.severity && (
-                  <SessionLintBadge
-                    flags={sessionLint.flags}
-                    severity={sessionLint.severity}
-                    onClickLint={() => setView('lint')}
-                  />
+                {health && health.count > 0 && (
+                  <SessionLintBadge health={health} onClick={() => changeTab('health')} />
                 )}
               </div>
             </div>
@@ -614,6 +587,16 @@ export default function SessionPanel(): React.JSX.Element | null {
               </TabsTrigger>
               <TabsTrigger value="tools" className="px-2.5 py-0.5 text-[11px]">
                 Tools &amp; MCPs
+              </TabsTrigger>
+              <TabsTrigger value="health" className="px-2.5 py-0.5 text-[11px]">
+                Health
+                {health && health.count > 0 && (
+                  <span
+                    className={`ml-1 tabular-nums ${health.severity === 'error' ? 'text-destructive' : health.severity === 'warning' ? 'text-amber-600' : 'text-muted-foreground'}`}
+                  >
+                    {health.count}
+                  </span>
+                )}
               </TabsTrigger>
             </TabsList>
           </Tabs>
@@ -668,6 +651,16 @@ export default function SessionPanel(): React.JSX.Element | null {
             <SessionToolsTab
               toolUsage={activeSessionSummary?.toolUsage ?? []}
               timeline={parsedSession.responseTimeline ?? []}
+            />
+          </div>
+        )}
+
+        {tab === 'health' && health && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <SessionHealthTab
+              health={health}
+              metadata={parsedSession.metadata}
+              onOpenSubagent={setOpenAgentId}
             />
           </div>
         )}

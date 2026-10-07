@@ -9,39 +9,66 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@renderer/components/ui/tooltip'
-import type { SessionSummary, LintCheckId, LintSeverity } from '@shared/types'
+import type { SessionSummary } from '@shared/types'
+import type { SessionHealth } from '@renderer/hooks/use-session-health'
 import { isSessionLive, isSubagentRunning } from '@shared/utils/live-session'
 import { ACTIVE_SESSION_MS, LIVE_REFRESH_INTERVAL_MS } from '@shared/constants/tuning'
 
-interface LintIndicatorProps {
-  flags: LintCheckId[]
-  severity: LintSeverity
-}
-
-function LintIndicator({ flags, severity }: LintIndicatorProps): React.JSX.Element {
+function LintIndicator({
+  health,
+  onOpen,
+}: {
+  health: SessionHealth
+  onOpen: () => void
+}): React.JSX.Element {
   const colorClass =
-    severity === 'error'
+    health.severity === 'error'
       ? 'text-destructive'
-      : severity === 'warning'
+      : health.severity === 'warning'
         ? 'text-amber-500'
         : 'text-blue-500'
+  const labels = [
+    ...health.checks.map((c) => c.title),
+    ...(health.secrets.length > 0
+      ? [`${health.secrets.length} secret${health.secrets.length === 1 ? '' : 's'} found`]
+      : []),
+  ]
 
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className={`flex items-center ${colorClass}`}>
-            <ShieldAlert className="h-2.5 w-2.5 shrink-0" />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="text-[10px]">
-          <p className="font-semibold mb-0.5">
-            {flags.length} lint issue{flags.length > 1 ? 's' : ''}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* A span, not a button: the whole row is already a button. */}
+        <span
+          className={`flex items-center rounded p-0.5 hover:bg-background ${colorClass}`}
+          role="button"
+          tabIndex={0}
+          aria-label={`${health.count} health issues: open the session's Health tab`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpen()
+          }}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            e.preventDefault()
+            e.stopPropagation()
+            onOpen()
+          }}
+        >
+          <ShieldAlert className="h-2.5 w-2.5 shrink-0" />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right" className="text-[10px]">
+        <p className="font-semibold mb-0.5">
+          {health.count} health issue{health.count > 1 ? 's' : ''}
+        </p>
+        {labels.map((l) => (
+          <p key={l} className="text-muted-foreground">
+            {l}
           </p>
-          <p className="text-muted-foreground">{flags.join(', ')}</p>
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+        ))}
+        <p className="mt-1 text-muted-foreground">Click for the session’s Health tab</p>
+      </TooltipContent>
+    </Tooltip>
   )
 }
 
@@ -52,8 +79,9 @@ interface SessionListItemProps {
   /** Total tokens across all sessions in the same project, for the progress bar */
   projectTotalTokens: number
   searchQuery?: string
-  lintFlags?: LintCheckId[]
-  lintSeverity?: LintSeverity
+  /** Set when the session fails a check or holds a secret. */
+  health?: SessionHealth
+  onOpenHealth?: () => void
   onClick: () => void
 }
 
@@ -104,8 +132,8 @@ export default function SessionListItem({
   isLive,
   projectTotalTokens,
   searchQuery = '',
-  lintFlags,
-  lintSeverity,
+  health,
+  onOpenHealth,
   onClick,
 }: SessionListItemProps): React.JSX.Element {
   const [now, setNow] = useState(() => Date.now())
@@ -170,9 +198,7 @@ export default function SessionListItem({
                 </TooltipContent>
               </Tooltip>
             )}
-            {lintFlags && lintFlags.length > 0 && lintSeverity && (
-              <LintIndicator flags={lintFlags} severity={lintSeverity} />
-            )}
+            {health && onOpenHealth && <LintIndicator health={health} onOpen={onOpenHealth} />}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="flex items-center gap-1 cursor-default">

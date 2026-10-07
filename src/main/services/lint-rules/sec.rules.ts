@@ -55,6 +55,7 @@ export async function secRules(
       message: `${f.patternName} found in a ${f.agentId ? 'sub-agent transcript' : 'session'}`,
       maskedSecret: f.maskedValue,
       subagentFileName: f.agentId ?? f.sessionId,
+      session: { sessionId: f.sessionId, projectId: f.projectId },
       detectedAt: f.foundAt,
     }
   })

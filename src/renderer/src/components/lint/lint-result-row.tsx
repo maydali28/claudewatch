@@ -1,7 +1,16 @@
 import React, { useState } from 'react'
-import { ChevronDown, ChevronRight, AlertCircle, AlertTriangle, Info } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronRight,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  ArrowRight,
+} from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { LINT_RULE_MAP } from '@shared/constants/lint-rules'
+import { useSessionsStore } from '@renderer/store/sessions.store'
+import { useOpenSessionHealth } from '@renderer/hooks/use-session-health'
 import type { LintResult } from '@shared/types'
 
 const SEVERITY_ICON = {
@@ -25,6 +34,16 @@ export function LintResultRow({ result }: LintResultRowProps): React.JSX.Element
   const meta = LINT_RULE_MAP.get(result.checkId)
   const { Icon, cls } = SEVERITY_ICON[result.severity]
   const hasExtra = !!(result.fix || result.contextLines?.length || result.maskedSecret)
+  const openSessionHealth = useOpenSessionHealth()
+  const sessionTitle = useSessionsStore((s) => {
+    const id = result.session?.sessionId
+    if (!id) return undefined
+    for (const p of s.projects) {
+      const found = p.sessions.find((x) => x.id === id)
+      if (found) return found.title || id.slice(0, 8)
+    }
+    return id.slice(0, 8)
+  })
 
   return (
     <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -54,6 +73,26 @@ export function LintResultRow({ result }: LintResultRowProps): React.JSX.Element
           </div>
 
           <p className="text-xs text-foreground leading-snug">{result.message}</p>
+
+          {result.session && (
+            <span
+              role="link"
+              tabIndex={0}
+              onClick={(e) => {
+                e.stopPropagation()
+                openSessionHealth(result.session!.sessionId, result.session!.projectId)
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return
+                e.stopPropagation()
+                openSessionHealth(result.session!.sessionId, result.session!.projectId)
+              }}
+              className="mt-1 inline-flex max-w-full items-center gap-1 text-[11px] text-primary hover:underline"
+            >
+              <span className="truncate">{sessionTitle}</span>
+              <ArrowRight className="h-3 w-3 shrink-0" />
+            </span>
+          )}
 
           {result.displayPath && (
             <p className="text-[10px] text-muted-foreground mt-1 font-mono truncate">

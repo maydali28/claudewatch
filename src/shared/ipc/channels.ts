@@ -17,6 +17,8 @@ export const CHANNELS = {
   SECRETS_LIST: 'secrets:list',
   SECRETS_DISMISS: 'secrets:dismiss',
   SECRETS_SCAN_HISTORY: 'secrets:scan-history',
+  SECRETS_TEST_NOTIFICATION: 'secrets:test-notification',
+  SECRETS_OPEN_NOTIFICATION_SETTINGS: 'secrets:open-notification-settings',
 
   // Analytics
   ANALYTICS_GET: 'analytics:get',

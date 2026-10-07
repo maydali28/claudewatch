@@ -84,6 +84,16 @@ export interface IPCContracts {
     request: void
     response: Result<SecretHistoryScanResult>
   }
+  // Development builds only: whether the OS supports notifications at all.
+  'secrets:test-notification': {
+    request: void
+    response: Result<{ supported: boolean }>
+  }
+  // Development builds only: false where the OS has no settings page to open.
+  'secrets:open-notification-settings': {
+    request: void
+    response: Result<{ opened: boolean }>
+  }
   'sessions:export': {
     request: ExportRequest
     response: Result<string | null> // file path written, or null when the dialog was cancelled
