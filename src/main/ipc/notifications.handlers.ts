@@ -3,6 +3,7 @@ import { CHANNELS } from '@shared/ipc/channels'
 import { ok, err, toSafeError } from '@shared/ipc/contracts'
 import { captureHandlerException } from '@main/services/sentry'
 import { getNotifier } from '@main/services/notifier'
+import { readOsNotificationStatus } from '@main/services/notification-permission'
 
 /** The OS page where notifications are allowed per app. Fixed here, never from the renderer. */
 const NOTIFICATION_SETTINGS_URL: Partial<Record<NodeJS.Platform, string>> = {
@@ -11,8 +12,10 @@ const NOTIFICATION_SETTINGS_URL: Partial<Record<NodeJS.Platform, string>> = {
 }
 
 export function registerNotificationsHandlers(): void {
+  // macOS answers from System Settings itself; elsewhere, fall back to what
+  // the last notification sent reported.
   ipcMain.handle(CHANNELS.NOTIFICATIONS_STATUS, async () => {
-    return ok(getNotifier()?.status ?? 'unknown')
+    return ok((await readOsNotificationStatus()) ?? getNotifier()?.status ?? 'unknown')
   })
 
   // A sample alert, so whether the OS shows ClaudeWatch's notifications can be

@@ -8,12 +8,18 @@ export function useNotificationStatus(): NotificationStatus {
   const [status, setStatus] = useState<NotificationStatus>('unknown')
   useEffect(() => {
     let live = true
-    void ipc.notifications.status().then((r) => {
-      if (live && r.ok) setStatus(r.data)
-    })
+    const refresh = (): void => {
+      void ipc.notifications.status().then((r) => {
+        if (live && r.ok) setStatus(r.data)
+      })
+    }
+    refresh()
+    // Coming back from System Settings: ask again.
+    window.addEventListener('focus', refresh)
     const unsub = ipc.on<NotificationStatus>(CHANNELS.PUSH_NOTIFICATION_STATUS, setStatus)
     return () => {
       live = false
+      window.removeEventListener('focus', refresh)
       unsub()
     }
   }, [])
