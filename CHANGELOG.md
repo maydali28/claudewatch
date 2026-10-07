@@ -1,3 +1,39 @@
+## 1.6.0 (2026-10-07)
+
+
+### Features
+
+* **alerts:** warn when today's spend or a session's cost passes a limit you set
+* **analytics:** add a tools tab with usage per tool and mcp server
+* **analytics:** explain each session health flag when you hover it
+* **commands:** show plugin commands with their source and arguments
+* **health:** add a health view that checks your setup and sessions
+* **hooks:** show plugin and managed hooks, label every hook with its source
+* **memory:** list every project's memory files like the sessions list, with kind filters
+* **notifications:** tell you when macos has claudewatch's notifications turned off
+* **plans:** list shared plans under the projects that used them and show each folder
+* **plugins:** add a plugins tab with each plugin's skills, commands and hooks, each opening in full
+* **security:** also notify outside the app when a secret is found
+* **security:** ask once before scanning transcripts for secrets
+* **security:** mask or remove secrets in the session viewer and exports
+* **security:** warn when a secret lands in a transcript, and list what was found
+* **sessions:** add a health tab to each session
+* **sessions:** add tabs for a session's tools, mcp servers and sub-agents
+* **sessions:** export a session as markdown, json or csv
+* **sessions:** name sub-agents and show their run time and running state
+* **sessions:** open a sub-agent's own conversation
+* **sessions:** show sub-agents as a tree or graph of who started whom
+* **sessions:** show when each sub-agent ran on a timeline
+* **settings:** choose the claude folder claudewatch reads
+* **settings:** map custom model ids to a family, own rates and a display name
+* **skills:** list every skill your sessions load, with its source and last use
+
+### Bug Fixes
+
+* **memory:** list every project's auto-memory notes
+* **settings:** save every setting the app changes, and say so when one is refused
+* **toasts:** make in-app notices readable in the light theme
+* **tray:** stop reopening the welcome window on every launch
 ## 1.5.7 (2026-10-02)
 
 
