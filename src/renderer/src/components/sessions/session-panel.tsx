@@ -15,7 +15,6 @@ import { Skeleton } from '@renderer/components/ui/skeleton'
 import { format } from 'date-fns'
 import { useSessionsStore } from '@renderer/store/sessions.store'
 import { useUIStore } from '@renderer/store/ui.store'
-import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 import { formatTokens } from '@shared/utils'
 import {
   Tooltip,
@@ -165,7 +164,7 @@ function SessionLintBadge({
               </li>
             ))}
           </ul>
-          <p className="mt-1.5 text-muted-foreground">Click to view in Lint panel</p>
+          <p className="mt-1.5 text-muted-foreground">Click to open Health</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -183,7 +182,6 @@ export default function SessionPanel(): React.JSX.Element | null {
     closeActiveSession,
   } = useSessionsStore()
   const { setView } = useUIStore()
-  const lintEnabled = useFeatureFlags((s) => s.lint)
 
   const activeSessionSummary = React.useMemo(() => {
     if (!activeSessionId) return null
@@ -565,16 +563,13 @@ export default function SessionPanel(): React.JSX.Element | null {
                 {sessionTags.map((tag) => (
                   <SessionTagBadge key={tag} tag={tag} />
                 ))}
-                {lintEnabled &&
-                  sessionLint &&
-                  sessionLint.flags.length > 0 &&
-                  sessionLint.severity && (
-                    <SessionLintBadge
-                      flags={sessionLint.flags}
-                      severity={sessionLint.severity}
-                      onClickLint={() => setView('lint')}
-                    />
-                  )}
+                {sessionLint && sessionLint.flags.length > 0 && sessionLint.severity && (
+                  <SessionLintBadge
+                    flags={sessionLint.flags}
+                    severity={sessionLint.severity}
+                    onClickLint={() => setView('lint')}
+                  />
+                )}
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">

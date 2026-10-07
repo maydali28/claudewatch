@@ -42,7 +42,7 @@ const TOP_ITEMS: NavItem[] = [
   { id: 'plugins', icon: Puzzle, label: 'Plugins' },
   { id: 'mcps', icon: Server, label: 'MCPs' },
   { id: 'memory', icon: Brain, label: 'Memory' },
-  { id: 'lint', icon: ShieldCheck, label: 'Lint', flag: 'lint' },
+  { id: 'lint', icon: ShieldCheck, label: 'Health' },
 ]
 
 const BOTTOM_ITEM: NavItem = { id: 'settings', icon: Settings, label: 'Settings' }

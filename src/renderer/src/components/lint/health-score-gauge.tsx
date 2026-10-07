@@ -6,10 +6,10 @@ interface HealthScoreGaugeProps {
   size?: number // px, default 120
 }
 
+// One label per colour band, so the word never says better than the colour.
 function getLabel(pct: number): string {
-  if (pct >= 80) return 'Excellent'
-  if (pct >= 50) return 'Good'
-  if (pct >= 25) return 'Fair'
+  if (pct >= 80) return 'Good'
+  if (pct >= 50) return 'Fair'
   return 'Poor'
 }
 
@@ -75,18 +75,9 @@ export function HealthScoreGauge({ score, size = 120 }: HealthScoreGaugeProps): 
           fill={color}
         >
           {pct}
-        </text>
-        <text
-          x={cx}
-          y={cy + 16}
-          textAnchor="middle"
-          dominantBaseline="middle"
-          fontSize="8"
-          fill="currentColor"
-          className="text-muted-foreground"
-          opacity={0.6}
-        >
-          %
+          <tspan fontSize="9" fontWeight="600" dx="1" opacity={0.7}>
+            %
+          </tspan>
         </text>
       </svg>
       <span

@@ -50,7 +50,7 @@ export default function LintSidebar(): React.JSX.Element {
           onClick={() => runLint()}
           disabled={isRunning}
           className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors disabled:opacity-50"
-          title="Run lint"
+          title="Run the health checks"
         >
           <Play className={cn('h-3 w-3', isRunning && 'animate-pulse')} />
           {isRunning ? 'Running…' : 'Run'}

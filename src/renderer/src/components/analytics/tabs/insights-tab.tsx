@@ -512,7 +512,7 @@ function SessionHealthCard({ summary }: { summary: SessionHealthSummary }): Reac
   return (
     <ChartCard
       title="Session Health"
-      description="Sessions evaluated against SES001–SES006 lint rules"
+      description="Sessions evaluated against health checks SES001–SES006"
     >
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <HealthDonutChart summary={summary} />

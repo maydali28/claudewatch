@@ -12,7 +12,6 @@ import {
 import type { SessionSummary, LintCheckId, LintSeverity } from '@shared/types'
 import { isSessionLive, isSubagentRunning } from '@shared/utils/live-session'
 import { ACTIVE_SESSION_MS, LIVE_REFRESH_INTERVAL_MS } from '@shared/constants/tuning'
-import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 
 interface LintIndicatorProps {
   flags: LintCheckId[]
@@ -110,7 +109,6 @@ export default function SessionListItem({
   onClick,
 }: SessionListItemProps): React.JSX.Element {
   const [now, setNow] = useState(() => Date.now())
-  const lintEnabled = useFeatureFlags((s) => s.lint)
 
   useEffect(() => {
     if (!isLive) return
@@ -172,7 +170,7 @@ export default function SessionListItem({
                 </TooltipContent>
               </Tooltip>
             )}
-            {lintEnabled && lintFlags && lintFlags.length > 0 && lintSeverity && (
+            {lintFlags && lintFlags.length > 0 && lintSeverity && (
               <LintIndicator flags={lintFlags} severity={lintSeverity} />
             )}
             <Tooltip>

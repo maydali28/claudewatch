@@ -58,8 +58,7 @@ export default function MainPanel(): React.JSX.Element {
 
   useEffect(() => {
     if (activeView === 'timeline' && !flags.timeline) setView('analytics')
-    if (activeView === 'lint' && !flags.lint) setView('analytics')
-  }, [activeView, flags.timeline, flags.lint, setView])
+  }, [activeView, flags.timeline, setView])
 
   return (
     <main className="flex flex-1 flex-col overflow-auto bg-background">
