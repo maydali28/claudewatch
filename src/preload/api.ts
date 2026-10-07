@@ -58,6 +58,7 @@ export const api = {
   analytics: {
     get: (request: IPCRequest<typeof CHANNELS.ANALYTICS_GET>) =>
       invoke(CHANNELS.ANALYTICS_GET, request),
+    listModels: () => invoke(CHANNELS.ANALYTICS_LIST_MODELS),
   },
 
   // ─── Config ─────────────────────────────────────────────────────────────────

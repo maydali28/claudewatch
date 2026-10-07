@@ -26,6 +26,7 @@ vi.mock('@main/store/preferences', () => ({
 const BASE_PREFS: AppPreferences = {
   pricingProvider: 'anthropic',
   pricingOverrides: {},
+  modelPreferences: {},
   secretScanEnabled: false,
   redactionLevel: 'none',
   launchAtLogin: false,

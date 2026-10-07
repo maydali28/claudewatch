@@ -47,7 +47,11 @@ export function registerSettingsHandlers(): void {
       // them right back on the next read. Refreshing here recomputes with
       // the new active table and, via its pricing fingerprint, discards the
       // stale disk entries too — one call covers both caches.
-      if ('pricingProvider' in settingsPatch || 'pricingOverrides' in settingsPatch) {
+      if (
+        'pricingProvider' in settingsPatch ||
+        'pricingOverrides' in settingsPatch ||
+        'modelPreferences' in settingsPatch
+      ) {
         // Full parses carry an estimated cost too; drop them so an open
         // session is re-parsed at the new rates.
         sessionCache.clear()

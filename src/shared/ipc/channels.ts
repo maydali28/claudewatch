@@ -20,6 +20,7 @@ export const CHANNELS = {
 
   // Analytics
   ANALYTICS_GET: 'analytics:get',
+  ANALYTICS_LIST_MODELS: 'analytics:list-models',
 
   // Config
   CONFIG_GET_FULL: 'config:get-full',

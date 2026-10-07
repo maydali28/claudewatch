@@ -68,6 +68,7 @@ vi.mock('@main/services/scan-cache', () => ({
 const BASE_PREFS: AppPreferences = {
   pricingProvider: 'anthropic',
   pricingOverrides: {},
+  modelPreferences: {},
   secretScanEnabled: false,
   redactionLevel: 'none',
   launchAtLogin: false,

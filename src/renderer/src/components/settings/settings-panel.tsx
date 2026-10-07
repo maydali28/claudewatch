@@ -3,6 +3,7 @@ import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import SettingsSidebar, { type SettingsSection } from './settings-sidebar'
 import AppearanceSettings from './appearance-settings'
 import PricingSettings from './pricing-settings'
+import ModelsSettings from './models-settings'
 import ClaudeFolderSettings from './claude-folder-settings'
 import SecuritySettings from './security-settings'
 import AlertsSettings from './alerts-settings'
@@ -16,6 +17,7 @@ const SECTION_TITLES: Record<SettingsSection, string> = {
   appearance: 'Appearance',
   'claude-folder': 'Claude folder',
   pricing: 'Pricing',
+  models: 'Models',
   security: 'Security',
   alerts: 'Alerts',
   privacy: 'Privacy',
@@ -30,6 +32,8 @@ function SectionContent({ section }: { section: SettingsSection }) {
       return <ClaudeFolderSettings />
     case 'pricing':
       return <PricingSettings />
+    case 'models':
+      return <ModelsSettings />
     case 'security':
       return <SecuritySettings />
     case 'alerts':

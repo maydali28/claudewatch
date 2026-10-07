@@ -39,7 +39,7 @@ import {
 } from '@shared/utils/tool-usage-summary'
 import type { SessionDayUsage } from '@shared/types/session'
 import type { LintCheckId, LintSeverity } from '@shared/types/lint'
-import { getModelFamily } from '@shared/constants/models'
+import { ratesFor, resolveModelFamily } from '@shared/constants/pricing'
 
 import {
   resolveDateRange,
@@ -537,8 +537,7 @@ function computeCacheAnalytics(
   for (const s of sessions) {
     for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
-        if (m.family === 'unknown') continue
-        const p = pricingTable[m.family]
+        const p = ratesFor(pricingTable, m.family, m.model)
         if (!p) continue
         grossReadSavings += (m.cacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
         writePremium +=
@@ -610,8 +609,7 @@ function computeCacheAnalytics(
         reads += d.cacheReadTokens
         writes += d.cacheCreationTokens
         for (const m of d.models) {
-          if (m.family === 'unknown') continue
-          const p = pricingTable[m.family]
+          const p = ratesFor(pricingTable, m.family, m.model)
           if (!p) continue
           savings += (m.cacheReadTokens / 1_000_000) * (p.input - p.cacheRead)
         }
@@ -644,9 +642,9 @@ function computeCacheAnalytics(
   for (const s of sessions) {
     for (const d of daysInRange(s, fromKey, toKey, includeUndated)) {
       for (const m of d.models) {
-        const p = pricingTable[m.family]
-        const known = m.family !== 'unknown' && !!p
-        const perMTok = known ? p.input - p.cacheRead : 0
+        const p = ratesFor(pricingTable, m.family, m.model)
+        const known = !!p
+        const perMTok = p ? p.input - p.cacheRead : 0
         const gross = (m.cacheReadTokens / 1_000_000) * perMTok
         const premium = known
           ? (m.cacheCreation5mTokens / 1_000_000) * (p.cache5m - p.input) +
@@ -689,8 +687,8 @@ function computeCacheAnalytics(
         // and 1h tiers are counted above — a model with no pricing entry
         // still had real cache-write activity.
         totalCacheUnknownTtlTokens += m.cacheCreationUnknownTtlTokens
-        const p = pricingTable[m.family]
-        if (m.family === 'unknown' || !p) continue
+        const p = ratesFor(pricingTable, m.family, m.model)
+        if (!p) continue
         cost5m += (m.cacheCreation5mTokens / 1_000_000) * p.cache5m
         cost1h += (m.cacheCreation1hTokens / 1_000_000) * p.cache1h
         // No TTL was reported for this remainder, so there is no tier rate to
@@ -741,9 +739,9 @@ function computeCacheAnalytics(
   // summarisation call's own cost, or later cache reuse, so it must never be
   // presented as a measured saving — UI labels it explicitly hypothetical.
   const costAvoidedFor = (r: CompactionRollup): number => {
-    const family = getModelFamily(r.session.dominantModel)
-    const p = pricingTable[family]
-    if (family === 'unknown' || !p) return 0
+    const model = r.session.dominantModel
+    const p = ratesFor(pricingTable, resolveModelFamily(model, pricingTable), model)
+    if (!p) return 0
     return (r.tokensRemoved / 1_000_000) * p.input
   }
 

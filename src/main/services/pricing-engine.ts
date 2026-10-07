@@ -1,7 +1,9 @@
-import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
+import type { ModelFamily, ModelPricing, ModelRate } from '@shared/types/pricing'
 import {
   estimateCost as sharedEstimateCost,
   getActivePricingTable as sharedGetActivePricingTable,
+  ratesFor,
+  resolveModelFamily,
 } from '@shared/constants/pricing'
 import { getModelFamily } from '@shared/constants/models'
 
@@ -16,6 +18,8 @@ export {
   sharedEstimateCost as estimateCost,
   getModelFamily,
   sharedGetActivePricingTable as getActivePricingTable,
+  ratesFor,
+  resolveModelFamily,
 }
 
 // ─── pricingFingerprint ───────────────────────────────────────────────────────
@@ -33,10 +37,17 @@ export {
  * `Object.entries` order follows insertion, which for a spread-merged table
  * depends on which families were overridden — sorting keeps the digest a
  * function of the rates alone, not of how the table was assembled.
+ *
+ * A `model:<id>` entry adds the family the user mapped that ID to, so a
+ * mapping that leaves the rates unchanged still restamps: the family is
+ * stored per response, and model breakdowns group by it.
  */
 export function pricingFingerprint(table: Record<ModelFamily, ModelPricing>): string {
   return Object.entries(table)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([f, p]) => `${f}:${p.input},${p.output},${p.cacheRead},${p.cache5m},${p.cache1h}`)
+    .map(([f, p]: [string, ModelPricing & Partial<Pick<ModelRate, 'family'>>]) => {
+      const rates = `${p.input},${p.output},${p.cacheRead},${p.cache5m},${p.cache1h}`
+      return p.family ? `${f}=${p.family}:${rates}` : `${f}:${rates}`
+    })
     .join('|')
 }

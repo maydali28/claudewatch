@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { PRICED_FAMILIES } from '@shared/constants/pricing'
+import type { ModelFamily } from '@shared/types/pricing'
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
@@ -120,6 +122,22 @@ export const SettingsSetSchema = z
         cacheRead: z.number().nonnegative().optional(),
         cache5m: z.number().nonnegative().optional(),
         cache1h: z.number().nonnegative().optional(),
+      })
+    ),
+    modelPreferences: z.record(
+      z.string().trim().min(1).max(512),
+      z.strictObject({
+        family: z.enum(PRICED_FAMILIES as [ModelFamily, ...ModelFamily[]]).optional(),
+        rates: z
+          .strictObject({
+            input: z.number().nonnegative().optional(),
+            output: z.number().nonnegative().optional(),
+            cacheRead: z.number().nonnegative().optional(),
+            cache5m: z.number().nonnegative().optional(),
+            cache1h: z.number().nonnegative().optional(),
+          })
+          .optional(),
+        displayName: z.string().max(80).optional(),
       })
     ),
     costAlertThreshold: z.number().nonnegative(),

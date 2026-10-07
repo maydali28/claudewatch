@@ -43,3 +43,45 @@ export type ModelFamily =
   // Haiku 3.5 — $0.80/$4
   | 'haiku-3-5'
   | 'unknown'
+
+// ─── Model preferences ────────────────────────────────────────────────────────
+
+/**
+ * What the user said about one exact model ID (a gateway alias, a Bedrock
+ * ARN, a Foundry deployment name, …): which family it is, rates of its own,
+ * and the name to show for it. Every field is optional.
+ */
+export interface ModelPreference {
+  family?: ModelFamily
+  rates?: Partial<ModelPricing>
+  displayName?: string
+}
+
+/** Keyed by the exact model ID as transcripts write it. */
+export type ModelPreferences = Record<string, ModelPreference>
+
+/** The rates one exact model ID is priced at, and the family it counts as. */
+export interface ModelRate extends ModelPricing {
+  family: ModelFamily
+}
+
+/**
+ * The active pricing table: rates per family, plus one `model:<id>` entry for
+ * each model ID the user mapped or priced. The per-model entries travel in the
+ * same object so everything the table already reaches (the accounting worker,
+ * the caches' pricing fingerprint, IPC) carries them without a second argument.
+ */
+export type PricingTable = Record<ModelFamily, ModelPricing> &
+  Partial<Record<`model:${string}`, ModelRate>>
+
+/** A model seen in the transcripts, for Settings › Models. */
+export interface SeenModel {
+  model: string
+  /** The family it resolves to under the current preferences. */
+  family: ModelFamily
+  responses: number
+  /** Responses that could not be priced. */
+  unpricedResponses: number
+  /** Last local day it was used, `YYYY-MM-DD`. */
+  lastDay: string
+}

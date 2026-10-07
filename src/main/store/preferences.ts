@@ -45,6 +45,25 @@ const AppPreferencesSchema = z.object({
     )
     .optional()
     .default({}),
+  modelPreferences: z
+    .record(
+      z.string(),
+      z.object({
+        family: z.string().optional(),
+        rates: z
+          .object({
+            input: z.number().optional(),
+            output: z.number().optional(),
+            cacheRead: z.number().optional(),
+            cache5m: z.number().optional(),
+            cache1h: z.number().optional(),
+          })
+          .optional(),
+        displayName: z.string().optional(),
+      })
+    )
+    .optional()
+    .default({}),
   costAlertThreshold: z.number().optional(),
   secretScanEnabled: z.boolean(),
   secretScanConsent: z.enum(['unasked', 'granted', 'declined']),

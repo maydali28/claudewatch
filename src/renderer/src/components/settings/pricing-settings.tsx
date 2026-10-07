@@ -45,7 +45,8 @@ function formatRate(rate: number): string {
 interface RateCellProps {
   modelLabel: string
   fieldLabel: string
-  defaultRate: number
+  /** Undefined when there is no rate to fall back on (a model with no family). */
+  defaultRate: number | undefined
   override: number | undefined
   onCommit: (value: number | undefined) => void
 }
@@ -53,7 +54,7 @@ interface RateCellProps {
 // Shows the default rate as a placeholder and the override, if any, as the
 // value. The draft is local so a half-typed or invalid entry never reaches the
 // store; it is committed on blur or Enter and reverted with Escape.
-function RateCell({
+export function RateCell({
   modelLabel,
   fieldLabel,
   defaultRate,
@@ -94,10 +95,14 @@ function RateCell({
         type="text"
         inputMode="decimal"
         value={draft}
-        placeholder={formatRate(defaultRate)}
+        placeholder={defaultRate === undefined ? '—' : formatRate(defaultRate)}
         aria-label={`${modelLabel} ${fieldLabel.toLowerCase()} rate, dollars per million tokens`}
         aria-invalid={error !== null}
-        title={isOverridden ? `Default ${formatRate(defaultRate)}` : undefined}
+        title={
+          isOverridden && defaultRate !== undefined
+            ? `Default ${formatRate(defaultRate)}`
+            : undefined
+        }
         onChange={(e) => {
           setDraft(e.target.value)
           if (error) setError(null)

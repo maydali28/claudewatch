@@ -1,4 +1,9 @@
-import type { ModelFamily, ModelPricing, PricingProvider } from '@shared/types/pricing'
+import type {
+  ModelFamily,
+  ModelPreferences,
+  ModelPricing,
+  PricingProvider,
+} from '@shared/types/pricing'
 
 export type SecretScanConsent = 'unasked' | 'granted' | 'declined'
 
@@ -7,6 +12,12 @@ export type SecretScanConsent = 'unasked' | 'granted' | 'declined'
 export interface AppPreferences {
   pricingProvider: PricingProvider
   pricingOverrides: Partial<Record<ModelFamily, Partial<ModelPricing>>>
+  /**
+   * Settings › Models: per exact model ID, the family it counts as, rates of
+   * its own and a display name. For IDs the built-in table cannot place, such
+   * as gateway aliases, Bedrock ARNs and Foundry deployment names.
+   */
+  modelPreferences: ModelPreferences
   costAlertThreshold?: number
   /**
    * The Settings › Security switch for scanning transcripts for leaked
@@ -44,6 +55,7 @@ export interface AppPreferences {
 export const DEFAULT_PREFERENCES: AppPreferences = {
   pricingProvider: 'anthropic',
   pricingOverrides: {},
+  modelPreferences: {},
   secretScanEnabled: false,
   secretScanConsent: 'unasked',
   secretScanNotify: true,

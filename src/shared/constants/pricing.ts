@@ -1,5 +1,12 @@
-import type { ModelPricing, ModelFamily, PricingProvider } from '@shared/types/pricing'
+import type {
+  ModelPricing,
+  ModelFamily,
+  ModelRate,
+  PricingProvider,
+  PricingTable,
+} from '@shared/types/pricing'
 import type { AppPreferences } from '@shared/types/preferences'
+import { getModelFamily } from '@shared/constants/models'
 
 // ─── Anthropic API Pricing (per million tokens) ───────────────────────────────
 // Source: platform.claude.com/docs/en/about-claude/pricing
@@ -79,6 +86,17 @@ export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   unknown: { input: 0, output: 0, cacheRead: 0, cache5m: 0, cache1h: 0 },
 }
 
+/** Every family with real rates, in table order: the choices for mapping a model. */
+export const PRICED_FAMILIES = (Object.keys(ANTHROPIC_PRICING) as ModelFamily[]).filter(
+  (f) => f !== 'unknown'
+) as Exclude<ModelFamily, 'unknown'>[]
+
+export function isPricedFamily(
+  family: string | undefined
+): family is Exclude<ModelFamily, 'unknown'> {
+  return !!family && (PRICED_FAMILIES as string[]).includes(family)
+}
+
 // ─── Lookup function ──────────────────────────────────────────────────────────
 
 export function getPricingTable(provider: PricingProvider): Record<ModelFamily, ModelPricing> {
@@ -98,11 +116,14 @@ export function getPricingTable(provider: PricingProvider): Record<ModelFamily, 
 // what-if calculator and the compaction cost panel — reprice at the same
 // effective rates the rest of the app uses, instead of a component quietly
 // falling back to the built-in table and disagreeing with an active override.
-export function getActivePricingTable(prefs: AppPreferences): Record<ModelFamily, ModelPricing> {
+export function getActivePricingTable(
+  prefs: Pick<AppPreferences, 'pricingProvider' | 'pricingOverrides'> &
+    Partial<Pick<AppPreferences, 'modelPreferences'>>
+): PricingTable {
   const base = getPricingTable(prefs.pricingProvider)
 
   // Shallow-clone so we don't mutate the shared constant
-  const table: Record<ModelFamily, ModelPricing> = { ...base }
+  const table: PricingTable = { ...base }
 
   // Apply overrides
   for (const [family, overrides] of Object.entries(prefs.pricingOverrides) as [
@@ -114,7 +135,70 @@ export function getActivePricingTable(prefs: AppPreferences): Record<ModelFamily
     }
   }
 
+  // Then each model ID the user mapped or priced. A model's own rates sit on
+  // top of its family's (after the family overrides above); a model with no
+  // known family is priced only when its own rates are complete, since a
+  // guessed rate is indistinguishable from a real one.
+  for (const [model, pref] of Object.entries(prefs.modelPreferences ?? {})) {
+    const own = definedRates(pref.rates)
+    // A family name this build does not know (a stale or hand-edited
+    // preference) is ignored rather than trusted.
+    const mapped = isPricedFamily(pref.family) ? pref.family : undefined
+    if (!mapped && Object.keys(own).length === 0) continue
+    const family = mapped ?? getModelFamily(model)
+    const rates = { ...(family === 'unknown' ? {} : table[family]), ...own }
+    if (!isCompleteRates(rates)) continue
+    table[`model:${model}`] = { family, ...rates }
+  }
+
   return table
+}
+
+const RATE_KEYS = ['input', 'output', 'cacheRead', 'cache5m', 'cache1h'] as const
+
+function definedRates(rates: Partial<ModelPricing> | undefined): Partial<ModelPricing> {
+  const out: Partial<ModelPricing> = {}
+  for (const k of RATE_KEYS) {
+    const v = rates?.[k]
+    if (typeof v === 'number' && Number.isFinite(v) && v >= 0) out[k] = v
+  }
+  return out
+}
+
+function isCompleteRates(rates: Partial<ModelPricing>): rates is ModelPricing {
+  return RATE_KEYS.every((k) => typeof rates[k] === 'number')
+}
+
+/** The user's own entry for one exact model ID, if they mapped or priced it. */
+export function modelRate(
+  table: Record<ModelFamily, ModelPricing>,
+  model: string | null | undefined
+): ModelRate | undefined {
+  if (!model) return undefined
+  return (table as PricingTable)[`model:${model}`]
+}
+
+/** The family a model counts as: the user's mapping first, then the built-in one. */
+export function resolveModelFamily(
+  model: string | null | undefined,
+  table: Record<ModelFamily, ModelPricing>
+): ModelFamily {
+  return modelRate(table, model)?.family ?? getModelFamily(model)
+}
+
+/**
+ * The rates one response is priced at: the model ID's own entry when the user
+ * set one, else its family's. Undefined means it cannot be priced.
+ */
+export function ratesFor(
+  table: Record<ModelFamily, ModelPricing>,
+  family: ModelFamily,
+  model?: string | null
+): ModelPricing | undefined {
+  const own = modelRate(table, model)
+  if (own) return own
+  if (family === 'unknown') return undefined
+  return table[family]
 }
 
 // ─── Cost Calculation ─────────────────────────────────────────────────────────
@@ -132,10 +216,10 @@ export function estimateCost(
   cacheReadTokens: number,
   cache5mTokens: number,
   cache1hTokens: number,
-  table: Record<ModelFamily, ModelPricing>
+  table: Record<ModelFamily, ModelPricing>,
+  model?: string | null
 ): number | null {
-  if (family === 'unknown') return null
-  const p = table[family]
+  const p = ratesFor(table, family, model)
   if (!p) return null
   return (
     (inputTokens / 1_000_000) * p.input +

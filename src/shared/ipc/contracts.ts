@@ -18,6 +18,7 @@ import type {
 import type { LintResult, LintSummary } from '@shared/types/lint'
 import type { AppPreferences } from '@shared/types/preferences'
 import type { ClaudeDirInspection, ClaudeDirSource } from '@shared/types/claude-dir'
+import type { SeenModel } from '@shared/types/pricing'
 import type { SecretFindingRecord, SecretHistoryScanResult } from '@shared/types/secrets'
 
 // ─── Result Wrapper ───────────────────────────────────────────────────────────
@@ -86,6 +87,11 @@ export interface IPCContracts {
   'sessions:export': {
     request: ExportRequest
     response: Result<string | null> // file path written, or null when the dialog was cancelled
+  }
+  /** Every model ID the transcripts used, for Settings › Models. */
+  'analytics:list-models': {
+    request: void
+    response: Result<SeenModel[]>
   }
   'analytics:get': {
     request: { dateRange: DateRange; projectIds?: string[] }
