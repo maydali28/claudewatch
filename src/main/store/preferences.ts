@@ -64,6 +64,7 @@ const AppPreferencesSchema = z.object({
     .optional(),
   sessionTags: z.record(z.string(), z.array(z.string())).optional().default({}),
   lastSeenVersion: z.string().optional(),
+  claudeDirOverride: z.string().optional(),
   sentryEnabled: z.boolean(),
 })
 
@@ -168,7 +169,12 @@ export const Preferences = {
 
   set(patch: Partial<AppPreferences & { sessionTags?: Record<string, string[]> }>): void {
     const next = { ..._cache, ...patch }
-    requireStore().set(next as unknown as Record<string, unknown>)
+    // electron-store refuses `undefined`; a key patched to undefined is cleared.
+    const cleared = Object.keys(patch).filter((k) => patch[k as keyof typeof patch] === undefined)
+    for (const key of cleared) delete (next as Record<string, unknown>)[key]
+    const activeStore = requireStore()
+    activeStore.set(next as unknown as Record<string, unknown>)
+    for (const key of cleared) activeStore.delete(key)
     _cache = next
   },
 

@@ -13,7 +13,7 @@ import { registerTrayHandlers } from './ipc/tray.handlers'
 import { Preferences } from './store/preferences'
 import { FileWatcher } from './services/file-watcher'
 import { accountingWorker } from './services/accounting/worker-client'
-import { getClaudeDir, getProjectsDirPath } from '@main/lib/claude-paths'
+import { getClaudeDir, getProjectsDirPath, setClaudeDirOverride } from '@main/lib/claude-paths'
 import { initUpdateService } from './services/update-service'
 import { isAppQuitting, registerUpdateQuitHandlers, onUpdateQuitDisarmed } from './lib/update-quit'
 import { rootLogger as log } from './lib/logger'
@@ -25,6 +25,9 @@ import { initSecretScanService } from './services/secret-scan-service'
 import { createSecretFindingsStore } from './services/secret-findings-store'
 import { notifySecretFindings } from './services/secret-notifier'
 import { peekCachedSessionsForProject } from '@main/ipc/sessions.handlers'
+import { onClaudeDirChange } from './services/claude-dir-service'
+import { scanCache } from './services/scan-cache'
+import { sessionCache } from '@shared/utils'
 
 app.setName('ClaudeWatch')
 
@@ -204,6 +207,8 @@ function bootstrap(): void {
     // Load preferences before anything else
     await Preferences.load()
     initSentry(Preferences.get().sentryEnabled)
+    // The folder chosen in Settings › Claude folder, ahead of every other source.
+    setClaudeDirOverride(Preferences.get().claudeDirOverride)
 
     // Register all IPC handlers before creating windows so handlers are ready
     // when renderer loads
@@ -266,14 +271,32 @@ function bootstrap(): void {
     void secretScan.sync()
 
     // Start file watcher after handlers are registered and the window exists.
-    fileWatcher = new FileWatcher(getClaudeDir(), {
-      broadcast: broadcastToRenderers,
-      getMainWindow: () => mainWindow,
-      onTranscriptsChanged: (files) => {
-        secretScan.scanChanged(files).catch((error) => log.error('Secret scan failed:', error))
-      },
+    const startWatcher = (claudeDir: string): void => {
+      fileWatcher = new FileWatcher(claudeDir, {
+        broadcast: broadcastToRenderers,
+        getMainWindow: () => mainWindow,
+        onTranscriptsChanged: (files) => {
+          secretScan.scanChanged(files).catch((error) => log.error('Secret scan failed:', error))
+        },
+      })
+      fileWatcher.start()
+    }
+    startWatcher(getClaudeDir())
+
+    // The Claude folder changed in Settings: re-point everything that captured
+    // the old one, then reload every window so no view keeps its data.
+    onClaudeDirChange(async (claudeDir) => {
+      log.info('Claude folder changed to', claudeDir)
+      fileWatcher?.stop()
+      await accountingWorker.restart()
+      sessionCache.clear()
+      await scanCache
+        .refresh()
+        .catch((error) => log.error('Rescan after folder change failed:', error))
+      startWatcher(claudeDir)
+      await secretScan.setProjectsDir(getProjectsDirPath())
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.reload()
     })
-    fileWatcher.start()
     log.info('FileWatcher started')
 
     app.on('activate', () => {

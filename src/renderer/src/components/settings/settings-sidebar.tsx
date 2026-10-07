@@ -1,10 +1,11 @@
 import React from 'react'
-import { Palette, DollarSign, Shield, Bell, Lock, Info } from 'lucide-react'
+import { Palette, DollarSign, Shield, Bell, Lock, Info, FolderOpen } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 import type { FeatureFlags } from '@shared/constants/feature-flags'
 
-export type SettingsSection = 'appearance' | 'pricing' | 'security' | 'alerts' | 'privacy' | 'about'
+export type SettingsSection =
+  'appearance' | 'claude-folder' | 'pricing' | 'security' | 'alerts' | 'privacy' | 'about'
 
 interface Props {
   active: SettingsSection
@@ -18,6 +19,7 @@ const ALL_SECTIONS: {
   flag?: keyof FeatureFlags
 }[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette className="h-4 w-4" /> },
+  { id: 'claude-folder', label: 'Claude folder', icon: <FolderOpen className="h-4 w-4" /> },
   { id: 'pricing', label: 'Pricing', icon: <DollarSign className="h-4 w-4" /> },
   { id: 'security', label: 'Security', icon: <Shield className="h-4 w-4" /> },
   { id: 'alerts', label: 'Alerts', icon: <Bell className="h-4 w-4" />, flag: 'costAlerts' },

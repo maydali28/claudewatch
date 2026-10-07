@@ -66,6 +66,9 @@ export const CHANNELS = {
   APP_RELAUNCH: 'app:relaunch',
   APP_GET_VERSION: 'app:get-version',
   APP_GET_PATHS: 'app:get-paths',
+  APP_INSPECT_CLAUDE_DIR: 'app:inspect-claude-dir',
+  APP_CHOOSE_CLAUDE_DIR: 'app:choose-claude-dir',
+  APP_SET_CLAUDE_DIR: 'app:set-claude-dir',
 
   // ─── Main → Renderer push events (webContents.send / ipcRenderer.on) ───────
 

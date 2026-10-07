@@ -25,7 +25,15 @@ vi.mock('@main/lib/claude-paths', () => ({
   getClaudeDir: () => mockGetClaudeDir(),
   getClaudeDirSource: () => mockGetClaudeDirSource(),
   describeClaudeDir: () => mockDescribeClaudeDir(),
+  resolveClaudeDirWithoutAppSetting: () => ({ dir: '/home/fixture/.claude', source: 'default' }),
 }))
+vi.mock('@main/services/sentry', () => ({ captureHandlerException: vi.fn() }))
+vi.mock('@main/services/claude-dir-service', () => ({
+  changeClaudeDir: vi.fn(),
+  inspectClaudeDir: vi.fn(),
+}))
+
+const FALLBACK = { claudeDir: '/home/fixture/.claude', source: 'default' }
 
 beforeEach(async () => {
   vi.clearAllMocks()
@@ -50,7 +58,12 @@ describe('app:get-paths', () => {
 
     expect(result).toEqual({
       ok: true,
-      data: { claudeDir: '/home/fixture/.claude', display: '~/.claude', source: 'default' },
+      data: {
+        claudeDir: '/home/fixture/.claude',
+        display: '~/.claude',
+        source: 'default',
+        fallback: FALLBACK,
+      },
     })
   })
 
@@ -63,7 +76,12 @@ describe('app:get-paths', () => {
 
     expect(result).toEqual({
       ok: true,
-      data: { claudeDir: '/home/fixture/.claude-work', display: '~/.claude-work', source: 'env' },
+      data: {
+        claudeDir: '/home/fixture/.claude-work',
+        display: '~/.claude-work',
+        source: 'env',
+        fallback: FALLBACK,
+      },
     })
   })
 })

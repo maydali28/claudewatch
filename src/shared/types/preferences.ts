@@ -31,6 +31,12 @@ export interface AppPreferences {
   windowBounds?: { width: number; height: number; x?: number; y?: number }
   /** App version the user last opened. Used to drive the What's New panel. */
   lastSeenVersion?: string
+  /**
+   * The Claude folder chosen in Settings › Claude folder. Absent: the
+   * environment's `CLAUDE_CONFIG_DIR`, then `~/.claude/settings.json`'s, then
+   * `~/.claude`.
+   */
+  claudeDirOverride?: string
   /** Whether to send crash reports and feedback to Sentry. Opt-in, defaults to false. */
   sentryEnabled: boolean
 }

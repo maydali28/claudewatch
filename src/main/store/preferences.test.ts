@@ -85,3 +85,18 @@ describe('Preferences.load — secret scan consent', () => {
     })
   })
 })
+
+describe('Preferences.set', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    storedData = { ...VALID_BASE, secretScanConsent: 'unasked', claudeDirOverride: '/data/claude' }
+  })
+
+  it('clears a key patched to undefined instead of throwing', async () => {
+    const { Preferences } = await import('./preferences')
+    await Preferences.load()
+    expect(Preferences.get().claudeDirOverride).toBe('/data/claude')
+    Preferences.set({ claudeDirOverride: undefined })
+    expect('claudeDirOverride' in Preferences.get()).toBe(false)
+  })
+})

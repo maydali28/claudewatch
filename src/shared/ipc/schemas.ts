@@ -51,6 +51,12 @@ export const TagSchema = z.object({
 })
 
 /** sessions:export */
+/** app:inspect-claude-dir */
+export const InspectClaudeDirSchema = z.object({ path: z.string().trim().min(1).max(1000) })
+
+/** app:set-claude-dir — null goes back to the environment and defaults. */
+export const SetClaudeDirSchema = z.object({ path: z.string().trim().min(1).max(1000).nullable() })
+
 /** secrets:dismiss — ids as the findings list gives them. */
 export const SecretsDismissSchema = z.object({
   ids: z.array(z.string().min(1).max(200)).min(1).max(1000),

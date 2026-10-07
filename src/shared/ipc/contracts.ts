@@ -17,6 +17,7 @@ import type {
 } from '@shared/types/config'
 import type { LintResult, LintSummary } from '@shared/types/lint'
 import type { AppPreferences } from '@shared/types/preferences'
+import type { ClaudeDirInspection, ClaudeDirSource } from '@shared/types/claude-dir'
 import type { SecretFindingRecord, SecretHistoryScanResult } from '@shared/types/secrets'
 
 // ─── Result Wrapper ───────────────────────────────────────────────────────────
@@ -200,15 +201,27 @@ export interface IPCContracts {
   }
   'app:get-paths': {
     request: void
-    // Mirrors `ClaudeDirSource` from `@main/lib/claude-paths` structurally —
-    // `src/shared/` stays free of main-process imports (see
-    // .dependency-cruiser.cjs), so the union is repeated here rather than
-    // imported.
     response: Result<{
       claudeDir: string
       display: string
-      source: 'env' | 'user-settings' | 'default'
+      source: ClaudeDirSource
+      /** What the folder would be without the app setting: env, settings.json or default. */
+      fallback: { claudeDir: string; source: ClaudeDirSource }
     }>
+  }
+  'app:inspect-claude-dir': {
+    request: { path: string }
+    response: Result<ClaudeDirInspection>
+  }
+  /** Opens a folder picker; null when cancelled. */
+  'app:choose-claude-dir': {
+    request: void
+    response: Result<ClaudeDirInspection | null>
+  }
+  /** Use this folder (null: back to the environment and defaults); windows reload after. */
+  'app:set-claude-dir': {
+    request: { path: string | null }
+    response: Result<void>
   }
 }
 

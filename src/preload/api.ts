@@ -137,6 +137,9 @@ export const api = {
     relaunch: () => invoke(CHANNELS.APP_RELAUNCH),
     getVersion: () => invoke(CHANNELS.APP_GET_VERSION),
     getPaths: () => invoke(CHANNELS.APP_GET_PATHS),
+    inspectClaudeDir: (path: string) => invoke(CHANNELS.APP_INSPECT_CLAUDE_DIR, { path }),
+    chooseClaudeDir: () => invoke(CHANNELS.APP_CHOOSE_CLAUDE_DIR),
+    setClaudeDir: (path: string | null) => invoke(CHANNELS.APP_SET_CLAUDE_DIR, { path }),
   },
 
   // ─── Push event subscriptions ─────────────────────────────────────────────

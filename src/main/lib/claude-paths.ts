@@ -4,6 +4,8 @@ import * as fs from 'fs'
 
 /**
  * How the effective Claude directory was resolved:
+ *  - 'app-setting': chosen in ClaudeWatch's Settings › Claude folder. An
+ *    explicit choice in the app wins over every other source.
  *  - 'env': `process.env.CLAUDE_CONFIG_DIR` was set when this process started.
  *  - 'user-settings': the default `~/.claude/settings.json`'s `env.CLAUDE_CONFIG_DIR`
  *    key pointed elsewhere. This is the case that matters most on macOS: the
@@ -15,9 +17,27 @@ import * as fs from 'fs'
  * Managed settings (the third place Claude Code honours this variable) are
  * out of scope for this task — see 1.6 roadmap item #34/#12.
  */
-export type ClaudeDirSource = 'env' | 'user-settings' | 'default'
+export type { ClaudeDirSource } from '@shared/types/claude-dir'
+import type { ClaudeDirSource } from '@shared/types/claude-dir'
 
 let cached: { dir: string; source: ClaudeDirSource } | null = null
+/** The folder chosen in Settings, if any. Set at startup and when it changes. */
+let appSetting: string | null = null
+
+/**
+ * Use `dir` (the folder chosen in Settings) ahead of every other source, or
+ * go back to the environment and defaults with `null`. Forgets the cached
+ * resolution so the next read uses it.
+ */
+export function setClaudeDirOverride(dir: string | null | undefined): void {
+  appSetting = dir?.trim() ? dir.trim() : null
+  cached = null
+}
+
+/** Where the folder would come from without the app setting: env, settings.json or default. */
+export function resolveClaudeDirWithoutAppSetting(): { dir: string; source: ClaudeDirSource } {
+  return resolveFromEnvironment()
+}
 
 function expandHome(p: string): string {
   if (p === '~') return os.homedir()
@@ -39,6 +59,11 @@ function readUserSettingsOverride(defaultDir: string): string | null {
 }
 
 function resolve(): { dir: string; source: ClaudeDirSource } {
+  if (appSetting) return { dir: expandHome(appSetting), source: 'app-setting' }
+  return resolveFromEnvironment()
+}
+
+function resolveFromEnvironment(): { dir: string; source: ClaudeDirSource } {
   const fromEnv = process.env.CLAUDE_CONFIG_DIR?.trim()
   if (fromEnv) return { dir: expandHome(fromEnv), source: 'env' }
 
@@ -59,10 +84,13 @@ export function getClaudeDirSource(): ClaudeDirSource {
   return (cached ??= resolve()).source
 }
 
-/** Tests only: forget the cached resolution so the next call re-resolves. */
+/** Tests only: forget the cached resolution and any app setting. */
 export function resetClaudeDirCache(): void {
   cached = null
+  appSetting = null
 }
+
+export { expandHome as expandClaudeDirPath }
 
 /**
  * Sets the cache directly, bypassing `resolve()`.

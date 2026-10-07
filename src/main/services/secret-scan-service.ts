@@ -89,7 +89,18 @@ export class SecretScanService {
   private offsets: Map<string, number> | null = null
   private activating: Promise<void> | null = null
 
-  constructor(private readonly deps: SecretScanServiceDeps) {}
+  constructor(private deps: SecretScanServiceDeps) {}
+
+  /**
+   * Read transcripts from another Claude folder. Live scanning restarts from
+   * the new folder's current sizes, so nothing already there counts as new.
+   */
+  async setProjectsDir(projectsDir: string): Promise<void> {
+    this.deps = { ...this.deps, projectsDir }
+    this.offsets = null
+    this.activating = null
+    await this.sync()
+  }
 
   get active(): boolean {
     return this.offsets !== null
