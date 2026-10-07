@@ -24,11 +24,15 @@ const ToastContext = createContext<ToastContextValue | null>(null)
 
 let nextId = 1
 
+// The colour is the border and its thick left edge only. The text and the
+// solid background come from the theme's popover tokens, so a toast reads in
+// light and dark alike (a tinted background with light text vanished in light).
+// `!` because the unlayered `* { border-color }` reset outranks border colours (L23).
 const VARIANT_STYLES: Record<ToastVariant, string> = {
-  error: 'border-red-500/40 bg-red-500/10 text-red-100',
-  warning: 'border-amber-500/40 bg-amber-500/10 text-amber-100',
-  info: 'border-sky-500/40 bg-sky-500/10 text-sky-100',
-  success: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-100',
+  error: '!border-red-500/50 !border-l-red-500',
+  warning: '!border-amber-500/50 !border-l-amber-500',
+  info: '!border-sky-500/50 !border-l-sky-500',
+  success: '!border-emerald-500/50 !border-l-emerald-500',
 }
 
 export function ToastProvider({ children }: { children: React.ReactNode }): React.JSX.Element {
@@ -88,7 +92,7 @@ function ToastItem({
   return (
     <div
       role="status"
-      className={`pointer-events-auto flex max-w-sm items-start gap-3 rounded-md border px-3 py-2 text-sm shadow-lg backdrop-blur ${VARIANT_STYLES[toast.variant]}`}
+      className={`pointer-events-auto flex max-w-sm items-start gap-3 rounded-md border border-l-4 bg-popover px-3 py-2 text-sm text-popover-foreground shadow-lg ${VARIANT_STYLES[toast.variant]}`}
     >
       <span className="flex-1">{toast.message}</span>
       {toast.action && (
