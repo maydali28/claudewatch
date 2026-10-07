@@ -4,19 +4,16 @@
 // the local build into the corresponding UI surface. CI builds ship with the
 // defaults below until each feature reaches general availability.
 //
-// Targets: timeline → 1.6; costAlerts → 1.7. See docs/ROADMAP.md.
+// Targets: costAlerts → 1.7. See docs/ROADMAP.md.
 //
 // Removing a flag from this file should happen in lockstep with making the
 // gated UI unconditional. Don't leave dead flags behind.
 
 export interface FeatureFlags {
-  /** Show the Timeline tab in the left nav. Coming in 0.12. */
-  timeline: boolean
   /** Show cost alert settings (backend not yet implemented). Coming in 0.14. */
   costAlerts: boolean
 }
 
 export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
-  timeline: false,
   costAlerts: false,
 }

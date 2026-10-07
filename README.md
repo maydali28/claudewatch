@@ -419,7 +419,6 @@ claudewatch/
 │   │   │   ├── config/          # Config file browser
 │   │   │   ├── lint/            # Health gauge + rule results
 │   │   │   ├── plans/           # Plan browser
-│   │   │   ├── timeline/        # Activity timeline
 │   │   │   ├── settings/        # Preferences panels
 │   │   │   ├── tray-popover/    # Tray window UI
 │   │   │   ├── onboarding/      # First-run flow

@@ -4,7 +4,6 @@ export type ViewId =
   | 'analytics'
   | 'sessions'
   | 'plans'
-  | 'timeline'
   | 'hooks'
   | 'commands'
   | 'skills'

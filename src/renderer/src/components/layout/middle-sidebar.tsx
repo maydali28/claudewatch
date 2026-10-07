@@ -68,7 +68,7 @@ export default function MiddleSidebar(): React.JSX.Element | null {
   )
 
   // These panels embed their own full-width layouts with an internal sidebar
-  if (activeView === 'settings' || activeView === 'timeline' || activeView === 'plans') return null
+  if (activeView === 'settings' || activeView === 'plans') return null
 
   return (
     <div
