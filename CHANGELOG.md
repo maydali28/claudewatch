@@ -29,6 +29,7 @@
 * **settings:** choose the claude folder claudewatch reads
 * **settings:** map custom model ids to a family, own rates and a display name
 * **skills:** list every skill your sessions load, with its source and last use
+* **tray:** show when today's spend or a session passes your cost limit
 
 ### Bug Fixes
 
