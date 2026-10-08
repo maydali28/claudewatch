@@ -7,22 +7,16 @@ import { cn } from '@renderer/lib/cn'
 import { ipc } from '@renderer/lib/ipc-client'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { ContextFillBar } from '@renderer/components/shared/context-fill-bar'
+import { contextFillView } from '@renderer/components/shared/context-fill-rules'
 
 const MAX_VISIBLE = 4
 
 interface ActiveSessionsProps {
   sessions: TraySnapshotSession[]
-  /** Sum of all tokens across visible sessions, used for relative progress bars */
-  totalTokens: number
 }
 
-function ActiveSessionRow({
-  session,
-  totalTokens,
-}: {
-  session: TraySnapshotSession
-  totalTokens: number
-}): React.JSX.Element {
+function ActiveSessionRow({ session }: { session: TraySnapshotSession }): React.JSX.Element {
   const handleClick = (): void => {
     ipc.tray.openDashboard(session.id, session.projectId)
   }
@@ -31,7 +25,7 @@ function ActiveSessionRow({
   const meta = getModelMeta(session.latestModel ?? session.primaryModel)
   const projectName = projectDisplayName(session.projectPath)
   const sessionTokens = session.totalInputTokens + session.totalOutputTokens
-  const pct = totalTokens > 0 ? Math.min(100, (sessionTokens / totalTokens) * 100) : 0
+  const fill = contextFillView(session.contextFill)
 
   return (
     <Tooltip delayDuration={400}>
@@ -83,29 +77,22 @@ function ActiveSessionRow({
             </div>
           </div>
 
-          {/* Progress bar */}
-          <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-emerald-500 transition-all duration-500"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+          {/* Context window used */}
+          <ContextFillBar view={fill} normalClass="bg-emerald-500" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" sideOffset={8}>
         <div className="flex flex-col gap-0.5">
           <span>{meta.label}</span>
           <span className="text-[10px] opacity-70">{projectName}</span>
+          <span className="text-[10px] opacity-70">{fill.description}</span>
         </div>
       </TooltipContent>
     </Tooltip>
   )
 }
 
-export function ActiveSessions({
-  sessions,
-  totalTokens,
-}: ActiveSessionsProps): React.JSX.Element | null {
+export function ActiveSessions({ sessions }: ActiveSessionsProps): React.JSX.Element | null {
   if (sessions.length === 0) return null
 
   const visible = sessions.slice(0, MAX_VISIBLE)
@@ -127,7 +114,7 @@ export function ActiveSessions({
       </div>
 
       {visible.map((s) => (
-        <ActiveSessionRow key={s.id} session={s} totalTokens={totalTokens} />
+        <ActiveSessionRow key={s.id} session={s} />
       ))}
 
       {overflow > 0 && (

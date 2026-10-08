@@ -354,3 +354,16 @@ describe('buildTraySnapshot — liveness considers an open turn, not only the la
     expect(snapshot.recentSessions.map((s) => s.id)).toEqual(['closed-1'])
   })
 })
+
+describe('buildTraySnapshot — context fill', () => {
+  it('passes each session’s context fill through to the tray rows', () => {
+    const fill = { tokens: 120_000, window: 200_000, windowEstimated: false }
+    const live: SessionSummary = {
+      ...session('live-1', 'alpha', [day({ day: TODAY_KEY, messageCount: 1 })]),
+      lastTimestamp: new Date().toISOString(),
+      contextFill: fill,
+    }
+    const snapshot = buildTraySnapshot([project('alpha', [live])], ANTHROPIC_PRICING)
+    expect(snapshot.activeSessions[0].contextFill).toEqual(fill)
+  })
+})

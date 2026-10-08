@@ -164,9 +164,15 @@ interface CacheFile {
 // none of them, and would show no tool calls at all. Tokens, cost and counts
 // are unaffected.
 //
+// v16: `SessionSummary.contextFill` holds the latest parent context and the
+// window of the model it ran on, for the session bars. A v15 entry has none,
+// and every bar would sit empty until its transcript changed. 1.6.0 is the
+// first release past v13, so users rebuild once either way. Tokens, cost and
+// counts are unaffected.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 15
+const CACHE_VERSION = 16
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

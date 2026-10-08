@@ -1,4 +1,4 @@
-import type { EffortLevel, EffortDistribution } from './session'
+import type { EffortLevel, EffortDistribution, ContextFill } from './session'
 import type { LintCheckId, LintSeverity } from './lint'
 
 // ─── Daily Usage ──────────────────────────────────────────────────────────────
@@ -471,6 +471,8 @@ export interface TraySnapshotSession {
   slug?: string
   latestModel?: string
   primaryModel?: string
+  /** See `SessionSummary.contextFill`; drives the row's bar. */
+  contextFill?: ContextFill
   messageCount: number
   totalInputTokens: number
   totalOutputTokens: number

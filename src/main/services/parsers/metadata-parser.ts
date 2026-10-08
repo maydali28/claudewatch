@@ -10,11 +10,13 @@ import type {
   SessionErrorDetail,
   SessionObservability,
   EffortDistribution,
+  ContextFill,
 } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { decodeProjectId } from '@shared/utils/decode-project-id'
 import { toDayKeyOrUndated, UNDATED_DAY } from '@shared/utils/date-ranges'
 import { IDLE_GAP_MS, ERROR_SNIPPET_MAX_CHARS } from '@shared/constants/tuning'
+import { contextWindowFor } from '@shared/constants/context-window'
 import {
   extractTextFromContent,
   getRawBlocks,
@@ -306,6 +308,16 @@ function flushPendingResponse(acc: MetadataAccumulator): void {
  * counter that stays immediate: blocks are not duplicated across records, so
  * summing them per record was already correct.
  */
+function buildContextFill(usage: UsageProjection): ContextFill | undefined {
+  if (usage.latestParentContextTokens === undefined) return undefined
+  const window = contextWindowFor(usage.latestParentModel, usage.latestParentPeakContextTokens ?? 0)
+  return {
+    tokens: usage.latestParentContextTokens,
+    window: window.tokens,
+    windowEstimated: window.estimated,
+  }
+}
+
 function processAssistantRecord(
   raw: RawRecord,
   acc: MetadataAccumulator,
@@ -501,6 +513,7 @@ function buildSessionSummary(
     parentMessageCount: activity.total,
     latestModel: usage.latestParentModel,
     dominantModel: usage.dominantParentModel,
+    contextFill: buildContextFill(usage),
     modelsUsed: usage.modelsUsed,
     unpricedResponses,
     totalInputTokens,

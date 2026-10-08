@@ -173,14 +173,6 @@ export default function TrayPopover(): React.JSX.Element {
 
   const hasActivity = activeSessions.length > 0 || recentSessions.length > 0
 
-  // Use the max session token count across both lists so progress bars are
-  // proportional to the heaviest session visible — matches the dashboard
-  // sidebar's behaviour of normalising against the project's largest session.
-  const listTotalTokens = Math.max(
-    1,
-    ...[...activeSessions, ...recentSessions].map((s) => s.totalInputTokens + s.totalOutputTokens)
-  )
-
   // Open the onboarding window only once the stored settings say the tip was
   // never dismissed. Gating on the analytics query's loading flag, as before,
   // read the settings placeholder (`trayTipDismissed: false`) whenever
@@ -229,11 +221,11 @@ export default function TrayPopover(): React.JSX.Element {
 
               {hasActivity ? (
                 <div className="flex flex-col gap-2">
-                  <ActiveSessions sessions={activeSessions} totalTokens={listTotalTokens} />
+                  <ActiveSessions sessions={activeSessions} />
                   {activeSessions.length > 0 && recentSessions.length > 0 && (
                     <div className="h-px bg-border/40 my-0.5" />
                   )}
-                  <RecentSessions sessions={recentSessions} totalTokens={listTotalTokens} />
+                  <RecentSessions sessions={recentSessions} />
                 </div>
               ) : (
                 <EmptyState />

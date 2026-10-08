@@ -80,15 +80,24 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(15, tz)
+    writeCacheFile(16, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 15, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 14, or a
-    // bump to 16 without a matching migration, would do.
+    // If the constant is not 16, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 15, or a
+    // bump to 17 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
+  })
+
+  it('discards a v15 cache file rather than serving it under the v16 contract', () => {
+    const tz = `${TZ}-stale-v15`
+    writeCacheFile(15, tz)
+
+    // A v15 summary has no `contextFill`, so every session bar would sit
+    // empty until its transcript changed. See `CACHE_VERSION`'s v16 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards a v14 cache file rather than serving it under the v15 contract', () => {

@@ -499,6 +499,13 @@ export interface SkillListingEntry {
   description?: string
 }
 
+export interface ContextFill {
+  tokens: number
+  window: number
+  /** True when the transcript cannot tell a 200K window from a 1M one. */
+  windowEstimated: boolean
+}
+
 export interface SessionSummary {
   id: string
   projectId: string
@@ -533,6 +540,12 @@ export interface SessionSummary {
   latestModel?: string
   /** Parent model with the most responses across the session's life. */
   dominantModel?: string
+  /**
+   * How full the context window is now: what the latest parent response sent,
+   * against the window of the model it ran on (`contextWindowFor`). Absent
+   * until the session has a response.
+   */
+  contextFill?: ContextFill
   /** Every exact model seen in this session, parent and subagents. */
   modelsUsed: string[]
   /** Responses whose model is unrecognised and therefore excluded from cost. */

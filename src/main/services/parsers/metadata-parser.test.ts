@@ -405,6 +405,78 @@ describe('parseSessionMetadata — model identity', () => {
   })
 })
 
+describe('parseSessionMetadata — context window fill', () => {
+  it('reports the latest context against the window of the model in use', async () => {
+    const file = session('context-fill', [
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1', ts: '2026-09-10T09:00:00.000Z', cacheRead: 300_000 }),
+      assistant({
+        uuid: 'b',
+        id: 'msg_2',
+        ts: '2026-09-10T10:00:00.000Z',
+        model: 'claude-opus-5-5',
+        input: 10,
+        cacheRead: 250_000,
+        cache5m: 1_000,
+      }),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'context-fill', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.contextFill).toEqual({
+      tokens: 251_010,
+      window: 1_000_000,
+      windowEstimated: false,
+    })
+  })
+
+  it('switches an opt-in model to 1M once the session has gone past 200K on it', async () => {
+    const file = session('context-fill-optin', [
+      user('u1'),
+      assistant({
+        uuid: 'a',
+        id: 'msg_1',
+        ts: '2026-09-10T09:00:00.000Z',
+        model: 'claude-opus-4-8',
+        cacheRead: 260_000,
+      }),
+      assistant({
+        uuid: 'b',
+        id: 'msg_2',
+        ts: '2026-09-10T10:00:00.000Z',
+        model: 'claude-opus-4-8',
+        cacheRead: 40_000,
+      }),
+    ])
+
+    const summary = await parseSessionMetadata(
+      file,
+      'context-fill-optin',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(summary.contextFill).toEqual({
+      tokens: 40_000,
+      window: 1_000_000,
+      windowEstimated: true,
+    })
+  })
+
+  it('reports no fill for a session with no response yet', async () => {
+    const file = session('context-fill-empty', [user('u1')])
+
+    const summary = await parseSessionMetadata(
+      file,
+      'context-fill-empty',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(summary.contextFill).toBeUndefined()
+  })
+})
+
 /**
  * `estimateCost` returns `null` for a model it cannot price — a real, known
  * rate and a guessed one must never look the same on screen. The day/model

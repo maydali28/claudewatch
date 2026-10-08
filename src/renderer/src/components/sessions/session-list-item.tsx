@@ -13,6 +13,8 @@ import type { SessionSummary } from '@shared/types'
 import type { SessionHealth } from '@renderer/hooks/use-session-health'
 import { isSessionLive, isSubagentRunning } from '@shared/utils/live-session'
 import { ACTIVE_SESSION_MS, LIVE_REFRESH_INTERVAL_MS } from '@shared/constants/tuning'
+import { ContextFillBar } from '@renderer/components/shared/context-fill-bar'
+import { contextFillView } from '@renderer/components/shared/context-fill-rules'
 
 function LintIndicator({
   health,
@@ -76,8 +78,6 @@ interface SessionListItemProps {
   session: SessionSummary
   isActive: boolean
   isLive: boolean
-  /** Total tokens across all sessions in the same project, for the progress bar */
-  projectTotalTokens: number
   searchQuery?: string
   /** Set when the session fails a check or holds a secret. */
   health?: SessionHealth
@@ -130,7 +130,6 @@ export default function SessionListItem({
   session,
   isActive,
   isLive,
-  projectTotalTokens,
   searchQuery = '',
   health,
   onOpenHealth,
@@ -152,8 +151,7 @@ export default function SessionListItem({
     ? (session.subagents ?? []).filter((s) => isSubagentRunning(s, now)).length
     : 0
   const live = (isLive && isSessionLive(session, now)) || runningAgents > 0
-  const sessionTokens = session.totalInputTokens + session.totalOutputTokens
-  const pct = projectTotalTokens > 0 ? Math.min(100, (sessionTokens / projectTotalTokens) * 100) : 0
+  const fill = contextFillView(session.contextFill, session.compactionCount)
 
   return (
     <TooltipProvider>
@@ -220,21 +218,21 @@ export default function SessionListItem({
           </div>
         </div>
 
-        {/* Progress bar */}
-        <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all duration-500',
-              isActive ? 'bg-primary' : 'bg-primary/40'
-            )}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
+        {/* Context window used */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <div>
+              <ContextFillBar view={fill} normalClass={isActive ? 'bg-primary' : 'bg-primary/40'} />
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="right">{fill.description}</TooltipContent>
+        </Tooltip>
 
         {/* Meta row */}
         <div className="mt-0.5 flex items-center justify-between gap-1">
           <span className="text-[10px] text-muted-foreground">
-            {formatShortRelativeTime(session.lastTimestamp)} · {pct.toFixed(0)}%
+            {formatShortRelativeTime(session.lastTimestamp)}
+            {fill.label && ` · ${fill.label}`}
           </span>
           {/* Latest, not dominant: the badge answers "what is this session on
               now", which is not the same question as "what did it use most". */}

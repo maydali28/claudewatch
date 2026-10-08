@@ -30,10 +30,6 @@ export default function ProjectTree({
 
   const secretsBySession = useSecretsBySession()
   const openSessionHealth = useOpenSessionHealth()
-  const projectTotalTokens = sessions.reduce(
-    (sum, s) => sum + s.totalInputTokens + s.totalOutputTokens,
-    0
-  )
 
   return (
     <div>
@@ -66,7 +62,6 @@ export default function ProjectTree({
                 session={session}
                 isActive={activeSessionId === session.id}
                 isLive={liveSessionIds.has(session.id)}
-                projectTotalTokens={projectTotalTokens}
                 searchQuery={searchQuery}
                 health={health.count > 0 ? health : undefined}
                 onOpenHealth={() => openSessionHealth(session.id, session.projectId)}
