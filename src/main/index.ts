@@ -25,7 +25,8 @@ import { initSecretScanService } from './services/secret-scan-service'
 import { createSecretFindingsStore } from './services/secret-findings-store'
 import { notifySecretFindings } from './services/secret-notifier'
 import { getOrScanProjects, peekCachedSessionsForProject } from '@main/ipc/sessions.handlers'
-import { CostAlertTracker, describeCostAlert } from './services/cost-alerts'
+import { CostAlertTracker, describeCostAlert, type CostAlert } from './services/cost-alerts'
+import { createCostAlertStateStore } from './services/cost-alert-state-store'
 import { initNotifier } from './services/notifier'
 import { costAlertThresholds, resolveCostAlertSettings } from '@shared/utils/cost-alert-settings'
 import type { CostAlertNotice, SessionSummary } from '@shared/types'
@@ -285,27 +286,28 @@ function bootstrap(): void {
     void secretScan.sync()
 
     // Cost alerts (Settings › Alerts), checked on every re-parsed session.
-    // What is already over at launch is recorded first, so a restart is quiet.
-    const costAlerts = new CostAlertTracker()
+    // What was announced is stored, so a restart neither repeats an alert nor
+    // swallows one that came due while the app was not running.
+    const costAlerts = new CostAlertTracker({
+      store: createCostAlertStateStore(app.getPath('userData')),
+    })
     const costThresholds = () => costAlertThresholds(Preferences.get())
     const allSessions = async (): Promise<SessionSummary[]> =>
       (await getOrScanProjects()).flatMap((p) => p.sessions)
-    const costBaseline = allSessions()
-      .then((sessions) => costAlerts.baseline(sessions, costThresholds()))
-      .catch((error) => log.error('Cost alert baseline failed:', error))
-    const checkCostAlerts = async (summary: SessionSummary): Promise<void> => {
-      await costBaseline
-      const others = (await allSessions()).filter((s) => s.id !== summary.id)
-      const alerts = costAlerts.check(summary, [...others, summary], costThresholds())
+    /**
+     * Toast in every window, plus a system notification when no ClaudeWatch
+     * window has focus. `atStartup` notifies regardless of focus: the windows
+     * are still loading, so a toast alone could go unseen.
+     */
+    const announceCostAlerts = (alerts: CostAlert[], atStartup: boolean): void => {
       if (alerts.length === 0) return
       const notices: CostAlertNotice[] = alerts.map((a) => ({
         ...a,
         message: describeCostAlert(a),
       }))
       broadcastToRenderers(CHANNELS.PUSH_COST_ALERT, notices)
-      // The in-app toast already says it while the dashboard has focus.
       if (!resolveCostAlertSettings(Preferences.get()).notify) return
-      if (BrowserWindow.getFocusedWindow() !== null) return
+      if (!atStartup && BrowserWindow.getFocusedWindow() !== null) return
       for (const notice of notices) {
         log.info('Cost notification:', notice.message.body)
         notifier.show({
@@ -324,6 +326,24 @@ function bootstrap(): void {
           },
         })
       }
+    }
+    const dashboardLoaded = (): Promise<void> =>
+      new Promise((resolve) => {
+        const win = mainWindow
+        if (!win || win.isDestroyed() || !win.webContents.isLoading()) return resolve()
+        win.webContents.once('did-finish-load', () => resolve())
+      })
+    const costStartup = allSessions()
+      .then(async (sessions) => {
+        const due = costAlerts.start(sessions, costThresholds())
+        await dashboardLoaded()
+        announceCostAlerts(due, true)
+      })
+      .catch((error) => log.error('Cost alert start-up check failed:', error))
+    const checkCostAlerts = async (summary: SessionSummary): Promise<void> => {
+      await costStartup
+      const others = (await allSessions()).filter((s) => s.id !== summary.id)
+      announceCostAlerts(costAlerts.check(summary, [...others, summary], costThresholds()), false)
     }
 
     // Start file watcher after handlers are registered and the window exists.

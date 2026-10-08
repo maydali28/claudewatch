@@ -6,8 +6,9 @@ import { formatCost } from '@shared/utils/format-cost'
 // Cost alerts from Settings › Alerts: a daily budget across every session and
 // a per-session limit. Checked each time a session's transcript changes, from
 // the summary the watcher just parsed. Each alert fires once: the budget once
-// per calendar day, the limit once per session. What was already over when the
-// app started is recorded, not announced, so a restart does not repeat alerts.
+// per calendar day, the limit once per session. What was announced is kept in
+// a store, so a restart neither repeats an alert nor swallows one that came
+// due while the app was not running.
 
 /** The fields the checks read; a `SessionSummary` has them all. */
 export type CostedSession = Pick<SessionSummary, 'id' | 'projectId' | 'title' | 'estimatedCost'> & {
@@ -28,23 +29,77 @@ export function todaysCost(sessions: readonly CostedSession[], day: string): num
 const isOn = (threshold: number | undefined): threshold is number =>
   threshold !== undefined && threshold > 0
 
+/** What has been announced, kept across restarts. */
+export interface CostAlertState {
+  /** The day the budget alert last fired. */
+  dailyFiredOn: string | null
+  /** Sessions whose limit alert fired, or that were already over when first seen. */
+  sessionsFired: string[]
+}
+
+export interface CostAlertStateStore {
+  load(): CostAlertState
+  save(state: CostAlertState): void
+}
+
+/** A store that lives as long as the process; the default, and for tests. */
+export function memoryCostAlertState(): CostAlertStateStore {
+  let state: CostAlertState = { dailyFiredOn: null, sessionsFired: [] }
+  return {
+    load: () => ({ ...state, sessionsFired: [...state.sessionsFired] }),
+    save: (next) => {
+      state = { ...next, sessionsFired: [...next.sessionsFired] }
+    },
+  }
+}
+
 export class CostAlertTracker {
-  /** The day the budget alert last fired (or was found already passed). */
-  private dailyFiredOn: string | null = null
-  private sessionsFired = new Set<string>()
+  private dailyFiredOn: string | null
+  private sessionsFired: Set<string>
+  private readonly store: CostAlertStateStore
+  private readonly now: () => Date
 
-  constructor(private readonly now: () => Date = () => new Date()) {}
+  constructor(opts: { store?: CostAlertStateStore; now?: () => Date } = {}) {
+    this.store = opts.store ?? memoryCostAlertState()
+    this.now = opts.now ?? (() => new Date())
+    const state = this.store.load()
+    this.dailyFiredOn = state.dailyFiredOn
+    this.sessionsFired = new Set(state.sessionsFired)
+  }
 
-  /** Record what is already over, without alerting. Run once at startup. */
-  baseline(sessions: readonly CostedSession[], thresholds: CostAlertThresholds): void {
+  private persist(): void {
+    this.store.save({ dailyFiredOn: this.dailyFiredOn, sessionsFired: [...this.sessionsFired] })
+  }
+
+  /**
+   * Run once at startup, on every session. Returns what came due while the app
+   * was not running and was never announced: the budget, and the limit of each
+   * session used today. Older sessions over the limit are recorded without an
+   * alert, so turning the limit on does not announce last month's sessions.
+   */
+  start(sessions: readonly CostedSession[], thresholds: CostAlertThresholds): CostAlert[] {
+    const alerts: CostAlert[] = []
     const day = toDateKey(this.now())
-    if (isOn(thresholds.daily) && todaysCost(sessions, day) > thresholds.daily) {
-      this.dailyFiredOn = day
+    const present = new Set(sessions.map((s) => s.id))
+    for (const id of this.sessionsFired) if (!present.has(id)) this.sessionsFired.delete(id)
+
+    if (isOn(thresholds.daily) && this.dailyFiredOn !== day) {
+      const cost = todaysCost(sessions, day)
+      if (cost > thresholds.daily) {
+        this.dailyFiredOn = day
+        alerts.push({ kind: 'daily', day, cost, threshold: thresholds.daily })
+      }
     }
     if (isOn(thresholds.session)) {
-      for (const s of sessions)
-        if (s.estimatedCost > thresholds.session) this.sessionsFired.add(s.id)
+      for (const s of sessions) {
+        if (this.sessionsFired.has(s.id) || s.estimatedCost <= thresholds.session) continue
+        this.sessionsFired.add(s.id)
+        const usedToday = s.dailyUsage.some((d) => d.day === day && d.estimatedCost > 0)
+        if (usedToday) alerts.push(sessionAlert(s, thresholds.session))
+      }
     }
+    this.persist()
+    return alerts
   }
 
   /** Alerts newly due after `updated` changed; `sessions` already holds its new figures. */
@@ -68,16 +123,21 @@ export class CostAlertTracker {
       updated.estimatedCost > thresholds.session
     ) {
       this.sessionsFired.add(updated.id)
-      alerts.push({
-        kind: 'session',
-        sessionId: updated.id,
-        projectId: updated.projectId,
-        title: updated.title,
-        cost: updated.estimatedCost,
-        threshold: thresholds.session,
-      })
+      alerts.push(sessionAlert(updated, thresholds.session))
     }
+    if (alerts.length > 0) this.persist()
     return alerts
+  }
+}
+
+function sessionAlert(s: CostedSession, threshold: number): CostAlert {
+  return {
+    kind: 'session',
+    sessionId: s.id,
+    projectId: s.projectId,
+    title: s.title,
+    cost: s.estimatedCost,
+    threshold,
   }
 }
 
