@@ -1,4 +1,4 @@
-## 1.6.0 (2026-10-07)
+## 1.6.0 (2026-10-08)
 
 
 ### Features
@@ -9,6 +9,7 @@
 * **commands:** show plugin commands with their source and arguments
 * **health:** add a health view that checks your setup and sessions
 * **hooks:** show plugin and managed hooks, label every hook with its source
+* **mcps:** list every mcp server claude code uses, with its status, tools and usage
 * **memory:** list every project's memory files like the sessions list, with kind filters
 * **notifications:** tell you when macos has claudewatch's notifications turned off
 * **plans:** list shared plans under the projects that used them and show each folder
@@ -22,6 +23,7 @@
 * **sessions:** export a session as markdown, json or csv
 * **sessions:** name sub-agents and show their run time and running state
 * **sessions:** open a sub-agent's own conversation
+* **sessions:** show how full each session's context window is
 * **sessions:** show sub-agents as a tree or graph of who started whom
 * **sessions:** show when each sub-agent ran on a timeline
 * **settings:** choose the claude folder claudewatch reads
@@ -30,6 +32,7 @@
 
 ### Bug Fixes
 
+* **mcps:** show server status again, read from session transcripts
 * **memory:** list every project's auto-memory notes
 * **settings:** save every setting the app changes, and say so when one is refused
 * **toasts:** make in-app notices readable in the light theme
