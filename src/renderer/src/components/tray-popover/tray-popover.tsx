@@ -1,5 +1,13 @@
 import React, { useEffect } from 'react'
-import { LayoutDashboard, MoreHorizontal, Download, Info, Power, Activity } from 'lucide-react'
+import {
+  LayoutDashboard,
+  MoreHorizontal,
+  Download,
+  Info,
+  Power,
+  Activity,
+  AlertTriangle,
+} from 'lucide-react'
 import appIcon from '@renderer/assets/claudewatch-ring.svg'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import {
@@ -18,6 +26,7 @@ import {
 import { ipc } from '@renderer/lib/ipc-client'
 import { cn } from '@renderer/lib/cn'
 import { TodayStats } from './today-stats'
+import { dailyBudgetNotice } from './cost-limits'
 import { ActiveSessions } from './active-sessions'
 import { RecentSessions } from './recent-sessions'
 import { useTrayData } from './use-tray-data'
@@ -161,6 +170,7 @@ export default function TrayPopover(): React.JSX.Element {
   const {
     todayStats,
     weeklyUsage,
+    costLimits,
     activeSessions,
     recentSessions,
     isLoading,
@@ -217,15 +227,29 @@ export default function TrayPopover(): React.JSX.Element {
                 weeklyUsage={weeklyUsage}
               />
 
+              {(() => {
+                const notice = dailyBudgetNotice(todayStats.cost, costLimits)
+                return notice ? (
+                  <div
+                    role="status"
+                    title="Estimated from recorded tokens at API rates; not your bill"
+                    className="mt-2 flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] font-medium text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-400"
+                  >
+                    <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                    <span className="tabular-nums">{notice}</span>
+                  </div>
+                ) : null
+              })()}
+
               <div className="h-px bg-border/50 my-3" />
 
               {hasActivity ? (
                 <div className="flex flex-col gap-2">
-                  <ActiveSessions sessions={activeSessions} />
+                  <ActiveSessions sessions={activeSessions} costLimits={costLimits} />
                   {activeSessions.length > 0 && recentSessions.length > 0 && (
                     <div className="h-px bg-border/40 my-0.5" />
                   )}
-                  <RecentSessions sessions={recentSessions} />
+                  <RecentSessions sessions={recentSessions} costLimits={costLimits} />
                 </div>
               ) : (
                 <EmptyState />

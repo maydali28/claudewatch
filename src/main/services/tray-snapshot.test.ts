@@ -367,3 +367,23 @@ describe('buildTraySnapshot — context fill', () => {
     expect(snapshot.activeSessions[0].contextFill).toEqual(fill)
   })
 })
+
+describe('buildTraySnapshot — cost limits', () => {
+  it('carries the active cost limits and each session’s cost for the tray’s over-limit hints', () => {
+    const live: SessionSummary = {
+      ...session('live-1', 'alpha', [day({ day: TODAY_KEY, messageCount: 1, estimatedCost: 12 })]),
+      lastTimestamp: new Date().toISOString(),
+    }
+    const snapshot = buildTraySnapshot([project('alpha', [live])], ANTHROPIC_PRICING, Date.now(), {
+      daily: 25,
+      session: 10,
+    })
+    expect(snapshot.costLimits).toEqual({ daily: 25, session: 10 })
+    expect(snapshot.activeSessions[0].estimatedCost).toBe(12)
+  })
+
+  it('reports every limit off when none is given', () => {
+    const snapshot = buildTraySnapshot([], ANTHROPIC_PRICING)
+    expect(snapshot.costLimits).toEqual({ daily: 0, session: 0 })
+  })
+})

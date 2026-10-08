@@ -9,14 +9,26 @@ import { getModelMeta } from '@renderer/lib/model-meta'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { ContextFillBar } from '@renderer/components/shared/context-fill-bar'
 import { contextFillView } from '@renderer/components/shared/context-fill-rules'
+import type { CostAlertThresholds } from '@shared/types/cost-alerts'
+import { formatCost } from '@shared/utils/format-cost'
+import { sessionLimitNotice } from './cost-limits'
 
 const MAX_VISIBLE = 4
 
 interface ActiveSessionsProps {
   sessions: TraySnapshotSession[]
+  /** Cost alerts in force (0 = off); a row over the session limit shows its cost. */
+  costLimits: CostAlertThresholds
 }
 
-function ActiveSessionRow({ session }: { session: TraySnapshotSession }): React.JSX.Element {
+function ActiveSessionRow({
+  session,
+  costLimits,
+}: {
+  session: TraySnapshotSession
+  costLimits: CostAlertThresholds
+}): React.JSX.Element {
+  const overLimit = sessionLimitNotice(session.estimatedCost, costLimits)
   const handleClick = (): void => {
     ipc.tray.openDashboard(session.id, session.projectId)
   }
@@ -68,6 +80,17 @@ function ActiveSessionRow({ session }: { session: TraySnapshotSession }): React.
                 <MessageSquare className="h-2.5 w-2.5" />
                 <span className="tabular-nums">{session.messageCount}</span>
               </span>
+              {overLimit && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <span
+                    className="tabular-nums whitespace-nowrap font-semibold text-red-600 dark:text-red-400"
+                    title={overLimit}
+                  >
+                    {formatCost(session.estimatedCost)}
+                  </span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-1 min-w-0 shrink">
               <Folder className="h-2.5 w-2.5 shrink-0" />
@@ -92,7 +115,10 @@ function ActiveSessionRow({ session }: { session: TraySnapshotSession }): React.
   )
 }
 
-export function ActiveSessions({ sessions }: ActiveSessionsProps): React.JSX.Element | null {
+export function ActiveSessions({
+  sessions,
+  costLimits,
+}: ActiveSessionsProps): React.JSX.Element | null {
   if (sessions.length === 0) return null
 
   const visible = sessions.slice(0, MAX_VISIBLE)
@@ -114,7 +140,7 @@ export function ActiveSessions({ sessions }: ActiveSessionsProps): React.JSX.Ele
       </div>
 
       {visible.map((s) => (
-        <ActiveSessionRow key={s.id} session={s} />
+        <ActiveSessionRow key={s.id} session={s} costLimits={costLimits} />
       ))}
 
       {overflow > 0 && (

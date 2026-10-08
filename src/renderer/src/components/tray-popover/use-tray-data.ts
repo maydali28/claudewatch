@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TraySnapshot, TraySnapshotSession } from '@shared/types/analytics'
 import type { UpdateInfo } from '@shared/types/project'
+import type { CostAlertThresholds } from '@shared/types/cost-alerts'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
 import { buildWeeklyUsage } from './weekly-usage'
@@ -44,6 +45,8 @@ async function fetchSettings(): Promise<{ launchAtLogin: boolean; trayTipDismiss
   }
 }
 
+const NO_LIMITS: CostAlertThresholds = { daily: 0, session: 0 }
+
 export interface TrayData {
   todayStats: {
     sessionCount: number
@@ -53,6 +56,8 @@ export interface TrayData {
     projectCount: number
   }
   weeklyUsage: Array<{ date: string; cost: number; tokens: number }>
+  /** Cost alerts in force (0 = off), for the over-limit hints. */
+  costLimits: CostAlertThresholds
   activeSessions: TraySnapshotSession[]
   recentSessions: TraySnapshotSession[]
   isLoading: boolean
@@ -209,6 +214,7 @@ export function useTrayData(): TrayData {
   return {
     todayStats,
     weeklyUsage,
+    costLimits: snapshot?.costLimits ?? NO_LIMITS,
     activeSessions,
     recentSessions,
     isLoading: analyticsQuery.isLoading,

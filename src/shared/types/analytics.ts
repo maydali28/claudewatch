@@ -1,3 +1,4 @@
+import type { CostAlertThresholds } from './cost-alerts'
 import type { EffortLevel, EffortDistribution, ContextFill } from './session'
 import type { LintCheckId, LintSeverity } from './lint'
 
@@ -473,6 +474,8 @@ export interface TraySnapshotSession {
   primaryModel?: string
   /** See `SessionSummary.contextFill`; drives the row's bar. */
   contextFill?: ContextFill
+  /** Estimated cost; the row shows it when it passes the session limit. */
+  estimatedCost: number
   messageCount: number
   totalInputTokens: number
   totalOutputTokens: number
@@ -494,4 +497,6 @@ export interface TraySnapshot {
   weekly: Array<{ date: string; tokens: number; cost: number }>
   activeSessions: TraySnapshotSession[]
   recentSessions: TraySnapshotSession[]
+  /** The cost alerts in force (0 = off), so the tray can say a limit is passed. */
+  costLimits: CostAlertThresholds
 }

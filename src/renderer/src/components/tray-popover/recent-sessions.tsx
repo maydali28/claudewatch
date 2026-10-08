@@ -9,9 +9,14 @@ import { getModelMeta } from '@renderer/lib/model-meta'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
 import { ContextFillBar } from '@renderer/components/shared/context-fill-bar'
 import { contextFillView } from '@renderer/components/shared/context-fill-rules'
+import type { CostAlertThresholds } from '@shared/types/cost-alerts'
+import { formatCost } from '@shared/utils/format-cost'
+import { sessionLimitNotice } from './cost-limits'
 
 interface RecentSessionsProps {
   sessions: TraySnapshotSession[]
+  /** Cost alerts in force (0 = off); a row over the session limit shows its cost. */
+  costLimits: CostAlertThresholds
 }
 
 function relativeTime(timestamp: string): string {
@@ -24,7 +29,14 @@ function relativeTime(timestamp: string): string {
   return `${Math.floor(h / 24)}d ago`
 }
 
-function RecentSessionRow({ session }: { session: TraySnapshotSession }): React.JSX.Element {
+function RecentSessionRow({
+  session,
+  costLimits,
+}: {
+  session: TraySnapshotSession
+  costLimits: CostAlertThresholds
+}): React.JSX.Element {
+  const overLimit = sessionLimitNotice(session.estimatedCost, costLimits)
   const handleClick = (): void => {
     ipc.tray.openDashboard(session.id, session.projectId)
   }
@@ -74,6 +86,17 @@ function RecentSessionRow({ session }: { session: TraySnapshotSession }): React.
                 <MessageSquare className="h-2.5 w-2.5" />
                 <span className="tabular-nums">{session.messageCount}</span>
               </span>
+              {overLimit && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <span
+                    className="tabular-nums whitespace-nowrap font-semibold text-red-600 dark:text-red-400"
+                    title={overLimit}
+                  >
+                    {formatCost(session.estimatedCost)}
+                  </span>
+                </>
+              )}
               <span className="text-muted-foreground/40">·</span>
               <span className="tabular-nums whitespace-nowrap">
                 {relativeTime(session.lastTimestamp)}
@@ -102,7 +125,10 @@ function RecentSessionRow({ session }: { session: TraySnapshotSession }): React.
   )
 }
 
-export function RecentSessions({ sessions }: RecentSessionsProps): React.JSX.Element | null {
+export function RecentSessions({
+  sessions,
+  costLimits,
+}: RecentSessionsProps): React.JSX.Element | null {
   if (sessions.length === 0) return null
 
   return (
@@ -113,7 +139,7 @@ export function RecentSessions({ sessions }: RecentSessionsProps): React.JSX.Ele
         </span>
       </div>
       {sessions.map((s) => (
-        <RecentSessionRow key={s.id} session={s} />
+        <RecentSessionRow key={s.id} session={s} costLimits={costLimits} />
       ))}
     </div>
   )
