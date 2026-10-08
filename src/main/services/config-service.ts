@@ -21,6 +21,8 @@ import {
   resolvePluginPath,
   sourceForLayer,
 } from './config-sources'
+import { readTranscriptMcpInfo } from './mcp-status'
+import { mcpToolServerName } from '@shared/utils/mcp-tool-name'
 import type {
   CommandArgument,
   ConfigScope,
@@ -419,9 +421,12 @@ export async function readExtendedConfig(projects: ProjectRootRef[]): Promise<Ex
 }
 
 // ─── readMcps ─────────────────────────────────────────────────────────────────
-// Claude Code stores MCP servers in ~/.claude.json (top-level mcpServers),
-// not in ~/.claude/settings.json. We read both and merge, deduplicating by name.
-// Status is parsed from ~/.claude/debug/latest which Claude Code writes on startup.
+// Claude Code reads MCP servers from ~/.claude.json (globally and per project),
+// a project's .mcp.json, the settings files and installed plugins, and adds
+// claude.ai connectors and its own built-in servers. See readMcps.
+// Status comes from the latest session transcripts (see mcp-status.ts), or
+// from ~/.claude/debug/latest, which Claude Code only writes with --debug.
+// The more recent of the two wins.
 
 interface ClaudeJsonMcpServer {
   type?: string
@@ -429,10 +434,23 @@ interface ClaudeJsonMcpServer {
   args?: string[]
   url?: string
   env?: Record<string, string>
+  headers?: Record<string, string>
+}
+
+interface ClaudeJsonProject {
+  mcpServers?: Record<string, ClaudeJsonMcpServer>
+  disabledMcpServers?: string[]
+  disabledMcpjsonServers?: string[]
 }
 
 interface ClaudeJson {
   mcpServers?: Record<string, ClaudeJsonMcpServer>
+  projects?: Record<string, ClaudeJsonProject>
+  /** claude.ai connectors this account has used, as `claude.ai <Name>`. */
+  claudeAiMcpEverConnected?: string[]
+  claudeInChromeDefaultEnabled?: boolean
+  hasCompletedClaudeInChromeOnboarding?: boolean
+  hasIdeOnboardingBeenShown?: Record<string, boolean>
 }
 
 interface McpRuntimeStatus {
@@ -510,46 +528,204 @@ function mcpLevelFor(scope: ConfigScope): McpLevel {
   return 'global'
 }
 
-export async function readMcps(project?: ProjectRootRef): Promise<McpServerEntry[]> {
+/** A `mcpServers` map, or an empty one when the value is anything else. */
+function mcpServersOf(value: unknown): Record<string, ClaudeJsonMcpServer> {
+  if (!isPlainObject(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value).filter((e): e is [string, ClaudeJsonMcpServer] => isPlainObject(e[1]))
+  )
+}
+
+/**
+ * A plugin's MCP servers: `mcpServers` in its `plugin.json` (inline, or a
+ * path to a JSON file), else its root `.mcp.json`. Either file may wrap the
+ * map in `mcpServers` or be the map itself.
+ */
+async function readPluginMcps(
+  source: ConfigSource
+): Promise<{ path: string; servers: Record<string, ClaudeJsonMcpServer> } | null> {
+  if (!source.root) return null
+  const manifest = await readPluginManifest(source.root)
+  if (isPlainObject(manifest.mcpServers)) {
+    return {
+      path: path.join(source.root, '.claude-plugin', 'plugin.json'),
+      servers: mcpServersOf(manifest.mcpServers),
+    }
+  }
+  const declared = typeof manifest.mcpServers === 'string' ? manifest.mcpServers : '.mcp.json'
+  const file = await resolvePluginPath(source.root, declared)
+  if (!file) return null
+  const json = await readJsonFile<Record<string, unknown>>(file)
+  if (!isPlainObject(json)) return null
+  return { path: file, servers: mcpServersOf(json.mcpServers ?? json) }
+}
+
+/** IDE names in `<claudeDir>/ide/*.lock`, written by each running IDE extension. */
+async function ideLockNames(): Promise<string[]> {
+  const dir = path.join(getClaudeDir(), 'ide')
+  let files: string[]
+  try {
+    files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.lock'))
+  } catch {
+    return []
+  }
+  const locks = await Promise.all(
+    files.map((f) => readJsonFile<{ ideName?: unknown }>(path.join(dir, f)))
+  )
+  return locks.map((l) => (typeof l?.ideName === 'string' ? l.ideName : '')).filter(Boolean)
+}
+
+/**
+ * The servers Claude Code adds itself, as named in tool calls: `claude-in-chrome`
+ * once the Chrome extension is set up, `claude-vscode` once a VS Code-family
+ * editor (VS Code, Cursor, Windsurf) has the Claude Code extension.
+ */
+async function builtinMcpNames(claudeJson: ClaudeJson | null): Promise<string[]> {
+  const names: string[] = []
+  if (
+    claudeJson?.claudeInChromeDefaultEnabled === true ||
+    claudeJson?.hasCompletedClaudeInChromeOnboarding === true
+  ) {
+    names.push('claude-in-chrome')
+  }
+  const vscodeFamily = /visual studio code|vs ?code|cursor|windsurf/i
+  if (
+    claudeJson?.hasIdeOnboardingBeenShown?.vscode === true ||
+    (await ideLockNames()).some((n) => vscodeFamily.test(n))
+  ) {
+    names.push('claude-vscode')
+  }
+  return names
+}
+
+/**
+ * Every MCP server Claude Code would start, in this order: `~/.claude.json`
+ * and the user settings (global); for each project its `.mcp.json` and
+ * `.claude/settings.json` (project), then `.claude/settings.local.json` and its
+ * entry in `~/.claude.json` (local); installed plugins' servers, named
+ * `plugin:<plugin>:<server>`; the claude.ai connectors this account has
+ * used; and Claude Code's built-in servers.
+ *
+ * A name is listed once per project: the first definition wins, and a global
+ * one hides a project's server of the same name. Names match Claude Code's
+ * own, so `mcpToolServerName` turns them into the `mcp__<server>__` prefix.
+ */
+export async function readMcps(projects: ProjectRootRef[] = []): Promise<McpServerEntry[]> {
   const seen = new Set<string>()
   const entries: McpServerEntry[] = []
 
-  const statuses = await readMcpStatuses()
+  const [debugStatuses, transcriptInfo, claudeJson, userLayers, managed] = await Promise.all([
+    readMcpStatuses(),
+    readTranscriptMcpInfo(),
+    readJsonFile<ClaudeJson>(getClaudeJsonPath()),
+    readSettingsLayers(),
+    readManagedSettings(),
+  ])
 
-  const add = (name: string, cfg: ClaudeJsonMcpServer, level: McpLevel): void => {
-    // First definition wins, as before.
-    if (seen.has(name)) return
-    seen.add(name)
-    const s = statuses.get(name)
+  const add = (
+    name: string,
+    cfg: ClaudeJsonMcpServer,
+    level: McpLevel,
+    extra: Partial<McpServerEntry> = {}
+  ): void => {
+    const projectKey = extra.projectId ? `${extra.projectId}\0${name}` : null
+    if (seen.has(name) || (projectKey && seen.has(projectKey))) return
+    seen.add(projectKey ?? name)
+    const fromDebug = debugStatuses.get(name)
+    const toolName = mcpToolServerName(name)
+    const fromTranscript = transcriptInfo.statuses.get(toolName)
+    const instructions = transcriptInfo.instructions.get(toolName)
+    const s =
+      fromTranscript && (!fromDebug?.lastSeen || fromDebug.lastSeen < fromTranscript.lastSeen)
+        ? fromTranscript
+        : fromDebug
     entries.push({
-      id: name,
+      id: projectKey ? `${extra.projectId}:${name}` : name,
       name,
       type: cfg.type ?? (cfg.command ? 'stdio' : cfg.url ? 'sse' : undefined),
       command: cfg.command,
-      args: cfg.args ?? [],
+      args: Array.isArray(cfg.args) ? cfg.args : [],
       url: cfg.url,
-      env: cfg.env ?? {},
+      env: isPlainObject(cfg.env) ? cfg.env : {},
+      // Header values carry tokens: only their names leave the main process.
+      ...(isPlainObject(cfg.headers) && Object.keys(cfg.headers).length > 0
+        ? { headerNames: Object.keys(cfg.headers) }
+        : {}),
       level,
+      ...extra,
       status: s?.status ?? 'unknown',
       error: s?.error,
-      capabilities: s?.capabilities,
+      ...(s && 'capabilities' in s && s.capabilities ? { capabilities: s.capabilities } : {}),
+      ...(s && 'toolCount' in s && s.toolCount ? { toolCount: s.toolCount } : {}),
+      ...(s && 'tools' in s && s.tools ? { tools: s.tools } : {}),
+      ...(instructions ? { instructions } : {}),
       lastSeen: s?.lastSeen,
     })
   }
 
-  // 1. ~/.claude.json (primary source for global MCPs)
-  const claudeJson = await readJsonFile<ClaudeJson>(getClaudeJsonPath())
-  for (const [name, cfg] of Object.entries(claudeJson?.mcpServers ?? {})) {
-    add(name, cfg, 'global')
+  // 1. Global: ~/.claude.json, then the user settings.
+  const claudeJsonPath = getClaudeJsonPath()
+  for (const [name, cfg] of Object.entries(mcpServersOf(claudeJson?.mcpServers))) {
+    add(name, cfg, 'global', { sourcePath: claudeJsonPath })
+  }
+  for (const layer of userLayers) {
+    for (const [name, cfg] of Object.entries(mcpServersOf(layer.settings.mcpServers))) {
+      add(name, cfg, 'global', { sourcePath: layer.path })
+    }
   }
 
-  // 2. The settings layers (some setups use these). Walk the layers rather
-  // than the merged object so each server keeps the level of the file that
-  // defined it.
-  for (const layer of await readSettingsLayers(project)) {
-    for (const [name, cfg] of Object.entries(layer.settings.mcpServers ?? {})) {
-      add(name, cfg, mcpLevelFor(layer.scope))
+  // 2. Per project: .mcp.json, the project and local settings, then the
+  // project's entry in ~/.claude.json (Claude Code's "local" scope).
+  for (const project of projects) {
+    const state = claudeJson?.projects?.[project.path]
+    const disabled = new Set([
+      ...asList(state?.disabledMcpServers),
+      ...asList(state?.disabledMcpjsonServers),
+    ])
+    const base = { projectId: project.id, projectName: project.name }
+    const flags = (name: string): Partial<McpServerEntry> =>
+      disabled.has(name) ? { ...base, disabled: true } : base
+
+    const mcpJsonPath = path.join(project.path, '.mcp.json')
+    const mcpJson = await readJsonFile<{ mcpServers?: unknown }>(mcpJsonPath)
+    for (const [name, cfg] of Object.entries(mcpServersOf(mcpJson?.mcpServers))) {
+      add(name, cfg, 'project', { ...flags(name), sourcePath: mcpJsonPath })
     }
+    const projectLayers = (await readSettingsLayers(project)).filter((l) => l.scope !== 'user')
+    for (const layer of projectLayers) {
+      for (const [name, cfg] of Object.entries(mcpServersOf(layer.settings.mcpServers))) {
+        add(name, cfg, mcpLevelFor(layer.scope), { ...flags(name), sourcePath: layer.path })
+      }
+    }
+    for (const [name, cfg] of Object.entries(mcpServersOf(state?.mcpServers))) {
+      add(name, cfg, 'local', { ...flags(name), sourcePath: claudeJsonPath })
+    }
+  }
+
+  // 3. Installed plugins; a disabled plugin's servers are listed, marked.
+  const plugins = await discoverPluginSources(
+    effectiveEnabledPlugins(mergeSettingsLayers(userLayers), managed?.settings)
+  )
+  for (const source of plugins) {
+    const read = await readPluginMcps(source)
+    if (!read) continue
+    const pluginName = source.plugin?.name ?? source.label
+    for (const [server, cfg] of Object.entries(read.servers)) {
+      add(`plugin:${pluginName}:${server}`, cfg, 'plugin', {
+        pluginName,
+        sourcePath: read.path,
+        ...(source.plugin?.enabled === false ? { disabled: true } : {}),
+      })
+    }
+  }
+
+  // 4. claude.ai connectors, then Claude Code's own servers. Neither has a
+  // config file: they are known from ~/.claude.json flags.
+  for (const name of asList(claudeJson?.claudeAiMcpEverConnected)) {
+    if (typeof name === 'string' && name) add(name, { type: 'http' }, 'connector')
+  }
+  for (const name of await builtinMcpNames(claudeJson)) {
+    add(name, {}, 'builtin')
   }
 
   return entries

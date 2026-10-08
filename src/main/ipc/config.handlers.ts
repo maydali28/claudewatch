@@ -78,10 +78,8 @@ export function registerConfigHandlers(): void {
     try {
       const projectScope = validateProjectScopedRequest(payload)
       const projectId = projectScope?.projectId
-      const root = projectId
-        ? (await resolvedProjectRoots()).find((r) => r.id === projectId)
-        : undefined
-      const mcps = await readMcps(root)
+      const roots = await resolvedProjectRoots()
+      const mcps = await readMcps(projectId ? roots.filter((r) => r.id === projectId) : roots)
       return ok(mcps)
     } catch (e) {
       captureHandlerException(e)

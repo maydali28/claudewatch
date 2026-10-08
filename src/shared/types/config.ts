@@ -118,9 +118,31 @@ export interface McpServerEntry {
   args: string[]
   url?: string
   env: Record<string, string>
-  level?: 'global' | 'project' | 'local'
-  status?: 'connected' | 'failed' | 'unknown'
+  /**
+   * Where the server comes from: a config file (`global`, `project`, `local`),
+   * an installed plugin, a claude.ai connector, or Claude Code itself
+   * (`builtin`: the Chrome extension and the IDE integration).
+   */
+  level?: 'global' | 'project' | 'local' | 'plugin' | 'connector' | 'builtin'
+  /** The file that defines it; absent for connectors and built-ins. */
+  sourcePath?: string
+  /** The project of a `project` or `local` server. */
+  projectId?: string
+  projectName?: string
+  /** The plugin of a `plugin` server. */
+  pluginName?: string
+  /** Turned off in `~/.claude.json` for its project, or its plugin is disabled. */
+  disabled?: boolean
+  status?: 'connected' | 'failed' | 'needs-auth' | 'unknown'
   error?: string
+  /** Tools the server offered when it last connected. */
+  toolCount?: number
+  /** Their names, without the `mcp__<server>__` prefix, sorted. */
+  tools?: string[]
+  /** What the server last told Claude about using it. */
+  instructions?: string
+  /** Names of the HTTP headers it is configured with; the values never leave the main process. */
+  headerNames?: string[]
   capabilities?: McpCapabilities
   lastSeen?: string
 }

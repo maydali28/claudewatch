@@ -337,7 +337,7 @@ describe('readExtendedConfig', () => {
     expect(allCommands).not.toContain('legacy.sh')
 
     expect((await readRawSettings(project)).hooks?.Notification).toBeUndefined()
-    expect((await readMcps(project)).map((m) => m.name)).not.toContain('legacy')
+    expect((await readMcps([project])).map((m) => m.name)).not.toContain('legacy')
   })
 
   it('gives every settings rule its source', async () => {
@@ -617,7 +617,7 @@ describe('readMcps', () => {
       mcpServers: { fromLocal: { command: 'd' } },
     })
 
-    const mcps = await readMcps(demoApp())
+    const mcps = await readMcps([demoApp()])
     const byName = Object.fromEntries(mcps.map((m) => [m.name, m]))
     expect(mcps.map((m) => m.name)).toEqual([
       'fromClaudeJson',
@@ -637,6 +637,102 @@ describe('readMcps', () => {
 
     const withoutProject = await readMcps()
     expect(withoutProject.map((m) => m.name)).toEqual(['fromClaudeJson', 'shared', 'fromUser'])
+  })
+
+  const claudeJsonPath = (): string => path.join(dirs.tmp, 'home', '.claude.json')
+
+  it("reads a project's .mcp.json and its ~/.claude.json entry, honouring disabled servers", async () => {
+    writeJson(path.join(projectRoot, '.mcp.json'), {
+      mcpServers: { github: { type: 'http', url: 'https://gh' }, supabase: { command: 's' } },
+    })
+    writeJson(claudeJsonPath(), {
+      projects: {
+        [projectRoot]: {
+          mcpServers: { scratch: { command: 'x' } },
+          disabledMcpjsonServers: ['supabase'],
+        },
+      },
+    })
+
+    const byName = Object.fromEntries((await readMcps([demoApp()])).map((m) => [m.name, m]))
+    expect(byName.github).toMatchObject({
+      level: 'project',
+      type: 'http',
+      projectName: 'demo-app',
+      sourcePath: path.join(projectRoot, '.mcp.json'),
+    })
+    expect(byName.github.disabled).toBeUndefined()
+    expect(byName.supabase.disabled).toBe(true)
+    expect(byName.scratch).toMatchObject({ level: 'local', sourcePath: claudeJsonPath() })
+  })
+
+  it('lists the same project server once per project, and a global one hides it', async () => {
+    const other = path.join(dirs.tmp, 'workspace', 'other')
+    for (const root of [projectRoot, other]) {
+      writeJson(path.join(root, '.mcp.json'), {
+        mcpServers: { github: { url: 'https://gh' }, time: { command: 'project-time' } },
+      })
+    }
+    writeJson(claudeJsonPath(), { mcpServers: { time: { command: 'global-time' } } })
+
+    const mcps = await readMcps([demoApp(), { id: '-tmp-other', name: 'other', path: other }])
+    expect(mcps.filter((m) => m.name === 'github').map((m) => m.projectName)).toEqual([
+      'demo-app',
+      'other',
+    ])
+    expect(new Set(mcps.map((m) => m.id)).size).toBe(mcps.length)
+    expect(mcps.filter((m) => m.name === 'time')).toHaveLength(1)
+  })
+
+  it('names plugin servers plugin:<plugin>:<server>, from .mcp.json or plugin.json', async () => {
+    const pluginsDir = path.join(dirs.claudeDir, 'plugins')
+    const install = (name: string, manifest: Record<string, unknown> = {}): string => {
+      const root = path.join(pluginsDir, 'cache', 'official', name, '1.0.0')
+      writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name, ...manifest })
+      return root
+    }
+    const fileRoot = install('linear')
+    writeJson(path.join(fileRoot, '.mcp.json'), { mcpServers: { api: { url: 'https://l' } } })
+    const inlineRoot = install('notes', { mcpServers: { store: { command: 'n' } } })
+    writeJson(path.join(pluginsDir, 'installed_plugins.json'), {
+      version: 2,
+      plugins: {
+        'linear@official': [{ installPath: fileRoot, version: '1.0.0' }],
+        'notes@official': [{ installPath: inlineRoot, version: '1.0.0' }],
+      },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'linear@official': true, 'notes@official': false },
+    })
+
+    const byName = Object.fromEntries((await readMcps()).map((m) => [m.name, m]))
+    expect(byName['plugin:linear:api']).toMatchObject({ level: 'plugin', pluginName: 'linear' })
+    expect(byName['plugin:linear:api'].disabled).toBeUndefined()
+    expect(byName['plugin:notes:store']).toMatchObject({ level: 'plugin', disabled: true })
+  })
+
+  it('lists claude.ai connectors and the built-in Chrome and VS Code servers', async () => {
+    writeJson(claudeJsonPath(), {
+      claudeAiMcpEverConnected: ['claude.ai Sentry', 'claude.ai Claude Docs'],
+      claudeInChromeDefaultEnabled: true,
+    })
+    writeJson(path.join(dirs.claudeDir, 'ide', '123.lock'), { ideName: 'Visual Studio Code' })
+
+    const mcps = await readMcps()
+    expect(mcps.filter((m) => m.level === 'connector').map((m) => m.name)).toEqual([
+      'claude.ai Sentry',
+      'claude.ai Claude Docs',
+    ])
+    expect(mcps.filter((m) => m.level === 'builtin').map((m) => m.name)).toEqual([
+      'claude-in-chrome',
+      'claude-vscode',
+    ])
+  })
+
+  it('lists no built-ins when Chrome and the IDE extension were never set up', async () => {
+    writeJson(path.join(dirs.claudeDir, 'ide', '1.lock'), { ideName: 'IntelliJ IDEA' })
+    expect((await readMcps()).filter((m) => m.level === 'builtin')).toEqual([])
   })
 })
 
