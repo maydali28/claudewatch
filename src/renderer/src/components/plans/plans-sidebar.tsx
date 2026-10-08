@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { FileText, Clock, RefreshCw, Search, X, BookOpen, FolderOpen } from 'lucide-react'
+import { BookOpen, Clock, FileText, FolderOpen, Globe, RefreshCw, Search, X } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
@@ -151,7 +151,9 @@ export default function PlansSidebar({
             icon={
               group.kind === 'project' ? (
                 <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-              ) : undefined
+              ) : (
+                <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              )
             }
           >
             {group.plans.map((plan) => (

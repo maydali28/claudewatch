@@ -1,5 +1,5 @@
 import React from 'react'
-import { FolderOpen, Package, Puzzle, ShieldCheck } from 'lucide-react'
+import { FolderOpen, Globe, Package, Puzzle, ShieldCheck } from 'lucide-react'
 import type { ConfigSource } from '@shared/types'
 import type { SourceGroupKind } from './scope-groups'
 
@@ -30,6 +30,12 @@ export function sourceGroupDecor(group: { kind: SourceGroupKind; source?: Config
   muted: boolean
 } {
   switch (group.kind) {
+    case 'global':
+      return {
+        icon: <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />,
+        tags: [],
+        muted: false,
+      }
     case 'project':
       return {
         icon: <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />,

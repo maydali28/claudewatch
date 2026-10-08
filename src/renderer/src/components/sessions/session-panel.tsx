@@ -1,5 +1,18 @@
 import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
-import { Search, X, RefreshCw, ArrowDown, Info, ShieldAlert, GitBranch, Layers } from 'lucide-react'
+import {
+  Search,
+  X,
+  RefreshCw,
+  ArrowDown,
+  Info,
+  ShieldAlert,
+  ShieldCheck,
+  GitBranch,
+  Layers,
+  LayoutGrid,
+  Bot,
+  Wrench,
+} from 'lucide-react'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import {
   INCREMENT_RENDER_BATCH,
@@ -576,19 +589,23 @@ export default function SessionPanel(): React.JSX.Element | null {
 
           <Tabs value={tab} onValueChange={(v) => changeTab(v as SessionTab)} className="mt-2">
             <TabsList className="h-7">
-              <TabsTrigger value="overview" className="px-2.5 py-0.5 text-[11px]">
+              <TabsTrigger value="overview" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <LayoutGrid className="h-3 w-3" />
                 Overview
               </TabsTrigger>
-              <TabsTrigger value="subagents" className="px-2.5 py-0.5 text-[11px]">
+              <TabsTrigger value="subagents" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <Bot className="h-3 w-3" />
                 Sub-agents
                 {subagentCount > 0 && (
                   <span className="ml-1 tabular-nums text-muted-foreground">{subagentCount}</span>
                 )}
               </TabsTrigger>
-              <TabsTrigger value="tools" className="px-2.5 py-0.5 text-[11px]">
+              <TabsTrigger value="tools" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <Wrench className="h-3 w-3" />
                 Tools &amp; MCPs
               </TabsTrigger>
-              <TabsTrigger value="health" className="px-2.5 py-0.5 text-[11px]">
+              <TabsTrigger value="health" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <ShieldCheck className="h-3 w-3" />
                 Health
                 {health && health.count > 0 && (
                   <span
