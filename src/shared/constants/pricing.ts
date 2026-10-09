@@ -13,7 +13,8 @@ import { getModelFamily } from '@shared/constants/models'
 //
 // Cache 5m write = 1.25x base input. Cache 1h write = 2x base input.
 // Cache read = 0.1x base input, EXCEPT Fable 5.1 / Mythos 5.1 (0.025x, a flat
-// $0.25 per million) and Opus 5.5 (0.05x, $0.20 per million).
+// $0.25 per million) and Opus 5.5 / Sonnet 5.5 (0.05x: $0.20 and $0.10 per
+// million).
 //
 // Confirmed by the published pricing table (platform.claude.com/docs/en/
 // about-claude/pricing), not carried over as an assumption:
@@ -22,6 +23,8 @@ import { getModelFamily } from '@shared/constants/models'
 //   - Mythos 5.1 shares Fable 5.1's flat $0.25 cache read rate.
 //   - Opus 5.5 is $4 / $20 with cache reads at 0.05x ($0.20), and the usual
 //     1.25x / 2x write multipliers ($5 / $8).
+//   - Sonnet 5.5 is $2 / $10 with cache reads at 0.05x ($0.10), not the 0.1x
+//     ($0.20) Sonnet 5 has.
 
 /**
  * Bump whenever any rate below changes, or whenever `getModelFamily` starts
@@ -38,8 +41,10 @@ import { getModelFamily } from '@shared/constants/models'
  *     official pricing page, so their sessions now surface as unpriced.
  * 4 — added sonnet-5-5, so sessions cached as `unknown` before it was
  *     recognised are repriced instead of staying unpriced.
+ * 5 — corrected the Sonnet 5.5 cache-read rate from $0.20 to the published
+ *     $0.10.
  */
-export const PRICING_REVISION = 4
+export const PRICING_REVISION = 5
 
 export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   // ── Fable 5.1 / Mythos 5.1 — $10 input / $50 output, $0.25 cache read ────
@@ -64,8 +69,10 @@ export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   'opus-4-1': { input: 15.0, output: 75.0, cacheRead: 1.5, cache5m: 18.75, cache1h: 30.0 },
   'opus-4': { input: 15.0, output: 75.0, cacheRead: 1.5, cache5m: 18.75, cache1h: 30.0 },
 
-  // ── Sonnet 5.5 / 5 — $2 input / $10 output ───────────────────────────────
-  'sonnet-5-5': { input: 2.0, output: 10.0, cacheRead: 0.2, cache5m: 2.5, cache1h: 4.0 },
+  // ── Sonnet 5.5 — $2 input / $10 output, $0.10 cache read (0.05x) ─────────
+  'sonnet-5-5': { input: 2.0, output: 10.0, cacheRead: 0.1, cache5m: 2.5, cache1h: 4.0 },
+
+  // ── Sonnet 5 — $2 input / $10 output ─────────────────────────────────────
   'sonnet-5': { input: 2.0, output: 10.0, cacheRead: 0.2, cache5m: 2.5, cache1h: 4.0 },
 
   // ── Sonnet 4.6 / 4.5 / 4 — $3 input / $15 output ─────────────────────────

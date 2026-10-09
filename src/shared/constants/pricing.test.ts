@@ -24,9 +24,9 @@ describe('ANTHROPIC_PRICING — published input/output rates', () => {
 
 /**
  * Cache reads are 0.1x input for every model except Fable 5.1 / Mythos 5.1
- * (0.025x, a flat $0.25 per million) and Opus 5.5 (0.05x, $0.20 per million).
- * Applying the usual multiplier there overcharges cache reads fourfold and
- * twofold respectively.
+ * (0.025x, a flat $0.25 per million) and Opus 5.5 / Sonnet 5.5 (0.05x, $0.20
+ * and $0.10 per million). Applying the usual multiplier there overcharges
+ * cache reads fourfold and twofold respectively.
  */
 describe('ANTHROPIC_PRICING — cache read rates', () => {
   it('prices Fable 5.1 cache reads at the documented $0.25, not 0.1x input', () => {
@@ -51,8 +51,8 @@ describe('ANTHROPIC_PRICING — cache read rates', () => {
     expect(ANTHROPIC_PRICING['opus-5'].cacheRead).toBe(0.5)
   })
 
-  it('prices Sonnet 5.5 cache reads at 0.1x input', () => {
-    expect(ANTHROPIC_PRICING['sonnet-5-5'].cacheRead).toBe(0.2)
+  it('prices Sonnet 5.5 cache reads at the documented 0.05x input ($0.10), not 0.1x', () => {
+    expect(ANTHROPIC_PRICING['sonnet-5-5'].cacheRead).toBe(0.1)
   })
 
   it('prices Sonnet 5 cache reads at 0.1x input', () => {
