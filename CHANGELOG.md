@@ -21,6 +21,7 @@
 * **sessions:** add a health tab to each session
 * **sessions:** add tabs for a session's tools, mcp servers and sub-agents
 * **sessions:** export a session as markdown, json or csv
+* **sessions:** list a session moved to the background once, counted once
 * **sessions:** name sub-agents and show their run time and running state
 * **sessions:** open a sub-agent's own conversation
 * **sessions:** show how full each session's context window is
@@ -35,6 +36,7 @@
 
 * **mcps:** show server status again, read from session transcripts
 * **memory:** list every project's auto-memory notes
+* **sessions:** show messages you send to a running sub-agent
 * **settings:** save every setting the app changes, and say so when one is refused
 * **toasts:** make in-app notices readable in the light theme
 * **tray:** stop reopening the welcome window on every launch
