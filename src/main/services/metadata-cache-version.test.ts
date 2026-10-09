@@ -80,15 +80,66 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(13, tz)
+    writeCacheFile(18, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 13, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 12, or a
-    // bump to 14 without a matching migration, would do.
+    // If the constant is not 18, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 17, or a
+    // bump to 19 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
+  })
+
+  it('discards a v17 cache file rather than serving it under the v18 contract', () => {
+    const tz = `${TZ}-stale-v17`
+    writeCacheFile(17, tz)
+
+    // A v17 summary has no `isBackground`, `firstUuid` or `lastUuid`, so a
+    // session moved to the background could not be folded into its copy and
+    // would be counted twice. See `CACHE_VERSION`'s v18 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
+  })
+
+  it('discards a v16 cache file rather than serving it under the v17 contract', () => {
+    const tz = `${TZ}-stale-v16`
+    writeCacheFile(16, tz)
+
+    // A v16 summary's message counts leave out every prompt queued while
+    // Claude was busy, including each message sent to a running sub-agent.
+    // See `CACHE_VERSION`'s v17 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
+  })
+
+  it('discards a v15 cache file rather than serving it under the v16 contract', () => {
+    const tz = `${TZ}-stale-v15`
+    writeCacheFile(15, tz)
+
+    // A v15 summary has no `contextFill`, so every session bar would sit
+    // empty until its transcript changed. See `CACHE_VERSION`'s v16 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
+  })
+
+  it('discards a v14 cache file rather than serving it under the v15 contract', () => {
+    const tz = `${TZ}-stale-v14`
+    writeCacheFile(14, tz)
+
+    // A v14 summary's sub-agents have no type, description, duration or stop
+    // time. Served back, every sub-agent card would show a bare agent id and
+    // never a run time until each transcript changed. See `CACHE_VERSION`'s
+    // v15 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
+  })
+
+  it('discards a v13 cache file rather than serving it under the v14 contract', () => {
+    const tz = `${TZ}-stale-v13`
+    writeCacheFile(13, tz)
+
+    // A v13 summary has no `skillListing`. Served back, every session would
+    // look as if it listed no skills, and the Skills panel would lose the
+    // built-in and claude.ai skills until each transcript changed. See
+    // `CACHE_VERSION`'s v14 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards a v12 cache file rather than serving it under the v13 contract', () => {

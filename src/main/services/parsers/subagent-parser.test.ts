@@ -4,6 +4,7 @@ import * as os from 'os'
 import * as path from 'path'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
 import { parseSubagents } from './subagent-parser'
+import { createAgentResultCollector } from './agent-results'
 
 let dir: string
 beforeAll(() => {
@@ -69,6 +70,147 @@ describe('parseSubagents', () => {
     const { summaries } = await parseSubagents(parent, 'sess', 'proj', ANTHROPIC_PRICING)
     expect(summaries).toHaveLength(1)
     expect(summaries[0].messageCount).toBe(2)
+  })
+
+  it("reads each sub-agent's meta file and tolerates a missing or broken one", async () => {
+    const parent = path.join(dir, 'sess-meta.jsonl')
+    fs.writeFileSync(parent, '')
+    const subdir = path.join(dir, 'sess-meta', 'subagents')
+    fs.mkdirSync(subdir, { recursive: true })
+    const transcript = [
+      {
+        type: 'user',
+        uuid: 'u',
+        timestamp: '2026-09-10T10:00:00.000Z',
+        message: { content: [{ type: 'text', text: 'go' }] },
+      },
+      {
+        type: 'assistant',
+        uuid: 'a',
+        timestamp: '2026-09-10T10:00:01.000Z',
+        message: {
+          id: 'm',
+          model: 'claude-opus-5',
+          content: [{ type: 'text', text: 'ok' }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        },
+      },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join('\n')
+    for (const id of ['withmeta', 'nometa', 'badmeta']) {
+      fs.writeFileSync(path.join(subdir, `agent-${id}.jsonl`), transcript)
+    }
+    fs.writeFileSync(
+      path.join(subdir, 'agent-withmeta.meta.json'),
+      JSON.stringify({
+        agentType: 'Explore',
+        description: '  Find the parser  ',
+        toolUseId: 'toolu_1',
+        parentAgentId: 'aparent',
+        spawnDepth: 2,
+        requestShape: 'background',
+        model: 'claude-opus-5',
+      })
+    )
+    fs.writeFileSync(path.join(subdir, 'agent-badmeta.meta.json'), '{not json')
+
+    const { summaries } = await parseSubagents(parent, 'sess-meta', 'proj', ANTHROPIC_PRICING)
+    const byId = new Map(summaries.map((s) => [s.agentId, s]))
+    expect(byId.get('withmeta')).toMatchObject({
+      agentType: 'Explore',
+      description: 'Find the parser',
+      toolUseId: 'toolu_1',
+      parentAgentId: 'aparent',
+      spawnDepth: 2,
+      isBackground: true,
+    })
+    for (const id of ['nometa', 'badmeta']) {
+      const sub = byId.get(id)!
+      expect(sub.messageCount).toBe(2)
+      expect(sub.agentType).toBeUndefined()
+      expect(sub.description).toBeUndefined()
+      expect(sub.isBackground).toBeUndefined()
+    }
+  })
+
+  it("reads a nested agent's end from the transcript of the agent that started it", async () => {
+    const parent = path.join(dir, 'sess-nested.jsonl')
+    fs.writeFileSync(parent, '')
+    const subdir = path.join(dir, 'sess-nested', 'subagents')
+    fs.mkdirSync(subdir, { recursive: true })
+    const reply = (uuid: string, ts: string) => ({
+      type: 'assistant',
+      uuid,
+      timestamp: ts,
+      message: {
+        id: uuid,
+        model: 'claude-opus-5',
+        content: [{ type: 'text', text: 'ok' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    })
+    const prompt = (uuid: string, ts: string) => ({
+      type: 'user',
+      uuid,
+      timestamp: ts,
+      message: { content: [{ type: 'text', text: 'go' }] },
+    })
+    // The outer agent receives the inner one's notification.
+    const outer = [
+      prompt('o1', '2026-09-10T10:00:00.000Z'),
+      reply('o2', '2026-09-10T10:00:01.000Z'),
+      {
+        type: 'user',
+        uuid: 'o3',
+        timestamp: '2026-09-10T10:05:00.000Z',
+        origin: { kind: 'task-notification' },
+        message: {
+          content: [
+            {
+              type: 'text',
+              text: '<task-notification>\n<task-id>inner</task-id>\n<status>completed</status>\n<usage><duration_ms>4200</duration_ms></usage>\n</task-notification>',
+            },
+          ],
+        },
+      },
+    ]
+    const inner = [
+      prompt('i1', '2026-09-10T10:01:00.000Z'),
+      reply('i2', '2026-09-10T10:04:00.000Z'),
+    ]
+    fs.writeFileSync(
+      path.join(subdir, 'agent-outer.jsonl'),
+      outer.map((l) => JSON.stringify(l)).join('\n')
+    )
+    fs.writeFileSync(
+      path.join(subdir, 'agent-inner.jsonl'),
+      inner.map((l) => JSON.stringify(l)).join('\n')
+    )
+    fs.writeFileSync(
+      path.join(subdir, 'agent-inner.meta.json'),
+      JSON.stringify({
+        agentType: 'Explore',
+        parentAgentId: 'outer',
+        spawnDepth: 2,
+        requestShape: 'background',
+      })
+    )
+
+    const collector = createAgentResultCollector()
+    const { summaries } = await parseSubagents(
+      parent,
+      'sess-nested',
+      'proj',
+      ANTHROPIC_PRICING,
+      collector
+    )
+    collector.apply(summaries)
+    expect(summaries.find((s) => s.agentId === 'inner')).toMatchObject({
+      durationMs: 4200,
+      durationSource: 'reported',
+      stoppedAt: '2026-09-10T10:05:00.000Z',
+    })
   })
 
   it('reports a malformed line in a subagent transcript', async () => {

@@ -2,23 +2,32 @@ import React, { useState, useRef, useCallback, useEffect, useLayoutEffect } from
 import {
   Search,
   X,
-  Download,
   RefreshCw,
   ArrowDown,
   Info,
   ShieldAlert,
+  ShieldCheck,
   GitBranch,
   Layers,
+  LayoutGrid,
+  Bot,
+  Wrench,
 } from 'lucide-react'
 import { EmptyState } from '@renderer/components/shared/empty-state'
-import { windowAfterScroll, windowAfterAppend, scrollTopAfterPrepend } from './render-window'
+import {
+  INCREMENT_RENDER_BATCH,
+  INITIAL_RENDER_BATCH,
+  RENDER_AHEAD_PX,
+  windowAfterScroll,
+  windowAfterAppend,
+  scrollTopAfterPrepend,
+} from './render-window'
 import { sessionPanelView } from './session-panel-state'
 import { groupResponses } from './assistant-response'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { format } from 'date-fns'
 import { useSessionsStore } from '@renderer/store/sessions.store'
 import { useUIStore } from '@renderer/store/ui.store'
-import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 import { formatTokens } from '@shared/utils'
 import {
   Tooltip,
@@ -28,7 +37,15 @@ import {
 } from '@renderer/components/ui/tooltip'
 import MessageBubble from './message-bubble'
 import SessionDetailsPanel from './session-details-panel'
-import type { LintCheckId, LintSeverity, SessionSummary } from '@shared/types'
+import { ExportMenu } from './export-menu'
+import { SessionSubagentsTab } from './insights/session-subagents-tab'
+import { SessionToolsTab } from './insights/session-tools-tab'
+import { SubagentConversationDialog } from './insights/subagent-transcript'
+import { SessionHealthTab } from './insights/session-health-tab'
+import { Tabs, TabsList, TabsTrigger } from '@renderer/components/ui/tabs'
+import { useSecretsBySession, sessionHealth } from '@renderer/hooks/use-session-health'
+import type { SessionHealth } from '@renderer/hooks/use-session-health'
+import type { SessionTab } from '@renderer/store/ui.store'
 
 const SCROLL_BOTTOM_THRESHOLD_PX = 80
 
@@ -36,62 +53,11 @@ const SCROLL_BOTTOM_THRESHOLD_PX = 80
 // records, open scrolled to the bottom, and mount older records in
 // INCREMENT_RENDER_BATCH chunks as the reader scrolls within RENDER_AHEAD_PX
 // of the oldest mounted one. Keeps first-paint cheap even on sessions with
-// hundreds of turns. Rules live in `render-window.ts`.
-const INITIAL_RENDER_BATCH = 50
-const INCREMENT_RENDER_BATCH = 50
-const RENDER_AHEAD_PX = 1500
-
-// ─── Session lint flag evaluation (mirrors SES001–SES006 thresholds) ──────────
-
-const SES_THRESHOLDS = {
-  cost: 25.0,
-  compactions: 5,
-  tokens: 2_000_000,
-  staleDays: 14,
-  // Halved when message counting moved from records to API responses: the old
-  // value of 10 was calibrated against counts inflated ~2.09x.
-  staleMinMessages: 5,
-}
-
-function evaluateSessionLintFlags(session: SessionSummary): {
-  flags: LintCheckId[]
-  severity: LintSeverity | null
-} {
-  const flags: LintCheckId[] = []
-  const totalTokens = session.totalInputTokens + session.totalOutputTokens
-  const staleMs = SES_THRESHOLDS.staleDays * 24 * 60 * 60 * 1000
-
-  if (session.estimatedCost > SES_THRESHOLDS.cost) flags.push('SES001')
-  if (session.compactionCount >= SES_THRESHOLDS.compactions) flags.push('SES002')
-  if (totalTokens > SES_THRESHOLDS.tokens) flags.push('SES003')
-  if (
-    Date.now() - new Date(session.lastTimestamp).getTime() > staleMs &&
-    session.messageCount >= SES_THRESHOLDS.staleMinMessages
-  ) {
-    flags.push('SES004')
-  }
-  if (session.hasError) flags.push('SES005')
-  if (session.observability.hasIdleZombieGap) flags.push('SES006')
-
-  if (flags.length === 0) return { flags, severity: null }
-  const warningFlags: LintCheckId[] = ['SES001', 'SES002', 'SES003', 'SES005', 'SES006']
-  const severity: LintSeverity = flags.some((f) => warningFlags.includes(f)) ? 'warning' : 'info'
-  return { flags, severity }
-}
-
-const FLAG_DESCRIPTIONS: Partial<Record<LintCheckId, string>> = {
-  SES001: 'Cost exceeds $25',
-  SES002: '5+ compaction cycles',
-  SES003: 'More than 2M tokens consumed',
-  SES004: 'Stale session (14+ days)',
-  SES005: 'Error patterns detected',
-  SES006: 'Idle/zombie gap detected',
-}
+// hundreds of turns. Rules and sizes live in `render-window.ts`.
 
 interface SessionLintBadgeProps {
-  flags: LintCheckId[]
-  severity: LintSeverity
-  onClickLint: () => void
+  health: SessionHealth
+  onClick: () => void
 }
 
 const TAG_META: Record<
@@ -129,41 +95,44 @@ function SessionTagBadge({ tag }: { tag: string }): React.JSX.Element | null {
   )
 }
 
-function SessionLintBadge({
-  flags,
-  severity,
-  onClickLint,
-}: SessionLintBadgeProps): React.JSX.Element {
+function SessionLintBadge({ health, onClick }: SessionLintBadgeProps): React.JSX.Element {
   const colorClass =
-    severity === 'error'
+    health.severity === 'error'
       ? 'border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20'
-      : severity === 'warning'
+      : health.severity === 'warning'
         ? 'border-amber-500/40 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20'
         : 'border-blue-500/40 bg-blue-500/10 text-blue-600 hover:bg-blue-500/20'
+  const secretCount = health.secrets.length
 
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
-            onClick={onClickLint}
+            onClick={onClick}
             className={`flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium transition-colors ${colorClass}`}
           >
             <ShieldAlert className="h-3 w-3 shrink-0" />
-            {flags.length} lint {flags.length === 1 ? 'issue' : 'issues'}
+            {health.count} health {health.count === 1 ? 'issue' : 'issues'}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" className="max-w-[220px] text-[10px]">
-          <p className="font-semibold mb-1">{flags.join(', ')}</p>
+        <TooltipContent side="bottom" className="max-w-[240px] text-[10px]">
           <ul className="space-y-0.5">
-            {flags.map((f) => (
-              <li key={f} className="text-muted-foreground">
-                <span className="font-medium text-foreground">{f}:</span>{' '}
-                {FLAG_DESCRIPTIONS[f] ?? f}
+            {health.checks.map((c) => (
+              <li key={c.checkId} className="text-muted-foreground">
+                <span className="font-medium text-foreground">{c.checkId}:</span> {c.title}
               </li>
             ))}
+            {secretCount > 0 && (
+              <li className="text-muted-foreground">
+                <span className="font-medium text-foreground">
+                  {secretCount} secret{secretCount === 1 ? '' : 's'}
+                </span>{' '}
+                found in the transcript
+              </li>
+            )}
           </ul>
-          <p className="mt-1.5 text-muted-foreground">Click to view in Lint panel</p>
+          <p className="mt-1.5 text-muted-foreground">Click for the session’s Health tab</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -180,9 +149,9 @@ export default function SessionPanel(): React.JSX.Element | null {
     projects,
     closeActiveSession,
   } = useSessionsStore()
-  const { setView } = useUIStore()
-  const lintEnabled = useFeatureFlags((s) => s.lint)
-  const sessionExportEnabled = useFeatureFlags((s) => s.sessionExport)
+  const sessionTabRequest = useUIStore((s) => s.sessionTabRequest)
+  const clearSessionTabRequest = useUIStore((s) => s.clearSessionTabRequest)
+  const secretsBySession = useSecretsBySession()
 
   const activeSessionSummary = React.useMemo(() => {
     if (!activeSessionId) return null
@@ -193,9 +162,12 @@ export default function SessionPanel(): React.JSX.Element | null {
     return null
   }, [projects, activeSessionId])
 
-  const sessionLint = React.useMemo(
-    () => (activeSessionSummary ? evaluateSessionLintFlags(activeSessionSummary) : null),
-    [activeSessionSummary]
+  const health = React.useMemo(
+    () =>
+      activeSessionSummary
+        ? sessionHealth(activeSessionSummary, secretsBySession.get(activeSessionSummary.id))
+        : null,
+    [activeSessionSummary, secretsBySession]
   )
 
   const sessionTags = React.useMemo(() => {
@@ -210,6 +182,10 @@ export default function SessionPanel(): React.JSX.Element | null {
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [detailsWidth, setDetailsWidth] = useState(256)
+  // Kept when another session is opened, so sessions can be compared tab by tab.
+  const [tab, setTab] = useState<SessionTab>('overview')
+  // The sub-agent whose conversation is open in the dialog, if any.
+  const [openAgentId, setOpenAgentId] = useState<string | null>(null)
   const [visibleCount, setVisibleCount] = useState(INITIAL_RENDER_BATCH)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -306,6 +282,37 @@ export default function SessionPanel(): React.JSX.Element | null {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [])
 
+  // The conversation unmounts on the other tabs. Coming back reopens it on the
+  // newest record with a fresh render window, as opening the session does.
+  const changeTab = useCallback((next: SessionTab) => {
+    if (next === 'overview') {
+      scrollToEndRef.current = true
+      pendingPrependRef.current = null
+      setVisibleCount(INITIAL_RENDER_BATCH)
+    }
+    setTab(next)
+  }, [])
+
+  // A link elsewhere (a health badge, a Health view row) asked for this
+  // session on a given tab.
+  // Applied during render, once the requested session is the open one; the
+  // request object itself marks it as handled.
+  const [handledTabRequest, setHandledTabRequest] = useState<typeof sessionTabRequest>(null)
+  if (
+    sessionTabRequest &&
+    sessionTabRequest !== handledTabRequest &&
+    sessionTabRequest.sessionId === activeSessionId
+  ) {
+    setHandledTabRequest(sessionTabRequest)
+    setTab(sessionTabRequest.tab)
+  }
+  useEffect(() => {
+    if (handledTabRequest) clearSessionTabRequest()
+  }, [handledTabRequest, clearSessionTabRequest])
+
+  // Opens over whichever tab is showing, so the reader keeps their place.
+  const openSubagentConversation = setOpenAgentId
+
   // Reset state when switching sessions / when the search query changes.
   // Using the "store prev prop, compare during render" pattern instead of a
   // post-render effect so resets happen synchronously with the prop change —
@@ -318,6 +325,7 @@ export default function SessionPanel(): React.JSX.Element | null {
     setShowScrollButton(false)
     setDetailsOpen(false)
     setVisibleCount(INITIAL_RENDER_BATCH)
+    setOpenAgentId(null)
   }
   const [prevSearchQuery, setPrevSearchQuery] = useState(searchQuery)
   if (prevSearchQuery !== searchQuery) {
@@ -491,6 +499,10 @@ export default function SessionPanel(): React.JSX.Element | null {
   )
 
   const totalTokens = metadata.totalInputTokens + metadata.totalOutputTokens
+  const subagentCount = activeSessionSummary?.subagents.length ?? 0
+  const openSubagent = openAgentId
+    ? (activeSessionSummary?.subagents.find((s) => s.agentId === openAgentId) ?? null)
+    : null
 
   return (
     <div className="flex h-full session-panel-root">
@@ -541,16 +553,9 @@ export default function SessionPanel(): React.JSX.Element | null {
                 {sessionTags.map((tag) => (
                   <SessionTagBadge key={tag} tag={tag} />
                 ))}
-                {lintEnabled &&
-                  sessionLint &&
-                  sessionLint.flags.length > 0 &&
-                  sessionLint.severity && (
-                    <SessionLintBadge
-                      flags={sessionLint.flags}
-                      severity={sessionLint.severity}
-                      onClickLint={() => setView('lint')}
-                    />
-                  )}
+                {health && health.count > 0 && (
+                  <SessionLintBadge health={health} onClick={() => changeTab('health')} />
+                )}
               </div>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
@@ -560,33 +565,61 @@ export default function SessionPanel(): React.JSX.Element | null {
                   aria-label="Refreshing session…"
                 />
               )}
-              <button
-                onClick={() => setDetailsOpen((v) => !v)}
-                className={`p-1.5 rounded transition-colors ${detailsOpen ? 'bg-accent text-foreground' : 'hover:bg-accent text-muted-foreground'}`}
-                title="Session details"
-              >
-                <Info className="h-3.5 w-3.5" />
-              </button>
-              <button
-                onClick={() => setSearchOpen((v) => !v)}
-                className="p-1.5 rounded hover:bg-accent transition-colors"
-                title="Search (Cmd+F)"
-              >
-                <Search className="h-3.5 w-3.5 text-muted-foreground" />
-              </button>
-              {sessionExportEnabled && (
-                <button
-                  className="p-1.5 rounded hover:bg-accent transition-colors"
-                  title="Export session"
-                >
-                  <Download className="h-3.5 w-3.5 text-muted-foreground" />
-                </button>
+              {tab === 'overview' && (
+                <>
+                  <button
+                    onClick={() => setDetailsOpen((v) => !v)}
+                    className={`p-1.5 rounded transition-colors ${detailsOpen ? 'bg-accent text-foreground' : 'hover:bg-accent text-muted-foreground'}`}
+                    title="Session details"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setSearchOpen((v) => !v)}
+                    className="p-1.5 rounded hover:bg-accent transition-colors"
+                    title="Search (Cmd+F)"
+                  >
+                    <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+                </>
               )}
+              <ExportMenu sessionId={parsedSession.id} projectId={parsedSession.projectId} />
             </div>
           </div>
 
+          <Tabs value={tab} onValueChange={(v) => changeTab(v as SessionTab)} className="mt-2">
+            <TabsList className="h-7">
+              <TabsTrigger value="overview" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <LayoutGrid className="h-3 w-3" />
+                Overview
+              </TabsTrigger>
+              <TabsTrigger value="subagents" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <Bot className="h-3 w-3" />
+                Sub-agents
+                {subagentCount > 0 && (
+                  <span className="ml-1 tabular-nums text-muted-foreground">{subagentCount}</span>
+                )}
+              </TabsTrigger>
+              <TabsTrigger value="tools" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <Wrench className="h-3 w-3" />
+                Tools &amp; MCPs
+              </TabsTrigger>
+              <TabsTrigger value="health" className="gap-1 px-2.5 py-0.5 text-[11px]">
+                <ShieldCheck className="h-3 w-3" />
+                Health
+                {health && health.count > 0 && (
+                  <span
+                    className={`ml-1 tabular-nums ${health.severity === 'error' ? 'text-destructive' : health.severity === 'warning' ? 'text-amber-600' : 'text-muted-foreground'}`}
+                  >
+                    {health.count}
+                  </span>
+                )}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
           {/* Search bar */}
-          {searchOpen && (
+          {tab === 'overview' && searchOpen && (
             <div className="mt-2 flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1">
               <Search className="h-3 w-3 text-muted-foreground shrink-0" />
               <input
@@ -614,57 +647,95 @@ export default function SessionPanel(): React.JSX.Element | null {
           )}
         </div>
 
-        {/* Conversation scroll area */}
-        <div className="relative flex-1 min-h-0">
-          {/* overflow-anchor is off: the layout effect above does its own
-              anchoring after a prepend, and Chromium's would double-correct. */}
-          <div
-            ref={scrollRef}
-            onScroll={handleScroll}
-            className="h-full overflow-y-auto py-2"
-            style={{ overflowAnchor: 'none' }}
-          >
-            {filteredRecords.length === 0 && searchQuery && (
-              <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
-                No messages match &quot;{searchQuery}&quot;
-              </div>
-            )}
-            {visibleCount < filteredRecords.length && (
-              <div className="flex items-center justify-center py-4 text-[11px] text-muted-foreground/60">
-                Loading older messages…
-              </div>
-            )}
-            {filteredRecords
-              .slice(Math.max(0, filteredRecords.length - visibleCount))
-              .map((record) => (
-                <MessageBubble
-                  key={record.uuid}
-                  record={record}
-                  toolResultMap={toolResultMap}
-                  searchQuery={searchQuery}
-                  turnDuration={
-                    record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
-                  }
-                  subagents={activeSessionSummary?.subagents}
-                />
-              ))}
+        {tab === 'subagents' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <SessionSubagentsTab
+              subagents={activeSessionSummary?.subagents ?? []}
+              session={{
+                title: activeSessionSummary?.title ?? parsedSession.slug ?? parsedSession.id,
+                model: activeSessionSummary?.latestModel ?? activeSessionSummary?.dominantModel,
+                cost: activeSessionSummary
+                  ? activeSessionSummary.estimatedCost -
+                    activeSessionSummary.subagents.reduce((s, a) => s + a.estimatedCost, 0)
+                  : undefined,
+              }}
+              onOpen={setOpenAgentId}
+            />
           </div>
+        )}
+        {tab === 'tools' && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <SessionToolsTab
+              toolUsage={activeSessionSummary?.toolUsage ?? []}
+              timeline={parsedSession.responseTimeline ?? []}
+            />
+          </div>
+        )}
 
-          {/* Scroll-to-bottom button — shown when watcher pushes new messages and user scrolled up */}
-          {showScrollButton && (
-            <button
-              onClick={handleScrollToBottom}
-              className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground shadow-lg transition-opacity hover:opacity-90"
+        {tab === 'health' && health && (
+          <div className="flex-1 min-h-0 overflow-y-auto p-4">
+            <SessionHealthTab
+              health={health}
+              metadata={parsedSession.metadata}
+              onOpenSubagent={setOpenAgentId}
+            />
+          </div>
+        )}
+
+        {/* Conversation scroll area */}
+        {tab === 'overview' && (
+          <div className="relative flex-1 min-h-0">
+            {/* overflow-anchor is off: the layout effect above does its own
+              anchoring after a prepend, and Chromium's would double-correct. */}
+            <div
+              ref={scrollRef}
+              onScroll={handleScroll}
+              className="h-full overflow-y-auto py-2"
+              style={{ overflowAnchor: 'none' }}
             >
-              <ArrowDown className="h-3 w-3" />
-              New messages
-            </button>
-          )}
-        </div>
+              {filteredRecords.length === 0 && searchQuery && (
+                <div className="flex items-center justify-center h-32 text-sm text-muted-foreground">
+                  No messages match &quot;{searchQuery}&quot;
+                </div>
+              )}
+              {visibleCount < filteredRecords.length && (
+                <div className="flex items-center justify-center py-4 text-[11px] text-muted-foreground/60">
+                  Loading older messages…
+                </div>
+              )}
+              {filteredRecords
+                .slice(Math.max(0, filteredRecords.length - visibleCount))
+                .map((record) => (
+                  <MessageBubble
+                    key={record.uuid}
+                    record={record}
+                    toolResultMap={toolResultMap}
+                    searchQuery={searchQuery}
+                    turnDuration={
+                      record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
+                    }
+                    subagents={activeSessionSummary?.subagents}
+                    onOpenSubagent={openSubagentConversation}
+                  />
+                ))}
+            </div>
+
+            {/* Scroll-to-bottom button — shown when watcher pushes new messages and user scrolled up */}
+            {showScrollButton && (
+              <button
+                onClick={handleScrollToBottom}
+                className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-[11px] font-medium text-primary-foreground shadow-lg transition-opacity hover:opacity-90"
+              >
+                <ArrowDown className="h-3 w-3" />
+                New messages
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Details side panel — resizable right side */}
-      {detailsOpen && (
+      {tab === 'overview' && detailsOpen && (
         <div
           ref={detailsPanelRef}
           className="flex shrink-0 border-l border-border/50"
@@ -681,10 +752,20 @@ export default function SessionPanel(): React.JSX.Element | null {
             className="w-1 cursor-col-resize hover:bg-primary/40 transition-colors shrink-0"
           />
           <div className="flex-1 min-w-0">
-            <SessionDetailsPanel onClose={() => setDetailsOpen(false)} />
+            <SessionDetailsPanel
+              onClose={() => setDetailsOpen(false)}
+              onOpenSubagent={openSubagentConversation}
+            />
           </div>
         </div>
       )}
+      <SubagentConversationDialog
+        sessionId={parsedSession.id}
+        projectId={parsedSession.projectId}
+        subagent={openSubagent}
+        subagents={activeSessionSummary?.subagents ?? []}
+        onClose={() => setOpenAgentId(null)}
+      />
     </div>
   )
 }

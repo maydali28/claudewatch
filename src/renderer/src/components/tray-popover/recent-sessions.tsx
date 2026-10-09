@@ -7,11 +7,16 @@ import { cn } from '@renderer/lib/cn'
 import { ipc } from '@renderer/lib/ipc-client'
 import { getModelMeta } from '@renderer/lib/model-meta'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@renderer/components/ui/tooltip'
+import { ContextFillBar } from '@renderer/components/shared/context-fill-bar'
+import { contextFillView } from '@renderer/components/shared/context-fill-rules'
+import type { CostAlertThresholds } from '@shared/types/cost-alerts'
+import { formatCost } from '@shared/utils/format-cost'
+import { sessionLimitNotice } from './cost-limits'
 
 interface RecentSessionsProps {
   sessions: TraySnapshotSession[]
-  /** Sum of tokens across visible sessions, used for relative progress bars */
-  totalTokens: number
+  /** Cost alerts in force (0 = off); a row over the session limit shows its cost. */
+  costLimits: CostAlertThresholds
 }
 
 function relativeTime(timestamp: string): string {
@@ -26,18 +31,19 @@ function relativeTime(timestamp: string): string {
 
 function RecentSessionRow({
   session,
-  totalTokens,
+  costLimits,
 }: {
   session: TraySnapshotSession
-  totalTokens: number
+  costLimits: CostAlertThresholds
 }): React.JSX.Element {
+  const overLimit = sessionLimitNotice(session.estimatedCost, costLimits)
   const handleClick = (): void => {
     ipc.tray.openDashboard(session.id, session.projectId)
   }
   const meta = getModelMeta(session.latestModel ?? session.primaryModel)
   const projectName = projectDisplayName(session.projectPath)
   const sessionTokens = session.totalInputTokens + session.totalOutputTokens
-  const pct = totalTokens > 0 ? Math.min(100, (sessionTokens / totalTokens) * 100) : 0
+  const fill = contextFillView(session.contextFill)
 
   return (
     <Tooltip delayDuration={400}>
@@ -80,6 +86,17 @@ function RecentSessionRow({
                 <MessageSquare className="h-2.5 w-2.5" />
                 <span className="tabular-nums">{session.messageCount}</span>
               </span>
+              {overLimit && (
+                <>
+                  <span className="text-muted-foreground/40">·</span>
+                  <span
+                    className="tabular-nums whitespace-nowrap font-semibold text-red-600 dark:text-red-400"
+                    title={overLimit}
+                  >
+                    {formatCost(session.estimatedCost)}
+                  </span>
+                </>
+              )}
               <span className="text-muted-foreground/40">·</span>
               <span className="tabular-nums whitespace-nowrap">
                 {relativeTime(session.lastTimestamp)}
@@ -93,19 +110,15 @@ function RecentSessionRow({
             </div>
           </div>
 
-          {/* Progress bar */}
-          <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              className="h-full rounded-full bg-primary/40 transition-all duration-500"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
+          {/* Context window used */}
+          <ContextFillBar view={fill} normalClass="bg-primary/40" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="left" sideOffset={8}>
         <div className="flex flex-col gap-0.5">
           <span>{meta.label}</span>
           <span className="text-[10px] opacity-70">{projectName}</span>
+          <span className="text-[10px] opacity-70">{fill.description}</span>
         </div>
       </TooltipContent>
     </Tooltip>
@@ -114,7 +127,7 @@ function RecentSessionRow({
 
 export function RecentSessions({
   sessions,
-  totalTokens,
+  costLimits,
 }: RecentSessionsProps): React.JSX.Element | null {
   if (sessions.length === 0) return null
 
@@ -126,7 +139,7 @@ export function RecentSessions({
         </span>
       </div>
       {sessions.map((s) => (
-        <RecentSessionRow key={s.id} session={s} totalTokens={totalTokens} />
+        <RecentSessionRow key={s.id} session={s} costLimits={costLimits} />
       ))}
     </div>
   )

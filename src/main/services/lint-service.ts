@@ -93,7 +93,7 @@ export async function runAll(
     xctRules(context),
     sesRules(context, sessions),
     cfgRules(context),
-    secRules(context, sessions),
+    secRules(context),
   ])
 
   const all = [...cmd, ...rul, ...skl, ...xct, ...ses, ...cfg, ...sec]

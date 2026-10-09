@@ -13,6 +13,7 @@ function row(id: string, lastTimestamp: string, turnOpen = false): TraySnapshotS
     projectPath: '/p',
     title: id,
     messageCount: 1,
+    estimatedCost: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
     lastTimestamp,

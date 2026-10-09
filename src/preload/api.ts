@@ -36,6 +36,9 @@ export const api = {
     getParsed: (sessionId: string, projectId: string) =>
       invoke(CHANNELS.SESSIONS_GET_PARSED, { sessionId, projectId }),
 
+    getSubagent: (sessionId: string, projectId: string, agentId: string) =>
+      invoke(CHANNELS.SESSIONS_GET_SUBAGENT, { sessionId, projectId, agentId }),
+
     search: (query: string, projectIds?: string[]) =>
       invoke(CHANNELS.SESSIONS_SEARCH, { query, projectIds }),
 
@@ -45,10 +48,24 @@ export const api = {
       invoke(CHANNELS.SESSIONS_EXPORT, request),
   },
 
+  secrets: {
+    list: () => invoke(CHANNELS.SECRETS_LIST),
+    dismiss: (ids: string[]) => invoke(CHANNELS.SECRETS_DISMISS, { ids }),
+    scanHistory: () => invoke(CHANNELS.SECRETS_SCAN_HISTORY),
+  },
+
+  // ─── System notifications ───────────────────────────────────────────────────
+  notifications: {
+    status: () => invoke(CHANNELS.NOTIFICATIONS_STATUS),
+    test: () => invoke(CHANNELS.NOTIFICATIONS_TEST),
+    openSettings: () => invoke(CHANNELS.NOTIFICATIONS_OPEN_SETTINGS),
+  },
+
   // ─── Analytics ──────────────────────────────────────────────────────────────
   analytics: {
     get: (request: IPCRequest<typeof CHANNELS.ANALYTICS_GET>) =>
       invoke(CHANNELS.ANALYTICS_GET, request),
+    listModels: () => invoke(CHANNELS.ANALYTICS_LIST_MODELS),
   },
 
   // ─── Config ─────────────────────────────────────────────────────────────────
@@ -58,8 +75,7 @@ export const api = {
     getCommands: (projectId?: string) => invoke(CHANNELS.CONFIG_GET_COMMANDS, { projectId }),
 
     getSkills: () => invoke(CHANNELS.CONFIG_GET_SKILLS),
-
-    getProjectSkills: () => invoke(CHANNELS.CONFIG_GET_PROJECT_SKILLS),
+    getPlugins: () => invoke(CHANNELS.CONFIG_GET_PLUGINS),
 
     getMcps: (projectId?: string) => invoke(CHANNELS.CONFIG_GET_MCPS, { projectId }),
 
@@ -87,8 +103,6 @@ export const api = {
     list: () => invoke(CHANNELS.PLANS_LIST),
 
     get: (id: string) => invoke(CHANNELS.PLANS_GET, { id }),
-
-    getProjects: (slug: string) => invoke(CHANNELS.PLANS_GET_PROJECTS, { slug }),
   },
 
   // ─── Updates ─────────────────────────────────────────────────────────────────
@@ -131,6 +145,9 @@ export const api = {
     relaunch: () => invoke(CHANNELS.APP_RELAUNCH),
     getVersion: () => invoke(CHANNELS.APP_GET_VERSION),
     getPaths: () => invoke(CHANNELS.APP_GET_PATHS),
+    inspectClaudeDir: (path: string) => invoke(CHANNELS.APP_INSPECT_CLAUDE_DIR, { path }),
+    chooseClaudeDir: () => invoke(CHANNELS.APP_CHOOSE_CLAUDE_DIR),
+    setClaudeDir: (path: string | null) => invoke(CHANNELS.APP_SET_CLAUDE_DIR, { path }),
   },
 
   // ─── Push event subscriptions ─────────────────────────────────────────────

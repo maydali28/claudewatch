@@ -7,9 +7,11 @@ import { validate, ConfigProjectSchema } from '@shared/ipc/schemas'
 import {
   readExtendedConfig,
   readCommands,
-  readSkills,
+  readAllSkills,
+  readPlugins,
   readMcps,
   readMemoryFiles,
+  readAllAutoMemory,
 } from '@main/services/config-service'
 import { resolvedProjectRoots } from '@main/services/project-roots'
 import { getOrScanProjects } from './sessions.handlers'
@@ -54,8 +56,18 @@ export function registerConfigHandlers(): void {
 
   ipcMain.handle(CHANNELS.CONFIG_GET_SKILLS, async () => {
     try {
-      const skills = await readSkills()
+      // Session skill listings come from the scan, so this waits for it.
+      const skills = await readAllSkills(await getOrScanProjects())
       return ok(skills)
+    } catch (e) {
+      captureHandlerException(e)
+      return err(toSafeError(e), 'CONFIG_READ_ERROR')
+    }
+  })
+
+  ipcMain.handle(CHANNELS.CONFIG_GET_PLUGINS, async () => {
+    try {
+      return ok(await readPlugins())
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'CONFIG_READ_ERROR')
@@ -66,10 +78,8 @@ export function registerConfigHandlers(): void {
     try {
       const projectScope = validateProjectScopedRequest(payload)
       const projectId = projectScope?.projectId
-      const root = projectId
-        ? (await resolvedProjectRoots()).find((r) => r.id === projectId)
-        : undefined
-      const mcps = await readMcps(root)
+      const roots = await resolvedProjectRoots()
+      const mcps = await readMcps(projectId ? roots.filter((r) => r.id === projectId) : roots)
       return ok(mcps)
     } catch (e) {
       captureHandlerException(e)
@@ -85,25 +95,11 @@ export function registerConfigHandlers(): void {
         ? (await resolvedProjectRoots()).find((r) => r.id === projectId)
         : undefined
       const memoryFiles = await readMemoryFiles(projectId, root)
+      // Without a project, list every project's auto-memory notes too.
+      if (!projectId) {
+        memoryFiles.push(...(await readAllAutoMemory(await getOrScanProjects())))
+      }
       return ok(memoryFiles)
-    } catch (e) {
-      captureHandlerException(e)
-      return err(toSafeError(e), 'CONFIG_READ_ERROR')
-    }
-  })
-
-  ipcMain.handle(CHANNELS.CONFIG_GET_PROJECT_SKILLS, async () => {
-    try {
-      const projects = await getOrScanProjects()
-      const projectSkillEntries = projects.flatMap((project) =>
-        project.localSkills.map((skill) => ({
-          ...skill,
-          projectId: project.id,
-          projectName: project.name,
-          projectPath: project.path,
-        }))
-      )
-      return ok(projectSkillEntries)
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'CONFIG_READ_ERROR')

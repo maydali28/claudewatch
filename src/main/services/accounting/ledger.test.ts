@@ -2,7 +2,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import * as fs from 'fs'
 import * as os from 'os'
 import * as path from 'path'
-import { ANTHROPIC_PRICING, estimateCost } from '@shared/constants/pricing'
+import { ANTHROPIC_PRICING, estimateCost, getActivePricingTable } from '@shared/constants/pricing'
+import { DEFAULT_PREFERENCES } from '@shared/types/preferences'
 import { UNDATED_DAY } from '@shared/utils/date-ranges'
 import { hasUnsupportedPricingModifier, ingestFile, type SourceIdentity } from './ledger'
 
@@ -1907,5 +1908,23 @@ describe('ingestFile — server tool requests', () => {
     const { entries } = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
 
     expect(entries[0].serverToolRequests).toBe(0)
+  })
+})
+
+describe('model preferences', () => {
+  it('prices a custom model ID at the family the user mapped it to', async () => {
+    const id = 'my-gateway/team-model'
+    const file = fixture('mapped-model', [
+      assistant({ uuid: 'u1', id: 'msg_a', model: id, usage: { input: 1_000_000 } }),
+    ])
+    const unmapped = await ingestFile(file, PARENT, ANTHROPIC_PRICING)
+    expect(unmapped.entries[0]).toMatchObject({ modelFamily: 'unknown', costUsd: null })
+
+    const table = getActivePricingTable({
+      ...DEFAULT_PREFERENCES,
+      modelPreferences: { [id]: { family: 'haiku-4-5' } },
+    })
+    const mapped = await ingestFile(file, PARENT, table)
+    expect(mapped.entries[0]).toMatchObject({ modelFamily: 'haiku-4-5', costUsd: 1 })
   })
 })

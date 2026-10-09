@@ -1,28 +1,44 @@
 import React, { useState } from 'react'
-import { RefreshCw, Search, Terminal, X, FolderOpen } from 'lucide-react'
+import { RefreshCw, Search, Terminal, X } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
+import { useUIStore } from '@renderer/store/ui.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
 import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
 import { ScopeGroup } from './scope-group'
-import { groupCommandsByScope } from './scope-groups'
+import { SourceChips } from './source-chips'
+import { sourceGroupDecor } from './source-group-decor'
+import { isPluginSourced } from '@renderer/components/plugins/plugin-views'
+import {
+  countBySourceFilter,
+  groupCommandsByScope,
+  matchesSourceFilter,
+  type SourceFilter,
+} from './scope-groups'
 
 export default function CommandsSidebar(): React.JSX.Element {
   const paths = useClaudePaths()
   const isLoading = useConfigStore((s) => s.isLoading)
-  const commands = useConfigStore((s) => s.commands)
+  const allCommands = useConfigStore((s) => s.commands)
+  // Plugin commands are listed in the Plugins tab.
+  const commands = allCommands.filter((c) => !isPluginSourced(c.source))
   const selectedCommandId = useConfigStore((s) => s.selectedCommandId)
   const setSelectedCommand = useConfigStore((s) => s.setSelectedCommand)
   const loadAll = useConfigStore((s) => s.loadAll)
   const [search, setSearch] = useState('')
+  const sourceFilter = (useUIStore((s) => s.sourceFilters.commands) ?? 'all') as SourceFilter
+  const setSourceFilter = useUIStore((s) => s.setSourceFilter)
 
   const q = search.toLowerCase()
-  const filtered = commands.filter(
+  const searched = commands.filter(
     (c) =>
       c.name.toLowerCase().includes(q) ||
       (c.description ?? '').toLowerCase().includes(q) ||
-      (c.projectName ?? '').toLowerCase().includes(q)
+      (c.projectName ?? '').toLowerCase().includes(q) ||
+      c.source.label.toLowerCase().includes(q)
   )
+  const counts = countBySourceFilter(searched, (c) => c.source)
+  const filtered = searched.filter((c) => matchesSourceFilter(c.source, sourceFilter))
   const groups = groupCommandsByScope(filtered)
 
   return (
@@ -70,6 +86,19 @@ export default function CommandsSidebar(): React.JSX.Element {
         </div>
       </div>
 
+      {commands.length > 0 && (
+        <SourceChips<SourceFilter>
+          label="Filter commands by source"
+          value={sourceFilter}
+          onChange={(v) => setSourceFilter('commands', v)}
+          options={[
+            { value: 'all', label: 'All', count: counts.all },
+            { value: 'user', label: 'User', count: counts.user },
+            { value: 'project', label: 'Project', count: counts.project },
+          ]}
+        />
+      )}
+
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {isLoading && commands.length === 0 && (
           <div className="flex flex-col gap-2 p-2">
@@ -89,56 +118,60 @@ export default function CommandsSidebar(): React.JSX.Element {
           </div>
         )}
 
-        {!isLoading && commands.length > 0 && groups.length === 0 && search && (
+        {!isLoading && commands.length > 0 && groups.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
-            <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
+            <p className="text-xs text-muted-foreground">
+              {search ? <>No matches for &quot;{search}&quot;</> : 'No commands from this source'}
+            </p>
           </div>
         )}
 
-        {groups.map((g) => (
-          <ScopeGroup
-            key={g.key}
-            label={g.label}
-            count={g.items.length}
-            icon={
-              g.kind === 'project' ? (
-                <FolderOpen className="h-3.5 w-3.5 shrink-0 text-amber-500" />
-              ) : undefined
-            }
-          >
-            {g.items.map((cmd) => (
-              <button
-                key={cmd.id}
-                onClick={() => setSelectedCommand(cmd.id)}
-                className={cn(
-                  'w-full rounded-md px-2.5 py-2 text-left transition-colors',
-                  selectedCommandId === cmd.id
-                    ? 'bg-primary/10 ring-1 ring-primary/30'
-                    : 'hover:bg-accent'
-                )}
-              >
-                <p
+        {groups.map((g) => {
+          const decor = sourceGroupDecor(g)
+          return (
+            <ScopeGroup
+              key={g.key}
+              label={g.label}
+              count={g.items.length}
+              icon={decor.icon}
+              tags={decor.tags}
+              muted={decor.muted}
+            >
+              {g.items.map((cmd) => (
+                <button
+                  key={cmd.id}
+                  onClick={() => setSelectedCommand(cmd.id)}
                   className={cn(
-                    'text-xs font-medium truncate',
-                    selectedCommandId === cmd.id ? 'text-primary' : 'text-foreground'
+                    'w-full rounded-md px-2.5 py-2 text-left transition-colors',
+                    selectedCommandId === cmd.id
+                      ? 'bg-primary/10 ring-1 ring-primary/30'
+                      : 'hover:bg-accent',
+                    cmd.inactive && 'opacity-60'
                   )}
                 >
-                  /{cmd.name}
-                </p>
-                {cmd.description && (
-                  <p className="text-[10px] text-muted-foreground truncate mt-0.5">
-                    {cmd.description}
+                  <p
+                    className={cn(
+                      'text-xs font-medium truncate',
+                      selectedCommandId === cmd.id ? 'text-primary' : 'text-foreground'
+                    )}
+                  >
+                    /{cmd.name}
                   </p>
-                )}
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[10px] text-muted-foreground/50">
-                    {(cmd.sizeBytes / 1024).toFixed(1)} KB
-                  </span>
-                </div>
-              </button>
-            ))}
-          </ScopeGroup>
-        ))}
+                  {cmd.description && (
+                    <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+                      {cmd.description}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="text-[10px] text-muted-foreground/50">
+                      {(cmd.sizeBytes / 1024).toFixed(1)} KB
+                    </span>
+                  </div>
+                </button>
+              ))}
+            </ScopeGroup>
+          )
+        })}
       </div>
     </div>
   )

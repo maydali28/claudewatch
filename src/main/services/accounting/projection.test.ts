@@ -173,6 +173,73 @@ describe('projectUsage — model identity', () => {
 })
 
 /**
+ * The session bar shows how full the context window is now: the latest parent
+ * response's context, and the largest context sent on that same model, which
+ * tells a 1M window from a 200K one.
+ */
+describe('projectUsage — context window fill', () => {
+  it('reports the latest parent response context, cache reads and writes included', () => {
+    const p = projectUsage([
+      entry({ tsUtc: '2026-09-10T09:00:00.000Z', inputTokens: 5, cacheReadTokens: 900_000 }),
+      entry({
+        tsUtc: '2026-09-10T10:00:00.000Z',
+        inputTokens: 10,
+        cacheReadTokens: 30_000,
+        cacheWrite5m: 2_000,
+        cacheWriteFlat: 2_000,
+      }),
+    ])
+
+    expect(p.latestParentContextTokens).toBe(32_010)
+  })
+
+  it('takes the peak on the latest model only', () => {
+    const p = projectUsage([
+      entry({
+        tsUtc: '2026-09-10T09:00:00.000Z',
+        modelRaw: 'claude-opus-4-8',
+        cacheReadTokens: 600_000,
+      }),
+      entry({
+        tsUtc: '2026-09-10T09:30:00.000Z',
+        modelRaw: 'claude-haiku-4-5',
+        cacheReadTokens: 120_000,
+      }),
+      entry({
+        tsUtc: '2026-09-10T10:00:00.000Z',
+        modelRaw: 'claude-haiku-4-5',
+        cacheReadTokens: 80_000,
+      }),
+    ])
+
+    expect(p.latestParentContextTokens).toBe(80_000)
+    expect(p.latestParentPeakContextTokens).toBe(120_000)
+  })
+
+  it('ignores subagents, which have context windows of their own', () => {
+    const p = projectUsage([
+      entry({ kind: 'parent', tsUtc: '2026-09-10T09:00:00.000Z', cacheReadTokens: 40_000 }),
+      entry({
+        kind: 'subagent',
+        agentId: 'a1',
+        tsUtc: '2026-09-10T10:00:00.000Z',
+        cacheReadTokens: 700_000,
+      }),
+    ])
+
+    expect(p.latestParentContextTokens).toBe(40_000)
+    expect(p.latestParentPeakContextTokens).toBe(40_000)
+  })
+
+  it('reports nothing for a session with no parent response', () => {
+    const p = projectUsage([entry({ kind: 'subagent', agentId: 'a1', cacheReadTokens: 10 })])
+
+    expect(p.latestParentContextTokens).toBeUndefined()
+    expect(p.latestParentPeakContextTokens).toBeUndefined()
+  })
+})
+
+/**
  * Analytics attributed a session's entire history to its last active day, so
  * resuming yesterday's session today moved yesterday's tokens into today.
  */

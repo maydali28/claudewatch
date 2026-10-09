@@ -6,6 +6,7 @@ import {
   validate,
   GetSummaryListSchema,
   GetParsedSchema,
+  GetSubagentSchema,
   SearchSchema,
   TagSchema,
 } from '@shared/ipc/schemas'
@@ -19,6 +20,7 @@ import { getActivePricingTable } from '@main/services/pricing-engine'
 import { scanCache } from '@main/services/scan-cache'
 import { searchSessions } from '@main/services/session-search'
 import { createLogger } from '@main/lib/logger'
+import { redactParsedSession } from '@main/services/redact-session'
 
 const log = createLogger('sessions')
 
@@ -74,8 +76,10 @@ export function registerSessionsHandlers(): void {
     try {
       const { sessionId, projectId } = validate(GetParsedSchema, payload)
       // Check LRU cache first
+      // The cache holds the raw parse; redaction is applied on the way out.
+      const redactionLevel = Preferences.get().redactionLevel
       const cached = sessionCache.get(projectId, sessionId)
-      if (cached) return ok(cached)
+      if (cached) return ok(redactParsedSession(cached, redactionLevel))
 
       const projectsDir = getProjectsDirPath()
       const sessionFilePath = assertSafePath(projectsDir, projectId, `${sessionId}.jsonl`)
@@ -88,7 +92,33 @@ export function registerSessionsHandlers(): void {
         pricingTable
       )
       sessionCache.set(projectId, sessionId, parsedSession)
-      return ok(parsedSession)
+      return ok(redactParsedSession(parsedSession, redactionLevel))
+    } catch (e) {
+      captureHandlerException(e)
+      return err(toSafeError(e), 'PARSE_FAILED')
+    }
+  })
+
+  // ── sessions:get-subagent ──────────────────────────────────────────────────
+  // Not cached: a running sub-agent's transcript changes with every write, and
+  // the panel only asks again when the session summary says it did.
+  ipcMain.handle(CHANNELS.SESSIONS_GET_SUBAGENT, async (_event, payload) => {
+    try {
+      const { sessionId, projectId, agentId } = validate(GetSubagentSchema, payload)
+      const filePath = assertSafePath(
+        getProjectsDirPath(),
+        projectId,
+        sessionId,
+        'subagents',
+        `agent-${agentId}.jsonl`
+      )
+      const parsed = await parseSessionFull(
+        filePath,
+        sessionId,
+        projectId,
+        getActivePricingTable(Preferences.get())
+      )
+      return ok(redactParsedSession(parsed, Preferences.get().redactionLevel))
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'PARSE_FAILED')
@@ -100,7 +130,15 @@ export function registerSessionsHandlers(): void {
     try {
       const searchRequest = validate(SearchSchema, payload)
       const results = await searchSessions(searchRequest)
-      return ok(results)
+      // Search reads transcripts straight off disk, so it still finds a
+      // session folded into its background copy; every hit there is also a
+      // hit in the copy, which is the session the list shows.
+      const folded = new Set(
+        (await getOrScanProjects()).flatMap((p) =>
+          p.sessions.flatMap((s) => s.continuesSessionIds ?? [])
+        )
+      )
+      return ok(folded.size ? results.filter((r) => !folded.has(r.sessionId)) : results)
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'SEARCH_FAILED')

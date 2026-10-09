@@ -110,6 +110,48 @@ export function isToolResultCarrierUser(raw: RawRecord): boolean {
   return content.every((b) => b.type === 'tool_result')
 }
 
+/**
+ * A prompt a person sent while Claude was busy, rewritten as the user record
+ * it stands for; any other record is returned unchanged.
+ *
+ * Claude Code does not write such a prompt as a `type: 'user'` record. It
+ * writes an `attachment` of type `queued_command` with `origin.kind: 'human'`
+ * and the text in `prompt` (a string, or text blocks), and never writes the
+ * user record afterwards. Every message sent to a running sub-agent takes this
+ * form, as do prompts typed mid-turn in a session. Read as an attachment it
+ * was dropped from the transcript and from the message counts.
+ *
+ * Queued notifications and sub-agent hand-backs (`origin.kind` other than
+ * `human`) are left alone: they are not something a person wrote.
+ */
+export function promoteQueuedPrompt(raw: RawRecord): RawRecord {
+  if (raw.type !== 'attachment') return raw
+  const a = raw.attachment
+  if (!a || a.type !== 'queued_command') return raw
+  const origin = a.origin as { kind?: unknown } | undefined
+  if (origin?.kind !== 'human') return raw
+  const prompt = a.prompt
+  let content: string | RawContentBlock[]
+  if (typeof prompt === 'string') {
+    content = prompt
+  } else if (Array.isArray(prompt)) {
+    content = (prompt as RawContentBlock[]).filter(
+      (b) => b && typeof b === 'object' && typeof b.type === 'string'
+    )
+  } else {
+    return raw
+  }
+  if (getRawBlocks({ message: { content } }).every((b) => !b.text?.trim())) return raw
+  const { attachment: _attachment, isMeta: _isMeta, ...rest } = raw
+  return {
+    ...rest,
+    type: 'user',
+    timestamp: raw.timestamp ?? (typeof a.timestamp === 'string' ? a.timestamp : undefined),
+    message: { role: 'user', content },
+    origin: { kind: 'human' },
+  }
+}
+
 export type { UserRecordKind }
 
 /**

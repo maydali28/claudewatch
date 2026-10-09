@@ -1,26 +1,126 @@
 import React, { useState } from 'react'
-import { RefreshCw, Search, Server, X } from 'lucide-react'
+import {
+  Cloud,
+  FolderOpen,
+  Globe,
+  Package,
+  Puzzle,
+  RefreshCw,
+  Search,
+  Server,
+  X,
+} from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
+import { useUIStore } from '@renderer/store/ui.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
+import { ScopeGroup } from './scope-group'
+import { SourceChips } from './source-chips'
+import {
+  countMcpsByFilter,
+  groupMcps,
+  mcpFilterOf,
+  mcpOriginNote,
+  mcpTransport,
+  type McpFilter,
+  type McpGroup,
+} from './mcp-labels'
 import type { McpServerEntry } from '@shared/types'
 
-const TRANSPORT_DOT: Record<string, string> = {
-  stdio: 'bg-emerald-500',
-  sse: 'bg-sky-500',
-  http: 'bg-orange-500',
+const ICON = 'h-3.5 w-3.5 shrink-0'
+
+/** The status dot before a server's name, and its tooltip. */
+const STATUS_DOT: Record<string, { className: string; label: string }> = {
+  connected: { className: 'bg-emerald-500', label: 'Connected' },
+  failed: { className: 'bg-red-500', label: 'Connection failed' },
+  'needs-auth': { className: 'bg-amber-500', label: 'Needs authentication' },
+  unknown: { className: 'bg-muted-foreground/30', label: 'Status unknown' },
 }
 
-const STATUS_DOT: Record<string, string> = {
-  connected: 'bg-emerald-500',
-  failed: 'bg-red-500',
-  unknown: 'bg-muted-foreground/40',
+const GROUP_ICON: Record<McpGroup['kind'], React.ReactNode> = {
+  user: <Globe className={cn(ICON, 'text-muted-foreground')} />,
+  project: <FolderOpen className={cn(ICON, 'text-amber-500')} />,
+  plugin: <Puzzle className={cn(ICON, 'text-violet-500')} />,
+  connector: <Cloud className={cn(ICON, 'text-teal-500')} />,
+  builtin: <Package className={cn(ICON, 'text-muted-foreground')} />,
 }
 
-function statusDot(mcp: McpServerEntry): string {
-  if (mcp.status) return STATUS_DOT[mcp.status] ?? STATUS_DOT.unknown
-  const transport = mcp.type ?? (mcp.url ? 'sse' : 'stdio')
-  return TRANSPORT_DOT[transport] ?? 'bg-muted-foreground/40'
+/**
+ * What the server runs or reaches: its command, its URL, or for a built-in
+ * what provides it. A connector needs no line: its group already says claude.ai.
+ */
+function mcpTarget(mcp: McpServerEntry): string | null {
+  if (mcp.command) return [mcp.command.split('/').pop(), ...mcp.args].join(' ')
+  if (mcp.url) return mcp.url
+  return mcp.level === 'connector' ? null : mcpOriginNote(mcp)
+}
+
+function McpItem({
+  mcp,
+  selectedId,
+  onSelect,
+}: {
+  mcp: McpServerEntry
+  selectedId: string | null
+  onSelect: (id: string) => void
+}): React.JSX.Element {
+  const selected = selectedId === mcp.id
+  const transport = mcpTransport(mcp)
+  const target = mcpTarget(mcp)
+  const dot = STATUS_DOT[mcp.status ?? 'unknown'] ?? STATUS_DOT.unknown
+  return (
+    <button
+      onClick={() => onSelect(mcp.id)}
+      className={cn(
+        'w-full rounded-md px-2.5 py-2 text-left transition-colors',
+        selected ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent',
+        mcp.disabled && 'opacity-60'
+      )}
+    >
+      <p className="flex items-center gap-1.5 min-w-0">
+        <span
+          role="img"
+          aria-label={dot.label}
+          title={dot.label}
+          className={cn('h-1.5 w-1.5 rounded-full shrink-0', dot.className)}
+        />
+        <span
+          className={cn(
+            'text-xs font-medium truncate',
+            selected ? 'text-primary' : 'text-foreground'
+          )}
+        >
+          {mcp.name}
+        </span>
+        {mcp.level === 'local' && (
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
+            local
+          </span>
+        )}
+        {mcp.disabled && (
+          <span className="text-[9px] uppercase tracking-wider text-muted-foreground/60 shrink-0">
+            disabled
+          </span>
+        )}
+        {transport && (
+          <span className="ml-auto text-[9px] uppercase tracking-wider font-mono text-muted-foreground/60 shrink-0">
+            {transport}
+          </span>
+        )}
+      </p>
+      {target && (
+        <p
+          className={cn(
+            // pl-3: under the name, past the status dot and its gap.
+            'pl-3 text-[10px] text-muted-foreground truncate mt-0.5 leading-relaxed',
+            (mcp.command || mcp.url) && 'font-mono'
+          )}
+        >
+          {target}
+        </p>
+      )}
+    </button>
+  )
 }
 
 export default function McpsSidebar(): React.JSX.Element {
@@ -30,16 +130,22 @@ export default function McpsSidebar(): React.JSX.Element {
   const selectedMcpId = useConfigStore((s) => s.selectedMcpId)
   const setSelectedMcp = useConfigStore((s) => s.setSelectedMcp)
   const [search, setSearch] = useState('')
+  const sourceFilter = (useUIStore((s) => s.sourceFilters.mcps) ?? 'all') as McpFilter
+  const setSourceFilter = useUIStore((s) => s.setSourceFilter)
 
-  const filtered = mcps.filter(
+  const q = search.toLowerCase()
+  const searched = mcps.filter(
     (m) =>
-      m.name.toLowerCase().includes(search.toLowerCase()) ||
-      (m.command ?? '').toLowerCase().includes(search.toLowerCase()) ||
-      (m.url ?? '').toLowerCase().includes(search.toLowerCase())
+      m.name.toLowerCase().includes(q) ||
+      (m.command ?? '').toLowerCase().includes(q) ||
+      (m.url ?? '').toLowerCase().includes(q) ||
+      (m.projectName ?? '').toLowerCase().includes(q) ||
+      (m.pluginName ?? '').toLowerCase().includes(q)
   )
-
-  const connectedCount = mcps.filter((m) => m.status === 'connected').length
-  const failedCount = mcps.filter((m) => m.status === 'failed').length
+  const counts = countMcpsByFilter(searched)
+  const filtered = searched.filter((m) => sourceFilter === 'all' || mcpFilterOf(m) === sourceFilter)
+  const groups = groupMcps(filtered)
+  const total = mcps.length
 
   return (
     <div className="flex flex-col h-full">
@@ -48,9 +154,9 @@ export default function McpsSidebar(): React.JSX.Element {
           <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             MCPs
           </span>
-          {mcps.length > 0 && (
+          {total > 0 && (
             <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">
-              {mcps.length}
+              {total}
             </span>
           )}
         </div>
@@ -65,30 +171,6 @@ export default function McpsSidebar(): React.JSX.Element {
           />
         </button>
       </div>
-
-      {/* Status summary */}
-      {mcps.length > 0 && (
-        <div className="flex gap-3 px-3 py-1.5 border-b border-border/30">
-          {connectedCount > 0 && (
-            <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 inline-block" />
-              <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                {connectedCount}
-              </span>{' '}
-              connected
-            </span>
-          )}
-          {failedCount > 0 && (
-            <span className="text-[10px] text-muted-foreground flex items-center gap-1">
-              <span className="h-1.5 w-1.5 rounded-full bg-red-500 inline-block" />
-              <span className="font-semibold text-red-600 dark:text-red-400">
-                {failedCount}
-              </span>{' '}
-              failed
-            </span>
-          )}
-        </div>
-      )}
 
       <div className="px-2 py-1.5 border-b border-border/30">
         <div className="flex items-center gap-1.5 rounded-md border border-border bg-background px-2 py-1">
@@ -110,83 +192,67 @@ export default function McpsSidebar(): React.JSX.Element {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2 space-y-0.5">
-        {isLoading && mcps.length === 0 && (
+      {total > 0 && (
+        <SourceChips<McpFilter>
+          label="Filter MCP servers by source"
+          value={sourceFilter}
+          onChange={(v) => setSourceFilter('mcps', v)}
+          options={[
+            { value: 'all', label: 'All', count: counts.all },
+            { value: 'user', label: 'User', count: counts.user },
+            { value: 'project', label: 'Project', count: counts.project },
+            { value: 'plugin', label: 'Plugin', count: counts.plugin },
+            { value: 'connector', label: 'claude.ai', count: counts.connector },
+            { value: 'builtin', label: 'Built-in', count: counts.builtin },
+          ]}
+        />
+      )}
+
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {isLoading && total === 0 && (
           <div className="flex flex-col gap-2 p-2">
-            {Array.from({ length: 3 }).map((_, i) => (
-              <Skeleton key={i} className="h-12" />
+            {Array.from({ length: 4 }).map((_, i) => (
+              <Skeleton key={i} className="h-8" />
             ))}
           </div>
         )}
 
-        {!isLoading && mcps.length === 0 && (
+        {!isLoading && total === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
             <Server className="h-6 w-6 text-muted-foreground/30 mb-2" />
-            <p className="text-xs text-muted-foreground">No MCP servers configured</p>
+            <p className="text-xs text-muted-foreground">No MCP servers found</p>
             <p className="text-[10px] text-muted-foreground/60 mt-1">
-              Add mcpServers to ~/.claude/settings.json
+              Add servers with claude mcp add, or a project&apos;s .mcp.json
             </p>
           </div>
         )}
 
-        {!isLoading && mcps.length > 0 && filtered.length === 0 && search && (
+        {!isLoading && total > 0 && groups.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 text-center px-3">
-            <p className="text-xs text-muted-foreground">No matches for &quot;{search}&quot;</p>
+            <p className="text-xs text-muted-foreground">
+              {search ? (
+                <>No matches for &quot;{search}&quot;</>
+              ) : (
+                'No MCP servers from this source'
+              )}
+            </p>
           </div>
         )}
 
-        {filtered.map((mcp) => {
-          const transport = mcp.type ?? (mcp.url ? 'sse' : 'stdio')
-          const isSelected = selectedMcpId === mcp.id
-          return (
-            <button
-              key={mcp.id}
-              onClick={() => setSelectedMcp(mcp.id)}
-              className={cn(
-                'w-full rounded-md px-2.5 py-2 text-left transition-colors',
-                isSelected ? 'bg-primary/10 ring-1 ring-primary/30' : 'hover:bg-accent'
-              )}
-            >
-              <div className="flex items-center gap-1.5 mb-1">
-                <span className={cn('h-1.5 w-1.5 rounded-full shrink-0', statusDot(mcp))} />
-                <p
-                  className={cn(
-                    'text-xs font-medium truncate flex-1',
-                    isSelected ? 'text-primary' : 'text-foreground'
-                  )}
-                >
-                  {mcp.name}
-                </p>
-                {mcp.level && (
-                  <span className="shrink-0 text-[9px] font-medium px-1 py-0.5 rounded bg-muted text-muted-foreground uppercase">
-                    {mcp.level}
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-1.5 pl-3">
-                <span className="text-[10px] text-muted-foreground/60 font-mono uppercase tracking-wide shrink-0">
-                  {transport}
-                </span>
-                <span className="text-muted-foreground/30 text-[10px]">·</span>
-                {mcp.status === 'failed' ? (
-                  <span className="text-[10px] text-red-500 truncate">connection failed</span>
-                ) : mcp.command ? (
-                  <p className="text-[10px] text-muted-foreground font-mono truncate">
-                    {mcp.command.split('/').pop()}
-                  </p>
-                ) : mcp.url ? (
-                  <p className="text-[10px] text-muted-foreground font-mono truncate">{mcp.url}</p>
-                ) : null}
-                {mcp.args.length > 0 && mcp.status !== 'failed' && (
-                  <span className="shrink-0 text-[9px] text-muted-foreground/60">
-                    {mcp.args.length} arg{mcp.args.length !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </div>
-            </button>
-          )
-        })}
+        {groups.map((g) => (
+          <ScopeGroup
+            key={g.key}
+            label={g.label}
+            count={g.items.length}
+            icon={GROUP_ICON[g.kind]}
+            tags={g.disabled ? ['disabled'] : []}
+            muted={g.disabled}
+          >
+            {g.items.map((m) => (
+              <McpItem key={m.id} mcp={m} selectedId={selectedMcpId} onSelect={setSelectedMcp} />
+            ))}
+          </ScopeGroup>
+        ))}
       </div>
     </div>
   )

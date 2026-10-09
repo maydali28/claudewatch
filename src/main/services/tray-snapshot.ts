@@ -2,6 +2,7 @@ import type { SessionSummary } from '@shared/types/session'
 import type { Project } from '@shared/types/project'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import type { TraySnapshot, TraySnapshotSession } from '@shared/types/analytics'
+import type { CostAlertThresholds } from '@shared/types/cost-alerts'
 import { computeAnalytics, buildSessionOwnerMap } from './analytics-engine'
 import { partitionLiveSessions } from '@shared/utils/live-session'
 import { toDateKey, compareTimestampsAscending } from '@shared/utils/date-ranges'
@@ -18,7 +19,8 @@ import { toDateKey, compareTimestampsAscending } from '@shared/utils/date-ranges
 export function buildTraySnapshot(
   projects: Project[],
   pricingTable: Record<ModelFamily, ModelPricing>,
-  now: number = Date.now()
+  now: number = Date.now(),
+  costLimits: CostAlertThresholds = { daily: 0, session: 0 }
 ): TraySnapshot {
   const sessions = projects.flatMap((p) => p.sessions)
 
@@ -76,6 +78,7 @@ export function buildTraySnapshot(
     })),
     activeSessions: active.map(toTraySession),
     recentSessions: recent.map(toTraySession),
+    costLimits,
   }
 }
 
@@ -122,6 +125,8 @@ function toTraySession(s: SessionSummary): TraySnapshotSession {
     title: s.title,
     slug: s.slug,
     latestModel: s.latestModel,
+    contextFill: s.contextFill,
+    estimatedCost: s.estimatedCost,
     messageCount: s.messageCount,
     totalInputTokens: s.totalInputTokens,
     totalOutputTokens: s.totalOutputTokens,

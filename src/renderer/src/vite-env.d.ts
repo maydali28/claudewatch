@@ -2,8 +2,8 @@
 
 interface ImportMetaEnv {
   readonly VITE_SENTRY_DSN: string
-  readonly VITE_WEBSITE_URL: string
-  readonly VITE_REPO_URL: string
+  readonly VITE_WEBSITE_URL?: string
+  readonly VITE_REPO_URL?: string
 }
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

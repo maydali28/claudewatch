@@ -12,6 +12,7 @@ export type RecordType =
   | 'file-history-snapshot'
   | 'progress'
   | 'ai-title'
+  | 'attachment'
 
 // ─── Token Usage ──────────────────────────────────────────────────────────────
 
@@ -105,6 +106,17 @@ export interface RawRecord {
    * later writes with the same text; the last one seen wins.
    */
   aiTitle?: string
+  /**
+   * `'bg'` on every record of a session Claude Code moved to the background.
+   * See `SessionSummary.isBackground`.
+   */
+  sessionKind?: string
+  /**
+   * The payload of a `type: 'attachment'` record: context Claude Code adds to
+   * a session (the skill listing, environment, hook output, …). Only the
+   * `skill_listing` kind is read, by `parsers/skill-listing.ts`.
+   */
+  attachment?: { type?: unknown; [key: string]: unknown }
   message?: RawMessage
   subtype?: string
   content?: string
@@ -116,6 +128,12 @@ export interface RawRecord {
     type?: string
     content?: string | Array<{ type: string; text: string }>
     is_error?: boolean
+    /** Agent tool results only: the sub-agent this result belongs to. */
+    agentId?: string
+    /** Agent tool results only: `completed`, or `async_launched` for a background agent. */
+    status?: string
+    /** Agent tool results only: how long a foreground sub-agent ran. */
+    totalDurationMs?: number
   }
   logicalParentUuid?: string
   compactMetadata?: {
@@ -210,6 +228,12 @@ export interface ParsedRecord {
   userKind?: UserRecordKind
   /** The sub-agent that sent an `'agent-message'` record (`origin.from`), when known. */
   originAgentId?: string
+  /**
+   * A prompt the person sent while Claude was busy, written by Claude Code as
+   * a `queued_command` attachment (see `promoteQueuedPrompt`). In a sub-agent
+   * transcript this is a message sent to the running agent directly.
+   */
+  queued?: boolean
 }
 
 // ─── Tool Result Map ───────────────────────────────────────────────────────────
@@ -313,7 +337,37 @@ export interface ModelTokenBreakdown {
 
 export interface SubagentSummary {
   agentId: string
+  /** `agentType` from the sub-agent's `agent-<id>.meta.json` (`general-purpose`, `Explore`, …). */
   agentType?: string
+  /**
+   * The task description the parent gave the sub-agent, from its meta file.
+   * Sub-agent transcripts carry no `ai-title` record, so this is the closest
+   * thing to a title.
+   */
+  description?: string
+  /** The parent's Agent tool call that started this sub-agent. */
+  toolUseId?: string
+  /** Set when another sub-agent, not the session itself, started this one. */
+  parentAgentId?: string
+  /** 1 for a sub-agent of the session, 2 for a sub-agent of a sub-agent, … */
+  spawnDepth?: number
+  /** Started in the background: the parent did not wait for it. */
+  isBackground?: boolean
+  /**
+   * How long the sub-agent ran. `reported` is Claude Code's own figure (the
+   * Agent tool result's `totalDurationMs`, or a background agent's
+   * task-notification `duration_ms`); `span` is last minus first timestamp,
+   * which overstates an agent that was resumed later.
+   */
+  durationMs?: number
+  durationSource?: 'reported' | 'span'
+  /**
+   * When the parent last saw this sub-agent stop: its Agent tool result, or
+   * for a background agent its latest task notification. Absent while it is
+   * running, and for a sub-agent whose end was never recorded. Read with
+   * `isSubagentRunning`.
+   */
+  stoppedAt?: string
   messageCount: number
   totalInputTokens: number
   totalOutputTokens: number
@@ -450,12 +504,32 @@ export interface SessionDayUsage {
 
 // ─── Session Summary (lightweight, for sidebar) ───────────────────────────────
 
+/** A skill Claude Code listed as available in a session. */
+export interface SkillListingEntry {
+  name: string
+  description?: string
+}
+
+export interface ContextFill {
+  tokens: number
+  window: number
+  /** True when the transcript cannot tell a 200K window from a 1M one. */
+  windowEstimated: boolean
+}
+
 export interface SessionSummary {
   id: string
   projectId: string
   projectPath: string
   slug?: string
   title: string
+  /**
+   * Every skill the session's `skill_listing` records named, in first-seen
+   * order; absent when it recorded none. The Skills panel's only source for
+   * skills with no file on disk (built-in, claude.ai). Added in metadata
+   * cache v14.
+   */
+  skillListing?: SkillListingEntry[]
   firstTimestamp: string
   lastTimestamp: string
   /**
@@ -477,6 +551,32 @@ export interface SessionSummary {
   latestModel?: string
   /** Parent model with the most responses across the session's life. */
   dominantModel?: string
+  /**
+   * How full the context window is now: what the latest parent response sent,
+   * against the window of the model it ran on (`contextWindowFor`). Absent
+   * until the session has a response.
+   */
+  contextFill?: ContextFill
+  /**
+   * Claude Code moved this session to the background (`sessionKind: 'bg'`).
+   * It does so by copying the session so far into a new session id, so the
+   * copy starts with the same messages as the session it came from and both
+   * appear in the list under the same title.
+   */
+  isBackground?: boolean
+  /**
+   * Sessions this background session was copied from, hidden from the list
+   * and from every total because all of their records are repeated here
+   * (see `foldBackgroundContinuations`). Absent when there are none.
+   */
+  continuesSessionIds?: string[]
+  /**
+   * `uuid` of the transcript's first and last records. A background copy
+   * starts with the same `firstUuid` as the session it came from, and holds
+   * that session's `lastUuid` unless the session went on after the move.
+   */
+  firstUuid?: string
+  lastUuid?: string
   /** Every exact model seen in this session, parent and subagents. */
   modelsUsed: string[]
   /** Responses whose model is unrecognised and therefore excluded from cost. */
@@ -529,6 +629,11 @@ export interface SessionSummary {
   recordedEffortDistribution: Record<string, number>
   /** Distinct `service_tier` values reported across this session's responses. */
   serviceTiers: string[]
+  /**
+   * Tool calls per day, tool and side (parent or sub-agents). Feeds the
+   * session's Tools tab and the Analytics Tools tab. Added in metadata cache v15.
+   */
+  toolUsage: ToolUsageRow[]
 }
 
 /**
@@ -712,34 +817,52 @@ export interface ParsedSession {
    * already does for `metadata.totalOutputTokens`.
    */
   responseUsage: Record<string, ResolvedResponseUsage>
+  /** Every dated response, parent and sub-agents, oldest first. */
+  responseTimeline: ResponseTimelinePoint[]
 }
 
 // ─── Tool Call Entry (for Tools rail) ────────────────────────────────────────
 
 export type ToolCategory = 'read' | 'write' | 'edit' | 'exec' | 'mcp' | 'other'
 
-export interface ToolCallEntry {
-  id: string
-  toolName: string
-  category: ToolCategory
-  input: Record<string, AnyCodableValue>
-  primaryArg?: string
-  resultContent?: string
-  isError: boolean
-  turnIndex: number
-  sessionId: string
-  timestamp?: string
+/**
+ * Tool calls of one tool on one day, from one side of the session (the parent
+ * transcript or its sub-agents). Built by `parsers/tool-usage.ts`.
+ */
+export interface ToolUsageRow {
+  /** Local calendar day of the response that made the calls, `YYYY-MM-DD` or `UNDATED_DAY`. */
+  day: string
+  /** Tool name as Claude Code wrote it (`Read`, `mcp__github__get_me`, …). */
+  tool: string
+  /** For `mcp__<server>__<method>` tools, the server part. */
   mcpServer?: string
-  mcpMethod?: string
+  source: 'parent' | 'subagent'
+  calls: number
+  /** Calls whose tool result was marked `is_error`. */
+  errors: number
+  /** Characters of tool result text returned to the model. */
+  resultChars: number
+  /**
+   * Estimated cost of the responses that made these calls, a response's cost
+   * split evenly across the tool calls it made. Unpriced responses add 0.
+   */
+  costUsd: number
 }
 
-export interface ToolAnalytics {
-  totalCalls: number
-  errorCount: number
-  errorRate: number
-  uniqueFilesTouched: number
-  callsByTool: Array<{ tool: string; count: number }>
-  callsByCategory: Array<{ category: ToolCategory; count: number }>
+/**
+ * One API response on the session's timeline: the parent's and every
+ * sub-agent's, from the ledger. Built by `full-parser.ts`.
+ */
+export interface ResponseTimelinePoint {
+  timestamp: string
+  source: 'parent' | 'subagent'
+  agentId?: string
+  model?: string
+  /** Prompt size of this request: fresh input + cache read + cache write. */
+  contextTokens: number
+  outputTokens: number
+  /** Null when the model could not be priced. */
+  costUsd: number | null
 }
 
 // ─── Search ───────────────────────────────────────────────────────────────────
@@ -756,9 +879,9 @@ export interface SessionSearchResult {
 
 export type ExportFormat = 'json' | 'csv' | 'markdown'
 
+/** The file is chosen in a save dialog main shows; the renderer never names a path. */
 export interface ExportRequest {
   sessionId: string
   projectId: string
   format: ExportFormat
-  outputPath?: string
 }

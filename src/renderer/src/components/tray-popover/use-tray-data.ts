@@ -2,6 +2,7 @@ import { useEffect, useCallback, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { TraySnapshot, TraySnapshotSession } from '@shared/types/analytics'
 import type { UpdateInfo } from '@shared/types/project'
+import type { CostAlertThresholds } from '@shared/types/cost-alerts'
 import { ipc } from '@renderer/lib/ipc-client'
 import { CHANNELS } from '@shared/ipc/channels'
 import { buildWeeklyUsage } from './weekly-usage'
@@ -44,6 +45,8 @@ async function fetchSettings(): Promise<{ launchAtLogin: boolean; trayTipDismiss
   }
 }
 
+const NO_LIMITS: CostAlertThresholds = { daily: 0, session: 0 }
+
 export interface TrayData {
   todayStats: {
     sessionCount: number
@@ -53,6 +56,8 @@ export interface TrayData {
     projectCount: number
   }
   weeklyUsage: Array<{ date: string; cost: number; tokens: number }>
+  /** Cost alerts in force (0 = off), for the over-limit hints. */
+  costLimits: CostAlertThresholds
   activeSessions: TraySnapshotSession[]
   recentSessions: TraySnapshotSession[]
   isLoading: boolean
@@ -60,6 +65,8 @@ export interface TrayData {
   updateInfo: UpdateInfo | null
   launchAtLogin: boolean
   trayTipDismissed: boolean
+  /** True once the stored settings have arrived (not the placeholder). */
+  settingsLoaded: boolean
   setLaunchAtLogin: (val: boolean) => Promise<void>
   dismissTrayTip: () => Promise<void>
 }
@@ -207,6 +214,7 @@ export function useTrayData(): TrayData {
   return {
     todayStats,
     weeklyUsage,
+    costLimits: snapshot?.costLimits ?? NO_LIMITS,
     activeSessions,
     recentSessions,
     isLoading: analyticsQuery.isLoading,
@@ -214,6 +222,9 @@ export function useTrayData(): TrayData {
     updateInfo: updateInfoQuery.data ?? null,
     launchAtLogin: settingsQuery.data?.launchAtLogin ?? false,
     trayTipDismissed: settingsQuery.data?.trayTipDismissed ?? false,
+    // The stored settings, not the placeholder shown until they arrive: a
+    // decision taken on the placeholder sees "tip not dismissed" every time.
+    settingsLoaded: settingsQuery.isSuccess && !settingsQuery.isPlaceholderData,
     setLaunchAtLogin,
     dismissTrayTip,
   }

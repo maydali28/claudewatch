@@ -4,7 +4,12 @@ import {
   OPEN_TURN_ACTIVE_MS,
   TRAY_RECENT_SESSION_COUNT,
 } from '@shared/constants/tuning'
-import { isSessionLive, partitionLiveSessions, type LiveSessionSignal } from './live-session'
+import {
+  isSessionLive,
+  isSubagentRunning,
+  partitionLiveSessions,
+  type LiveSessionSignal,
+} from './live-session'
 
 const NOW = Date.parse('2026-09-16T10:00:00.000Z')
 const agoIso = (ms: number): string => new Date(NOW - ms).toISOString()
@@ -64,5 +69,44 @@ describe('partitionLiveSessions', () => {
     expect(recent).toHaveLength(TRAY_RECENT_SESSION_COUNT)
     expect(recent[0].id).toBe('r0')
     expect(recent.map((s) => s.id)).not.toContain('old')
+  })
+})
+
+describe('isSubagentRunning', () => {
+  const now = Date.parse('2026-09-10T12:00:00.000Z')
+  const ago = (ms: number): string => new Date(now - ms).toISOString()
+
+  it('runs while the parent has no result for it and it wrote recently', () => {
+    expect(isSubagentRunning({ lastTimestamp: ago(5 * 60_000), toolUseId: 't' }, now)).toBe(true)
+  })
+
+  it('stops once the parent recorded its end after its last write', () => {
+    expect(
+      isSubagentRunning({ lastTimestamp: ago(10_000), stoppedAt: ago(5_000), toolUseId: 't' }, now)
+    ).toBe(false)
+  })
+
+  it('runs again when it was resumed after stopping', () => {
+    expect(
+      isSubagentRunning(
+        { lastTimestamp: ago(1_000), stoppedAt: ago(60_000), isBackground: true },
+        now
+      )
+    ).toBe(true)
+  })
+
+  it('is abandoned past the open-turn cap', () => {
+    expect(
+      isSubagentRunning({ lastTimestamp: ago(OPEN_TURN_ACTIVE_MS + 1), toolUseId: 't' }, now)
+    ).toBe(false)
+  })
+
+  it('falls back to short recency without a meta file', () => {
+    expect(isSubagentRunning({ lastTimestamp: ago(ACTIVE_SESSION_MS - 1) }, now)).toBe(true)
+    expect(isSubagentRunning({ lastTimestamp: ago(ACTIVE_SESSION_MS + 1) }, now)).toBe(false)
+  })
+
+  it('is never running with an unparsable timestamp', () => {
+    expect(isSubagentRunning({ lastTimestamp: 'garbage', toolUseId: 't' }, now)).toBe(false)
   })
 })

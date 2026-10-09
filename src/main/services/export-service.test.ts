@@ -19,7 +19,7 @@ vi.mock('@main/lib/logger', () => ({
 }))
 
 import type { ParsedSession, SessionDiagnostics } from '@shared/types/session'
-import { exportAsCsv, exportAsJson, exportAsMarkdown } from './export-service'
+import { exportAsCsv, exportAsJson, exportAsMarkdown, exportFileName } from './export-service'
 import { parseSessionFull } from './parsers/full-parser'
 
 function diagnostics(over: Partial<SessionDiagnostics> = {}): SessionDiagnostics {
@@ -77,6 +77,7 @@ function makeSession(over: Partial<ParsedSession> = {}): ParsedSession {
     subagentTotals: { inputTokens: 0, outputTokens: 0, messageCount: 0, estimatedCost: 0 },
     diagnostics: diagnostics(),
     responseUsage: {},
+    responseTimeline: [],
     ...over,
   }
 }
@@ -927,6 +928,17 @@ describe('export diagnostics — the lead sentence matches what actually fired',
     // before the provenance clause starts, not interleaved with it.
     expect(note.indexOf('may be missing data')).toBeLessThan(
       note.indexOf('maximum observed across snapshots')
+    )
+  })
+})
+
+describe('exportFileName', () => {
+  it('names the file after the slug, or the id, with a safe base', () => {
+    expect(exportFileName(makeSession({ slug: 'fix the/parser' }), 'markdown')).toBe(
+      'claudewatch-fix-the-parser.md'
+    )
+    expect(exportFileName(makeSession({ slug: undefined, id: 'abc-123' }), 'csv')).toBe(
+      'claudewatch-abc-123.csv'
     )
   })
 })

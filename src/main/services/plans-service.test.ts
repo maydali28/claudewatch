@@ -31,6 +31,9 @@ vi.mock('@main/lib/claude-paths', async () => {
     getUserSettingsPath: () => p.join(dirs.claudeDir, 'settings.json'),
     getMcpDebugLatestPath: () => p.join(dirs.claudeDir, 'debug', 'latest'),
     getUserCommandsDirPath: () => p.join(dirs.claudeDir, 'commands'),
+    getPluginsDirPath: () => p.join(dirs.claudeDir, 'plugins'),
+    getUserSkillsDirPath: () => p.join(dirs.claudeDir, 'skills'),
+    getManagedSettingsPath: () => p.join(dirs.tmp, 'managed', 'managed-settings.json'),
     getDefaultPlansDirPath: () => p.join(dirs.claudeDir, 'plans'),
   }
 })
@@ -40,7 +43,7 @@ import {
   resolvePlanDirectories,
   listPlans,
   readPlan,
-  projectNamesForSlug,
+  planUsageBySlug,
   type PlanDirectory,
 } from './plans-service'
 
@@ -287,46 +290,61 @@ describe('readPlan', () => {
   })
 })
 
-describe('projectNamesForSlug', () => {
-  it('matches directories whose transcripts mention the slug to a project name, once for merged worktrees', async () => {
-    const projectsDir = path.join(dirs.claudeDir, 'projects')
-    const dirA = path.join(projectsDir, 'proj-a')
-    const dirAWorktree = path.join(projectsDir, 'proj-a--claude-worktrees-feat')
-    fs.mkdirSync(dirA, { recursive: true })
-    fs.mkdirSync(dirAWorktree, { recursive: true })
-    fs.writeFileSync(path.join(dirA, 's1.jsonl'), 'no match here\n')
-    // The slug match lands on the worktree directory, not on `project.id`
-    // itself, so this only passes if the lookup checks every session's
-    // `projectId` (the merge group) rather than just `project.id`.
-    fs.writeFileSync(path.join(dirAWorktree, 's2.jsonl'), '{"slug":"my-slug"}\n')
-
-    const dirB = path.join(projectsDir, 'proj-b')
-    fs.mkdirSync(dirB, { recursive: true })
-    fs.writeFileSync(path.join(dirB, 's3.jsonl'), 'no match here either\n')
-
-    const projects = [
+describe('planUsageBySlug', () => {
+  it('maps each session slug to the projects that used it, once per project and sorted by name', () => {
+    const usage = planUsageBySlug([
+      {
+        id: 'proj-b',
+        name: 'Other App',
+        sessions: [{ slug: 'shared-plan' }, { slug: undefined }],
+      },
       {
         id: 'proj-a',
         name: 'Demo App',
-        sessions: [{ projectId: 'proj-a' }, { projectId: 'proj-a--claude-worktrees-feat' }],
+        // A merged worktree project carries sessions from several directories.
+        sessions: [{ slug: 'shared-plan' }, { slug: 'shared-plan' }, { slug: 'only-a' }],
       },
-      { id: 'proj-b', name: 'Other App', sessions: [{ projectId: 'proj-b' }] },
-    ]
-
-    const names = await projectNamesForSlug('my-slug', projects)
-    expect(names).toEqual(['Demo App'])
-  })
-
-  it('returns an empty list when the projects directory is missing, even with real projects to match against', async () => {
-    // `dirs.claudeDir/projects` is never created in this test — a bare `[]`
-    // project list would pass trivially regardless of the missing-directory
-    // handling, since there would be no names to return either way. A
-    // non-empty list makes the assertion mean what it says: matching the
-    // slug fails because the directory can't be scanned, not because there
-    // was nothing to match.
-    const names = await projectNamesForSlug('my-slug', [
-      { id: 'proj-a', name: 'Demo App', sessions: [{ projectId: 'proj-a' }] },
     ])
-    expect(names).toEqual([])
+
+    expect(usage.get('shared-plan')).toEqual([
+      { projectId: 'proj-a', projectName: 'Demo App' },
+      { projectId: 'proj-b', projectName: 'Other App' },
+    ])
+    expect(usage.get('only-a')).toEqual([{ projectId: 'proj-a', projectName: 'Demo App' }])
+    expect(usage.has('')).toBe(false)
+  })
+})
+
+describe('listPlans with usage', () => {
+  it('attaches usedBy to shared-folder plans only, keyed by the filename without .md', async () => {
+    const defaultDir = path.join(dirs.claudeDir, 'plans')
+    const projectDir = path.join(tmp, 'repo', 'plans')
+    fs.mkdirSync(defaultDir, { recursive: true })
+    fs.mkdirSync(projectDir, { recursive: true })
+    fs.writeFileSync(path.join(defaultDir, 'shared-plan.md'), '# Shared')
+    fs.writeFileSync(path.join(defaultDir, 'unused-plan.md'), '# Unused')
+    fs.writeFileSync(path.join(projectDir, 'shared-plan.md'), '# In repo')
+
+    const usage = planUsageBySlug([
+      { id: 'proj-a', name: 'Demo App', sessions: [{ slug: 'shared-plan' }] },
+    ])
+    const plans = await listPlans(
+      [
+        { directory: defaultDir, scope: 'default' },
+        {
+          directory: projectDir,
+          scope: 'project',
+          project: { id: 'proj-a', name: 'Demo App', path: path.join(tmp, 'repo') },
+        },
+      ],
+      usage
+    )
+
+    const byId = new Map(plans.map((p) => [p.id, p]))
+    expect(byId.get(path.join(defaultDir, 'shared-plan.md'))?.usedBy).toEqual([
+      { projectId: 'proj-a', projectName: 'Demo App' },
+    ])
+    expect(byId.get(path.join(defaultDir, 'unused-plan.md'))?.usedBy).toEqual([])
+    expect(byId.get(path.join(projectDir, 'shared-plan.md'))?.usedBy).toBeUndefined()
   })
 })

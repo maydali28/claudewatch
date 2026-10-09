@@ -6,6 +6,10 @@ import { useSessionsStore } from '@renderer/store/sessions.store'
 import { useAnalyticsStore } from '@renderer/store/analytics.store'
 import { useConfigStore } from '@renderer/store/config.store'
 import { useUIStore } from '@renderer/store/ui.store'
+import { useSettingsStore } from '@renderer/store/settings.store'
+import { useSecretsStore } from '@renderer/store/secrets.store'
+import { toast } from '@renderer/components/shared/toast-host'
+import type { CostAlertNotice, SecretFindingRecord } from '@shared/types'
 
 /**
  * Subscribe to push events from the main process.
@@ -54,6 +58,65 @@ export function useFileEvents(): void {
       refreshAnalytics()
     })
 
+    // Secrets found as they were written: add them to the list and say so,
+    // one toast per session, with a way to open it.
+    const unsubSecrets = ipc.on<SecretFindingRecord[]>(CHANNELS.PUSH_SECRETS_FOUND, (found) => {
+      useSecretsStore.getState().addFound(found)
+      const live = found.filter((f) => f.source === 'live')
+      const bySession = new Map<string, SecretFindingRecord[]>()
+      for (const f of live) {
+        const key = `${f.projectId}/${f.sessionId}`
+        bySession.set(key, [...(bySession.get(key) ?? []), f])
+      }
+      for (const group of bySession.values()) {
+        const { projectId, sessionId } = group[0]
+        const title =
+          useSessionsStore
+            .getState()
+            .projects.flatMap((p) => p.sessions)
+            .find((s) => s.id === sessionId)?.title ?? sessionId.slice(0, 8)
+        const what =
+          group.length === 1
+            ? `Possible ${group[0].patternName}`
+            : `${group.length} possible secrets`
+        toast(`${what} in “${title}”`, 'warning', 15_000, {
+          label: 'Open session',
+          onClick: () => {
+            setView('sessions')
+            loadParsedSession(sessionId, projectId)
+          },
+        })
+      }
+    })
+
+    // A Settings › Alerts threshold was passed. Main also sends a system
+    // notification when the dashboard is in the background.
+    const unsubCostAlert = ipc.on<CostAlertNotice[]>(CHANNELS.PUSH_COST_ALERT, (notices) => {
+      for (const notice of notices) {
+        toast(
+          notice.message.body,
+          'warning',
+          15_000,
+          notice.kind === 'session'
+            ? {
+                label: 'Open session',
+                onClick: () => {
+                  setView('sessions')
+                  loadParsedSession(notice.sessionId, notice.projectId)
+                },
+              }
+            : { label: 'Open analytics', onClick: () => setView('analytics') }
+        )
+      }
+    })
+
+    // Redaction is applied in main on the way out; a new setting needs a refetch.
+    const unsubRedaction = useSettingsStore.subscribe((state, prev) => {
+      if (state.prefs.redactionLevel !== prev.prefs.redactionLevel) {
+        useSessionsStore.getState().handleRedactionChanged()
+      }
+    })
+
     const unsubConfig = ipc.on(CHANNELS.PUSH_CONFIG_CHANGED, () => {
       loadAllConfig()
     })
@@ -78,6 +141,9 @@ export function useFileEvents(): void {
     )
 
     return () => {
+      unsubSecrets()
+      unsubCostAlert()
+      unsubRedaction()
       unsubUpdated()
       unsubCreated()
       unsubDeleted()

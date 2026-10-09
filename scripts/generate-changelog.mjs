@@ -24,6 +24,19 @@ if (fromIndex !== -1 && !from) {
 }
 
 /**
+ * The section's date, as `--date YYYY-MM-DD`; today when omitted. Lets the
+ * changelog carry the release day when it is generated ahead of it, so the
+ * file is still produced by this command rather than edited by hand.
+ */
+const dateIndex = process.argv.indexOf('--date')
+const dateOverride = dateIndex === -1 ? undefined : process.argv[dateIndex + 1]
+
+if (dateIndex !== -1 && !/^\d{4}-\d{2}-\d{2}$/.test(dateOverride ?? '')) {
+  console.error('--date needs a day as YYYY-MM-DD, e.g. --date 2026-10-12')
+  process.exit(1)
+}
+
+/**
  * Section layout — byte-for-byte what conventional-changelog 7 produced, so
  * every section of CHANGELOG.md reads the same and extract-release-notes.mjs
  * and the release hook keep parsing it:
@@ -46,7 +59,8 @@ if (fromIndex !== -1 && !from) {
  * template: the writer trims every segment, so the second blank line after
  * the heading cannot come from the header partial any more.
  */
-function headerPartial({ version, title, date }) {
+function headerPartial({ version, title, date: generatedOn }) {
+  const date = dateOverride ?? generatedOn
   return `## ${version}${title ? ` "${title}"` : ''}${date ? ` (${date})` : ''}`
 }
 

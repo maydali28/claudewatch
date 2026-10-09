@@ -119,6 +119,45 @@ function session(
   return file
 }
 
+describe('parseSessionMetadata — skill listing', () => {
+  it('records the skills the session listed, and leaves usage untouched', async () => {
+    const file = session('skills', [
+      {
+        type: 'attachment',
+        uuid: 'att-1',
+        timestamp: '2026-09-10T09:58:00.000Z',
+        attachment: {
+          type: 'skill_listing',
+          names: ['humanizer', 'code-review'],
+          content: '- humanizer: Remove AI tells.\n- code-review: Review the diff.',
+          skillCount: 2,
+          isInitial: true,
+        },
+      },
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1', input: 100, output: 20 }),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'skills', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.skillListing).toEqual([
+      { name: 'humanizer', description: 'Remove AI tells.' },
+      { name: 'code-review', description: 'Review the diff.' },
+    ])
+    expect(summary.totalInputTokens).toBe(100)
+    expect(summary.messageCount).toBe(2)
+  })
+
+  it('leaves skillListing out for a session without a listing', async () => {
+    const file = session('no-skills', [
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1', input: 1, output: 1 }),
+    ])
+    const summary = await parseSessionMetadata(file, 'no-skills', 'proj', ANTHROPIC_PRICING)
+    expect(summary.skillListing).toBeUndefined()
+  })
+})
+
 describe('parseSessionMetadata — usage comes from the response ledger', () => {
   it('counts a response once even when several records carry it', async () => {
     const file = session('dup', [
@@ -363,6 +402,78 @@ describe('parseSessionMetadata — model identity', () => {
 
     expect(summary.latestModel).toBe('claude-sonnet-5')
     expect(summary.dominantModel).toBe('claude-opus-5')
+  })
+})
+
+describe('parseSessionMetadata — context window fill', () => {
+  it('reports the latest context against the window of the model in use', async () => {
+    const file = session('context-fill', [
+      user('u1'),
+      assistant({ uuid: 'a', id: 'msg_1', ts: '2026-09-10T09:00:00.000Z', cacheRead: 300_000 }),
+      assistant({
+        uuid: 'b',
+        id: 'msg_2',
+        ts: '2026-09-10T10:00:00.000Z',
+        model: 'claude-opus-5-5',
+        input: 10,
+        cacheRead: 250_000,
+        cache5m: 1_000,
+      }),
+    ])
+
+    const summary = await parseSessionMetadata(file, 'context-fill', 'proj', ANTHROPIC_PRICING)
+
+    expect(summary.contextFill).toEqual({
+      tokens: 251_010,
+      window: 1_000_000,
+      windowEstimated: false,
+    })
+  })
+
+  it('switches an opt-in model to 1M once the session has gone past 200K on it', async () => {
+    const file = session('context-fill-optin', [
+      user('u1'),
+      assistant({
+        uuid: 'a',
+        id: 'msg_1',
+        ts: '2026-09-10T09:00:00.000Z',
+        model: 'claude-opus-4-8',
+        cacheRead: 260_000,
+      }),
+      assistant({
+        uuid: 'b',
+        id: 'msg_2',
+        ts: '2026-09-10T10:00:00.000Z',
+        model: 'claude-opus-4-8',
+        cacheRead: 40_000,
+      }),
+    ])
+
+    const summary = await parseSessionMetadata(
+      file,
+      'context-fill-optin',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(summary.contextFill).toEqual({
+      tokens: 40_000,
+      window: 1_000_000,
+      windowEstimated: true,
+    })
+  })
+
+  it('reports no fill for a session with no response yet', async () => {
+    const file = session('context-fill-empty', [user('u1')])
+
+    const summary = await parseSessionMetadata(
+      file,
+      'context-fill-empty',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+
+    expect(summary.contextFill).toBeUndefined()
   })
 })
 
@@ -1405,6 +1516,23 @@ describe('parseSessionMetadata — turnOpen reflects whether the last turn is st
     const file = session('turn-empty', [])
     const s = await parseSessionMetadata(file, 'turn-empty', 'p', ANTHROPIC_PRICING)
     expect(s.turnOpen).toBe(false)
+  })
+})
+
+describe('parseSessionMetadata — background sessions', () => {
+  it('marks a session Claude Code moved to the background', async () => {
+    const file = session('bg', [
+      { ...user('u1'), sessionKind: 'bg' },
+      { ...assistant({ uuid: 'a', id: 'msg_1' }), sessionKind: 'bg' },
+    ])
+    const summary = await parseSessionMetadata(file, 'bg', 'proj', ANTHROPIC_PRICING)
+    expect(summary.isBackground).toBe(true)
+  })
+
+  it('leaves an ordinary session unmarked', async () => {
+    const file = session('fg', [user('u1'), assistant({ uuid: 'a', id: 'msg_1' })])
+    const summary = await parseSessionMetadata(file, 'fg', 'proj', ANTHROPIC_PRICING)
+    expect(summary.isBackground).toBeUndefined()
   })
 })
 

@@ -1,4 +1,4 @@
-import type { Project, ProjectSkillEntry, ProjectClaudeMd, UpdateInfo } from '@shared/types/project'
+import type { Project, ProjectClaudeMd, UpdateInfo } from '@shared/types/project'
 import type { PlanSummary, PlanDetail } from '@shared/types/plan'
 import type {
   SessionSummary,
@@ -13,9 +13,14 @@ import type {
   SkillEntry,
   McpServerEntry,
   MemoryFile,
+  PluginEntry,
 } from '@shared/types/config'
 import type { LintResult, LintSummary } from '@shared/types/lint'
 import type { AppPreferences } from '@shared/types/preferences'
+import type { ClaudeDirInspection, ClaudeDirSource } from '@shared/types/claude-dir'
+import type { SeenModel } from '@shared/types/pricing'
+import type { SecretFindingRecord, SecretHistoryScanResult } from '@shared/types/secrets'
+import type { NotificationStatus } from '@shared/types/notifications'
 
 // ─── Result Wrapper ───────────────────────────────────────────────────────────
 // Never throw across IPC — error objects lose type information over serialization.
@@ -55,6 +60,11 @@ export interface IPCContracts {
     request: { sessionId: string; projectId: string }
     response: Result<ParsedSession>
   }
+  /** One sub-agent's own transcript, parsed like a session. */
+  'sessions:get-subagent': {
+    request: { sessionId: string; projectId: string; agentId: string }
+    response: Result<ParsedSession>
+  }
   'sessions:search': {
     request: { query: string; projectIds?: string[] }
     response: Result<SessionSearchResult[]>
@@ -63,9 +73,40 @@ export interface IPCContracts {
     request: { sessionId: string; tags: string[] }
     response: Result<void>
   }
+  'secrets:list': {
+    request: void
+    response: Result<SecretFindingRecord[]>
+  }
+  'secrets:dismiss': {
+    request: { ids: string[] }
+    response: Result<void>
+  }
+  'secrets:scan-history': {
+    request: void
+    response: Result<SecretHistoryScanResult>
+  }
+  'notifications:status': {
+    request: void
+    response: Result<NotificationStatus>
+  }
+  // Sends a sample notification; the status follows by push once the OS answers.
+  'notifications:test': {
+    request: void
+    response: Result<{ supported: boolean }>
+  }
+  // False where the OS has no settings page to open.
+  'notifications:open-settings': {
+    request: void
+    response: Result<{ opened: boolean }>
+  }
   'sessions:export': {
     request: ExportRequest
-    response: Result<string> // file path written
+    response: Result<string | null> // file path written, or null when the dialog was cancelled
+  }
+  /** Every model ID the transcripts used, for Settings › Models. */
+  'analytics:list-models': {
+    request: void
+    response: Result<SeenModel[]>
   }
   'analytics:get': {
     request: { dateRange: DateRange; projectIds?: string[] }
@@ -83,9 +124,9 @@ export interface IPCContracts {
     request: void
     response: Result<SkillEntry[]>
   }
-  'config:get-project-skills': {
+  'config:get-plugins': {
     request: void
-    response: Result<ProjectSkillEntry[]>
+    response: Result<PluginEntry[]>
   }
   'config:get-mcps': {
     request: { projectId?: string }
@@ -122,10 +163,6 @@ export interface IPCContracts {
   'plans:get': {
     request: { id: string }
     response: Result<PlanDetail>
-  }
-  'plans:get-projects': {
-    request: { slug: string }
-    response: Result<string[]>
   }
   'updates:check': {
     request: void
@@ -185,15 +222,27 @@ export interface IPCContracts {
   }
   'app:get-paths': {
     request: void
-    // Mirrors `ClaudeDirSource` from `@main/lib/claude-paths` structurally —
-    // `src/shared/` stays free of main-process imports (see
-    // .dependency-cruiser.cjs), so the union is repeated here rather than
-    // imported.
     response: Result<{
       claudeDir: string
       display: string
-      source: 'env' | 'user-settings' | 'default'
+      source: ClaudeDirSource
+      /** What the folder would be without the app setting: env, settings.json or default. */
+      fallback: { claudeDir: string; source: ClaudeDirSource }
     }>
+  }
+  'app:inspect-claude-dir': {
+    request: { path: string }
+    response: Result<ClaudeDirInspection>
+  }
+  /** Opens a folder picker; null when cancelled. */
+  'app:choose-claude-dir': {
+    request: void
+    response: Result<ClaudeDirInspection | null>
+  }
+  /** Use this folder (null: back to the environment and defaults); windows reload after. */
+  'app:set-claude-dir': {
+    request: { path: string | null }
+    response: Result<void>
   }
 }
 

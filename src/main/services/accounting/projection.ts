@@ -136,6 +136,16 @@ export interface UsageProjection {
   latestParentModel?: string
   /** Parent model with the most responses over the session's life. */
   dominantParentModel?: string
+  /**
+   * Context the latest parent response sent: input plus cache reads and
+   * writes. Subagents are left out, since each runs in a window of its own.
+   */
+  latestParentContextTokens?: number
+  /**
+   * Largest parent context sent on `latestParentModel`, which tells a 1M
+   * window from a 200K one (see `contextWindowFor`).
+   */
+  latestParentPeakContextTokens?: number
   /** Every model seen, parent and child. */
   modelsUsed: string[]
   byDay: DayBucket[]
@@ -263,8 +273,10 @@ export function projectUsage(entries: ResponseEntry[]): UsageProjection {
   const dayFamilies = new Map<string, Set<ModelFamily>>()
   const dayModels = new Map<string, Map<string, ModelUsageRow>>()
   const parentCounts = new Map<string, number>()
+  const parentPeakContext = new Map<string, number>()
 
   let latestParentModel: string | undefined
+  let latestParentContextTokens: number | undefined
   let latestParentInstant = -Infinity
   let conflictCount = 0
   const recordedEffortDistribution: Record<string, number> = {}
@@ -290,6 +302,8 @@ export function projectUsage(entries: ResponseEntry[]): UsageProjection {
       add(parent, e)
       if (e.modelRaw) {
         parentCounts.set(e.modelRaw, (parentCounts.get(e.modelRaw) ?? 0) + 1)
+        const context = e.inputTokens + e.cacheReadTokens + effectiveCacheWriteTotal(e)
+        parentPeakContext.set(e.modelRaw, Math.max(parentPeakContext.get(e.modelRaw) ?? 0, context))
         // `parseInstant` compares parsed instants, not raw strings: a
         // `+02:00`-offset timestamp can sort later than a `Z` one while naming
         // an earlier instant, which picked the wrong model for this badge. It
@@ -303,6 +317,7 @@ export function projectUsage(entries: ResponseEntry[]): UsageProjection {
         if (parentInstant !== null && parentInstant > latestParentInstant) {
           latestParentInstant = parentInstant
           latestParentModel = e.modelRaw
+          latestParentContextTokens = context
         }
       }
     }
@@ -351,6 +366,9 @@ export function projectUsage(entries: ResponseEntry[]): UsageProjection {
     modelBreakdown: [...byModel.values()].sort((a, b) => b.turnCount - a.turnCount),
     latestParentModel,
     dominantParentModel,
+    latestParentContextTokens,
+    latestParentPeakContextTokens:
+      latestParentModel === undefined ? undefined : parentPeakContext.get(latestParentModel),
     modelsUsed: [...byModel.keys()],
     byDay: days,
     conflictCount,

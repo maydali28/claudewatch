@@ -103,6 +103,7 @@ function session(id: string, dailyUsage: SessionDayUsage[]): SessionSummary {
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
   }
 }
 
@@ -1738,5 +1739,87 @@ describe('computeAnalytics — bounded ranges zero-fill idle days', () => {
     // bounded preset where the chart's branch stays legitimately reachable.
     const a = computeAnalytics([], PROJECTS, 'today', ANTHROPIC_PRICING)
     expect(a.sessionHealthSummary.dailyHealthTrend).toHaveLength(1)
+  })
+})
+
+describe('computeAnalytics — tool usage', () => {
+  const s: SessionSummary = {
+    ...session('tools', [
+      day({ day: '2026-09-08', estimatedCost: 4 }),
+      day({ day: '2026-09-09', estimatedCost: 6 }),
+    ]),
+    toolUsage: [
+      {
+        day: '2026-09-08',
+        tool: 'Read',
+        source: 'parent',
+        calls: 3,
+        errors: 1,
+        resultChars: 9,
+        costUsd: 1,
+      },
+      {
+        day: '2026-09-09',
+        tool: 'Read',
+        source: 'subagent',
+        calls: 2,
+        errors: 0,
+        resultChars: 1,
+        costUsd: 2,
+      },
+      {
+        day: '2026-09-09',
+        tool: 'mcp__github__get_me',
+        mcpServer: 'github',
+        source: 'parent',
+        calls: 1,
+        errors: 0,
+        resultChars: 1,
+        costUsd: 0.5,
+      },
+    ],
+    subagents: [
+      {
+        agentId: 'a',
+        agentType: 'Explore',
+        messageCount: 1,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        firstTimestamp: '2026-09-09T10:00:00',
+        lastTimestamp: '2026-09-09T10:01:00',
+        estimatedCost: 2,
+        modelBreakdown: [],
+      },
+    ],
+  }
+
+  it('keeps only in-range days and shares cost against the period total', () => {
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-09', to: '2026-09-09' },
+      ANTHROPIC_PRICING
+    )
+    const read = a.toolUsage.tools.find((t) => t.tool === 'Read')!
+    expect(read).toMatchObject({ calls: 2, subagentCalls: 2, errors: 0, costUsd: 2 })
+    expect(read.costShare).toBeCloseTo(2 / a.totalCost)
+    expect(a.toolUsage.totalCalls).toBe(3)
+    expect(a.toolUsage.mcpServers).toEqual([
+      expect.objectContaining({ server: 'github', calls: 1, configured: false }),
+    ])
+    expect(a.toolUsage.agentTypes).toEqual([
+      { agentType: 'Explore', runs: 1, costUsd: 2, durationMs: 0 },
+    ])
+  })
+
+  it('leaves out sub-agents that started outside the range', () => {
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-08', to: '2026-09-08' },
+      ANTHROPIC_PRICING
+    )
+    expect(a.toolUsage.agentTypes).toEqual([])
+    expect(a.toolUsage.totalErrors).toBe(1)
   })
 })

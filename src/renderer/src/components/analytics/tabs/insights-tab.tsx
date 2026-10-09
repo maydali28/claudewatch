@@ -24,6 +24,13 @@ import {
 } from 'recharts'
 import { formatCost, formatTokens } from '@shared/utils'
 import { COST_ESTIMATE_LABEL, COST_ESTIMATE_NOTE_SHORT } from '@shared/constants/copy'
+import { LINT_RULE_MAP } from '@shared/constants/lint-rules'
+import {
+  Tooltip as HoverTip,
+  TooltipContent as HoverTipContent,
+  TooltipProvider as HoverTipProvider,
+  TooltipTrigger as HoverTipTrigger,
+} from '@renderer/components/ui/tooltip'
 import { ChartCard } from '@renderer/components/analytics/chart-card'
 import { ProjectCostChart } from '@renderer/components/analytics/charts/project-cost-chart'
 import { WhatIfCalculator } from '@renderer/components/analytics/charts/whatif-calculator'
@@ -409,47 +416,59 @@ function UnhealthySessionsTable({ entries }: { entries: SessionHealthEntry[] }):
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b text-muted-foreground">
-            <th className="pb-1.5 text-left font-medium">Session</th>
-            <th className="pb-1.5 text-left font-medium">Flags</th>
-            <th className="pb-1.5 text-right font-medium">{COST_ESTIMATE_LABEL}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry) => {
-            const cfg = SEVERITY_CONFIG[entry.worstSeverity]
-            return (
-              <tr key={entry.sessionId} className="border-b last:border-0 hover:bg-muted/30">
-                <td className="py-1.5 pr-3 max-w-[160px]">
-                  <p className="truncate font-medium" title={entry.sessionTitle}>
-                    {entry.sessionTitle}
-                  </p>
-                </td>
-                <td className="py-1.5 pr-3">
-                  <div className="flex flex-wrap gap-1">
-                    {entry.flags.map((flag) => (
-                      <span
-                        key={flag}
-                        title={FLAG_META[flag] ?? flag}
-                        className={`rounded px-1 py-0.5 text-[9px] font-semibold ${cfg.badgeBg}`}
-                      >
-                        {flag}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="py-1.5 text-right font-semibold">
-                  {formatCost(entry.estimatedCost)}
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
+    <HoverTipProvider>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="border-b text-muted-foreground">
+              <th className="pb-1.5 text-left font-medium">Session</th>
+              <th className="pb-1.5 text-left font-medium">Flags</th>
+              <th className="pb-1.5 text-right font-medium">{COST_ESTIMATE_LABEL}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((entry) => {
+              const cfg = SEVERITY_CONFIG[entry.worstSeverity]
+              return (
+                <tr key={entry.sessionId} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="py-1.5 pr-3 max-w-[160px]">
+                    <p className="truncate font-medium" title={entry.sessionTitle}>
+                      {entry.sessionTitle}
+                    </p>
+                  </td>
+                  <td className="py-1.5 pr-3">
+                    <div className="flex flex-wrap gap-1">
+                      {entry.flags.map((flag) => (
+                        <HoverTip key={flag}>
+                          <HoverTipTrigger asChild>
+                            <span
+                              className={`cursor-default rounded px-1 py-0.5 text-[9px] font-semibold ${cfg.badgeBg}`}
+                            >
+                              {flag}
+                            </span>
+                          </HoverTipTrigger>
+                          <HoverTipContent side="top" className="max-w-64 text-[10px]">
+                            <p className="font-semibold">{FLAG_META[flag] ?? flag}</p>
+                            {LINT_RULE_MAP.get(flag) && (
+                              <p className="text-muted-foreground">
+                                {LINT_RULE_MAP.get(flag)!.description}
+                              </p>
+                            )}
+                          </HoverTipContent>
+                        </HoverTip>
+                      ))}
+                    </div>
+                  </td>
+                  <td className="py-1.5 text-right font-semibold">
+                    {formatCost(entry.estimatedCost)}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </HoverTipProvider>
   )
 }
 
@@ -512,7 +531,7 @@ function SessionHealthCard({ summary }: { summary: SessionHealthSummary }): Reac
   return (
     <ChartCard
       title="Session Health"
-      description="Sessions evaluated against SES001–SES006 lint rules"
+      description="Sessions evaluated against health checks SES001–SES006"
     >
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <HealthDonutChart summary={summary} />

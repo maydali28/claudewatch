@@ -8,6 +8,7 @@ import SessionsSidebar from '@renderer/components/sessions/sessions-sidebar'
 import HooksSidebar from '@renderer/components/config/hooks-sidebar'
 import CommandsSidebar from '@renderer/components/config/commands-sidebar'
 import SkillsSidebar from '@renderer/components/config/skills-sidebar'
+import PluginsSidebar from '@renderer/components/plugins/plugins-sidebar'
 import McpsSidebar from '@renderer/components/config/mcps-sidebar'
 import MemorySidebar from '@renderer/components/config/memory-sidebar'
 import LintSidebar from '@renderer/components/lint/lint-sidebar'
@@ -18,6 +19,7 @@ function SidebarContent({ view }: { view: ViewId }): React.JSX.Element | null {
   if (view === 'hooks') return <HooksSidebar />
   if (view === 'commands') return <CommandsSidebar />
   if (view === 'skills') return <SkillsSidebar />
+  if (view === 'plugins') return <PluginsSidebar />
   if (view === 'mcps') return <McpsSidebar />
   if (view === 'memory') return <MemorySidebar />
   if (view === 'lint') return <LintSidebar />
@@ -66,7 +68,7 @@ export default function MiddleSidebar(): React.JSX.Element | null {
   )
 
   // These panels embed their own full-width layouts with an internal sidebar
-  if (activeView === 'settings' || activeView === 'timeline' || activeView === 'plans') return null
+  if (activeView === 'settings' || activeView === 'plans') return null
 
   return (
     <div

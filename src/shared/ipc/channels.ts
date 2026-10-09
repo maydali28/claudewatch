@@ -8,18 +8,30 @@ export const CHANNELS = {
   SESSIONS_LIST_PROJECTS: 'sessions:list-projects',
   SESSIONS_GET_SUMMARY_LIST: 'sessions:get-summary-list',
   SESSIONS_GET_PARSED: 'sessions:get-parsed',
+  SESSIONS_GET_SUBAGENT: 'sessions:get-subagent',
   SESSIONS_SEARCH: 'sessions:search',
   SESSIONS_TAG: 'sessions:tag',
   SESSIONS_EXPORT: 'sessions:export',
 
+  // Secrets
+  SECRETS_LIST: 'secrets:list',
+  SECRETS_DISMISS: 'secrets:dismiss',
+  SECRETS_SCAN_HISTORY: 'secrets:scan-history',
+
+  // System notifications (secret and cost alerts)
+  NOTIFICATIONS_STATUS: 'notifications:status',
+  NOTIFICATIONS_TEST: 'notifications:test',
+  NOTIFICATIONS_OPEN_SETTINGS: 'notifications:open-settings',
+
   // Analytics
   ANALYTICS_GET: 'analytics:get',
+  ANALYTICS_LIST_MODELS: 'analytics:list-models',
 
   // Config
   CONFIG_GET_FULL: 'config:get-full',
   CONFIG_GET_COMMANDS: 'config:get-commands',
   CONFIG_GET_SKILLS: 'config:get-skills',
-  CONFIG_GET_PROJECT_SKILLS: 'config:get-project-skills',
+  CONFIG_GET_PLUGINS: 'config:get-plugins',
   CONFIG_GET_MCPS: 'config:get-mcps',
   CONFIG_GET_MEMORY: 'config:get-memory',
   CONFIG_GET_PROJECT_CLAUDE_MDS: 'config:get-project-claude-mds',
@@ -35,7 +47,6 @@ export const CHANNELS = {
   // Plans
   PLANS_LIST: 'plans:list',
   PLANS_GET: 'plans:get',
-  PLANS_GET_PROJECTS: 'plans:get-projects',
 
   // Updates
   UPDATES_CHECK: 'updates:check',
@@ -61,6 +72,9 @@ export const CHANNELS = {
   APP_RELAUNCH: 'app:relaunch',
   APP_GET_VERSION: 'app:get-version',
   APP_GET_PATHS: 'app:get-paths',
+  APP_INSPECT_CLAUDE_DIR: 'app:inspect-claude-dir',
+  APP_CHOOSE_CLAUDE_DIR: 'app:choose-claude-dir',
+  APP_SET_CLAUDE_DIR: 'app:set-claude-dir',
 
   // ─── Main → Renderer push events (webContents.send / ipcRenderer.on) ───────
 
@@ -101,6 +115,12 @@ export const CHANNELS = {
    * something went sideways instead of staring at a frozen UI.
    */
   PUSH_MAIN_ERROR: 'push:main-error',
+  /** Secrets found that were not in the list before; masked values only. */
+  PUSH_SECRETS_FOUND: 'push:secrets-found',
+  /** A Settings › Alerts threshold was just passed (`CostAlertNotice[]`). */
+  PUSH_COST_ALERT: 'push:cost-alert',
+  /** Whether the OS showed or refused the last system notification (`NotificationStatus`). */
+  PUSH_NOTIFICATION_STATUS: 'push:notification-status',
 } as const
 
 export type Channel = (typeof CHANNELS)[keyof typeof CHANNELS]
@@ -118,4 +138,7 @@ export type PushChannel = (typeof CHANNELS)[
   | 'PUSH_SHOW_ONBOARDING'
   | 'PUSH_PREFERENCES_CHANGED'
   | 'PUSH_PRICING_CHANGED'
-  | 'PUSH_MAIN_ERROR']
+  | 'PUSH_MAIN_ERROR'
+  | 'PUSH_SECRETS_FOUND'
+  | 'PUSH_COST_ALERT'
+  | 'PUSH_NOTIFICATION_STATUS']

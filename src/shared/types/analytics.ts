@@ -1,4 +1,5 @@
-import type { EffortLevel, EffortDistribution } from './session'
+import type { CostAlertThresholds } from './cost-alerts'
+import type { EffortLevel, EffortDistribution, ContextFill } from './session'
 import type { LintCheckId, LintSeverity } from './lint'
 
 // ─── Daily Usage ──────────────────────────────────────────────────────────────
@@ -356,6 +357,7 @@ export interface AnalyticsData {
   parallelToolAnalytics: ParallelToolAnalytics
   sessionHealthSummary: SessionHealthSummary
   sessionRows: SessionPeriodRow[]
+  toolUsage: ToolUsageAnalytics
   /**
    * Activity with no parsable timestamp (`UNDATED_DAY` in `date-ranges.ts`),
    * reported regardless of which preset is selected. `messages`/`responses`
@@ -371,6 +373,52 @@ export interface AnalyticsData {
     responses: number
     includedInTotals: boolean
   }
+}
+
+// ─── Tools and MCPs ───────────────────────────────────────────────────────────
+
+export interface ToolSummary {
+  tool: string
+  mcpServer?: string
+  calls: number
+  /** Of `calls`, the ones made by sub-agents. */
+  subagentCalls: number
+  errors: number
+  resultChars: number
+  costUsd: number
+}
+
+export interface McpServerSummary {
+  /** The server name as tool names spell it. */
+  server: string
+  calls: number
+  errors: number
+  costUsd: number
+  /** Distinct tools of this server that were called. */
+  toolsUsed: number
+  /** Found in the MCP configuration that applies here. */
+  configured: boolean
+}
+
+export interface AgentTypeSummary {
+  agentType: string
+  runs: number
+  costUsd: number
+  durationMs: number
+}
+
+/** Tool calls across the selected range and projects, parent and sub-agents. */
+export interface ToolUsageAnalytics {
+  totalCalls: number
+  totalErrors: number
+  /** `costUsd` of every tool row summed; the rest of the period's cost went to responses that called no tool. */
+  toolCost: number
+  /** Each tool's `costUsd` over the period's `totalCost`, 0 when the period cost nothing. */
+  tools: Array<ToolSummary & { costShare: number }>
+  /** Called servers only; the renderer adds the configured ones nobody called. */
+  mcpServers: McpServerSummary[]
+  /** Sub-agent runs by type, each attributed to the day it started. */
+  agentTypes: AgentTypeSummary[]
 }
 
 // ─── Session Health ───────────────────────────────────────────────────────────
@@ -424,6 +472,10 @@ export interface TraySnapshotSession {
   slug?: string
   latestModel?: string
   primaryModel?: string
+  /** See `SessionSummary.contextFill`; drives the row's bar. */
+  contextFill?: ContextFill
+  /** Estimated cost; the row shows it when it passes the session limit. */
+  estimatedCost: number
   messageCount: number
   totalInputTokens: number
   totalOutputTokens: number
@@ -445,4 +497,6 @@ export interface TraySnapshot {
   weekly: Array<{ date: string; tokens: number; cost: number }>
   activeSessions: TraySnapshotSession[]
   recentSessions: TraySnapshotSession[]
+  /** The cost alerts in force (0 = off), so the tray can say a limit is passed. */
+  costLimits: CostAlertThresholds
 }

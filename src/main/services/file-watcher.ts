@@ -2,6 +2,7 @@ import * as fs from 'fs'
 import * as path from 'path'
 import type { FSWatcher } from 'chokidar'
 import type { BrowserWindow } from 'electron'
+import type { SessionSummary } from '@shared/types/session'
 import chokidar from 'chokidar'
 import { CHANNELS } from '@shared/ipc/channels'
 import { sessionCache } from '@shared/utils'
@@ -17,6 +18,7 @@ import { invalidateCachedSummary } from './metadata-cache'
 import { createLogger } from '@main/lib/logger'
 import { resolveSessionFileLocation, type SessionFileLocation } from './session-file-location'
 import { ReparseScheduler } from './reparse-scheduler'
+import { foldBackgroundContinuations } from './background-continuations'
 import {
   FILE_WATCHER_DEBOUNCE_MS,
   FILE_WATCHER_WRITE_FINISH_STABILITY_MS,
@@ -37,6 +39,15 @@ export interface FileWatcherDeps {
    * off as that need comes and goes.
    */
   getMainWindow: () => BrowserWindow | null
+  /**
+   * Every transcript a job covered (the parent and whichever sub-agents
+   * changed), after the session was re-parsed. The secret scanner reads what
+   * was appended to each; it cannot be coalesced onto the parent the way the
+   * parse is, since it reads each file from its own offset.
+   */
+  onTranscriptsChanged?: (files: ReadonlySet<string>) => void
+  /** A session was re-parsed; its summary is already in the scan cache. Cost alerts check it. */
+  onSessionUpdated?: (summary: SessionSummary) => void
 }
 
 export class FileWatcher {
@@ -58,7 +69,7 @@ export class FileWatcher {
     this.projectsDir = path.join(claudeDir, 'projects')
     this.deps = deps
     this.scheduler = new ReparseScheduler(
-      (parentKey) => this.processFileChange(parentKey),
+      (parentKey, contributingFiles) => this.processFileChange(parentKey, contributingFiles),
       FILE_WATCHER_DEBOUNCE_MS,
       (parentKey, error) => log.error(`Failed to re-parse ${path.basename(parentKey)}:`, error)
     )
@@ -156,7 +167,10 @@ export class FileWatcher {
     return path.join(projectsDir, location.projectId, `${location.sessionId}.jsonl`)
   }
 
-  private async processFileChange(filePath: string): Promise<void> {
+  private async processFileChange(
+    filePath: string,
+    contributingFiles: ReadonlySet<string> = new Set([filePath])
+  ): Promise<void> {
     const isNewFile = this.newFiles.delete(filePath)
     if (filePath.endsWith('settings.json')) {
       this.deps.broadcast(CHANNELS.PUSH_CONFIG_CHANGED, { filePath })
@@ -171,6 +185,7 @@ export class FileWatcher {
 
     // A subagent write updates the parent session; it never creates one.
     await this.processSessionFileChange(filePath, location, isNewFile && !location.isSubagent)
+    this.deps.onTranscriptsChanged?.(contributingFiles)
   }
 
   private async processSessionFileChange(
@@ -214,16 +229,79 @@ export class FileWatcher {
 
       sessionCache.invalidate(projectId, sessionId)
 
-      patchCachedSessionSummary(sessionSummary)
+      const folded = await this.foldIntoSiblings(sessionSummary, parentPath, projectId)
+      if (!folded) return
 
-      const channel = isNewFile ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
-      this.deps.broadcast(channel, sessionSummary)
+      patchCachedSessionSummary(folded.summary)
 
-      // Live secret scanning was removed for 1.5.x; it returns with a visible
-      // alert and a toggle in roadmap #4.
+      const channel =
+        isNewFile || folded.unfolded ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
+      this.deps.broadcast(channel, folded.summary)
+      this.deps.onSessionUpdated?.(folded.summary)
     } catch (error) {
       log.error('Failed to re-parse session:', sessionId, error)
     }
+  }
+
+  /**
+   * Applies `foldBackgroundContinuations` to one re-parsed session against
+   * the project's cached sessions, the same fold a full scan applies.
+   *
+   * Returns null when the session stays folded into a background copy (the
+   * renderer already left it out). Otherwise returns the summary to publish,
+   * and `unfolded` when it was hidden until now — it went on after the move —
+   * so the renderer adds it back. Siblings the fold changes are published
+   * here: an original hidden for the first time is removed, and a copy loses
+   * or gains the ids it names.
+   */
+  private async foldIntoSiblings(
+    summary: SessionSummary,
+    parentPath: string,
+    projectId: string
+  ): Promise<{ summary: SessionSummary; unfolded: boolean } | null> {
+    const cached = peekCachedSessionsForProject(projectId)
+    const previous = cached.find((s) => s.id === summary.id)
+    const siblings = cached.filter((s) => s.id !== summary.id)
+    const holder = siblings.find((s) => s.continuesSessionIds?.includes(summary.id))
+
+    const { foldedIds } = await foldBackgroundContinuations(
+      [summary, ...siblings],
+      path.dirname(parentPath)
+    )
+
+    if (foldedIds.has(summary.id)) {
+      if (!holder) {
+        // Folded for the first time: the copy that holds it is the session
+        // whose write got us here, or arrives with its own push.
+        removeCachedSession(projectId, summary.id)
+        this.deps.broadcast(CHANNELS.PUSH_SESSION_DELETED, { sessionId: summary.id, projectId })
+      }
+      return null
+    }
+
+    // Hidden originals are not among the cached siblings, so the fold above
+    // cannot find them again: keep what this copy already named.
+    const names = new Set(previous?.continuesSessionIds ?? [])
+    for (const id of foldedIds) {
+      names.add(id)
+      removeCachedSession(projectId, id)
+      this.deps.broadcast(CHANNELS.PUSH_SESSION_DELETED, { sessionId: id, projectId })
+    }
+    const published: SessionSummary = names.size
+      ? { ...summary, continuesSessionIds: [...names] }
+      : summary
+
+    if (holder) {
+      // It went on after the move: it is a session of its own again.
+      const ids = holder.continuesSessionIds!.filter((id) => id !== summary.id)
+      const updated: SessionSummary = {
+        ...holder,
+        continuesSessionIds: ids.length ? ids : undefined,
+      }
+      patchCachedSessionSummary(updated)
+      this.deps.broadcast(CHANNELS.PUSH_SESSION_UPDATED, updated)
+    }
+    return { summary: published, unfolded: holder !== undefined }
   }
 
   /**

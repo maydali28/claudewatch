@@ -116,6 +116,8 @@ interface SessionsState {
   closeActiveSession(): void
   /** Rates changed: every summary and cached parse holds a cost at the old rates, so reload them. */
   handlePricingChanged(): Promise<void>
+  /** The redaction setting changed: refetch the open session so it is shown with it. */
+  handleRedactionChanged(): void
 }
 
 /**
@@ -479,5 +481,15 @@ export const useSessionsStore = create<SessionsState>((set, get) => ({
       void get().loadParsedSession(activeSessionId, activeProjectId)
     }
     await get().loadProjects()
+  },
+
+  handleRedactionChanged() {
+    // Main redacts on the way out, so every parse this window holds was
+    // redacted under the old setting.
+    rendererSessionCache.clear()
+    const { activeSessionId, activeProjectId, parsedSession } = get()
+    if (activeSessionId && activeProjectId && parsedSession?.id === activeSessionId) {
+      void get().loadParsedSession(activeSessionId, activeProjectId)
+    }
   },
 }))

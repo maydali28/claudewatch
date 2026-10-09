@@ -32,6 +32,9 @@ vi.mock('@main/lib/claude-paths', async () => {
     getUserSettingsPath: () => p.join(dirs.claudeDir, 'settings.json'),
     getMcpDebugLatestPath: () => p.join(dirs.claudeDir, 'debug', 'latest'),
     getUserCommandsDirPath: () => p.join(dirs.claudeDir, 'commands'),
+    getPluginsDirPath: () => p.join(dirs.claudeDir, 'plugins'),
+    getUserSkillsDirPath: () => p.join(dirs.claudeDir, 'skills'),
+    getManagedSettingsPath: () => p.join(dirs.tmp, 'managed', 'managed-settings.json'),
   }
 })
 
@@ -44,6 +47,9 @@ import {
   readMcps,
   readMemoryFiles,
   readCommands,
+  readAllSkills,
+  readPlugins,
+  readAllAutoMemory,
 } from './config-service'
 
 // The fixture keeps `.claude` spelled `dot-claude` on disk: a common global
@@ -331,7 +337,265 @@ describe('readExtendedConfig', () => {
     expect(allCommands).not.toContain('legacy.sh')
 
     expect((await readRawSettings(project)).hooks?.Notification).toBeUndefined()
-    expect((await readMcps(project)).map((m) => m.name)).not.toContain('legacy')
+    expect((await readMcps([project])).map((m) => m.name)).not.toContain('legacy')
+  })
+
+  it('gives every settings rule its source', async () => {
+    const cfg = await readExtendedConfig([demoApp()])
+    const rules = cfg.hooks.flatMap((g) => g.rules)
+    expect(rules.find((r) => r.scope === 'user')?.source).toEqual({
+      kind: 'user',
+      id: 'user',
+      label: 'Global',
+    })
+    expect(rules.find((r) => r.scope === 'project')?.source).toMatchObject({
+      kind: 'project',
+      id: 'project:-tmp-demo-app',
+      projectName: 'demo-app',
+      root: projectRoot,
+    })
+  })
+})
+
+describe('readExtendedConfig — plugin and managed hooks', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+  const managedPath = (): string => path.join(dirs.tmp, 'managed', 'managed-settings.json')
+
+  function installPluginWithHook(name: string, command: string): string {
+    const root = path.join(pluginsDir(), 'cache', 'official', name, '1.0.0')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name })
+    writeJson(path.join(root, 'hooks', 'hooks.json'), {
+      hooks: { SessionStart: [{ matcher: 'startup', hooks: [{ type: 'command', command }] }] },
+    })
+    return root
+  }
+
+  beforeEach(() => {
+    const enabled = installPluginWithHook('superpowers', '${CLAUDE_PLUGIN_ROOT}/hooks/run.sh')
+    const disabled = installPluginWithHook('sleepy', 'sleepy.sh')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: {
+        'superpowers@official': [{ installPath: enabled, version: '1.0.0' }],
+        'sleepy@official': [{ installPath: disabled, version: '1.0.0' }],
+      },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'superpowers@official': true },
+    })
+  })
+
+  const sessionStartRules = async () =>
+    (await readExtendedConfig([demoApp()])).hooks.find((g) => g.event === 'SessionStart')?.rules ??
+    []
+
+  it('lists each plugin’s hooks with the plugin as source and the hooks file as path', async () => {
+    const rule = (await sessionStartRules()).find((r) => r.source.label === 'superpowers')!
+    expect(rule).toMatchObject({
+      id: 'plugin:superpowers@official:SessionStart-0',
+      scope: 'plugin',
+      matcher: 'startup',
+      source: { kind: 'plugin', plugin: { enabled: true, origin: 'marketplace' } },
+    })
+    expect(rule.sourcePath.endsWith(path.join('hooks', 'hooks.json'))).toBe(true)
+    expect(rule.inactiveReason).toBeUndefined()
+  })
+
+  it('marks the hooks of a disabled plugin as not running', async () => {
+    const rule = (await sessionStartRules()).find((r) => r.source.label === 'sleepy')!
+    expect(rule.inactiveReason).toBe('plugin-disabled')
+  })
+
+  it('lists managed hooks, and marks every other hook inactive when managed settings allow only theirs', async () => {
+    writeJson(managedPath(), {
+      allowManagedHooksOnly: true,
+      hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'audit.sh' }] }] },
+    })
+
+    const cfg = await readExtendedConfig([demoApp()])
+    const rules = cfg.hooks.flatMap((g) => g.rules)
+    const managed = rules.filter((r) => r.scope === 'managed')
+
+    expect(managed).toHaveLength(1)
+    expect(managed[0]).toMatchObject({
+      id: 'managed:SessionStart-0',
+      sourcePath: managedPath(),
+      source: { kind: 'managed', id: 'managed', label: 'Managed' },
+    })
+    expect(managed[0].inactiveReason).toBeUndefined()
+    const others = rules.filter((r) => r.scope !== 'managed')
+    expect(others.length).toBeGreaterThan(0)
+    expect(others.every((r) => r.inactiveReason !== undefined)).toBe(true)
+    // A disabled plugin's own reason wins: it would not run even without the managed rule.
+    expect(others.find((r) => r.source.label === 'sleepy')?.inactiveReason).toBe('plugin-disabled')
+    expect(others.find((r) => r.scope === 'user')?.inactiveReason).toBe('managed-only')
+  })
+
+  it('lets managed enabledPlugins switch a plugin off', async () => {
+    writeJson(managedPath(), { enabledPlugins: { 'superpowers@official': false } })
+    const rule = (await sessionStartRules()).find((r) => r.source.label === 'superpowers')!
+    expect(rule.inactiveReason).toBe('plugin-disabled')
+  })
+})
+
+describe('readAllSkills', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+
+  function writeSkill(dir: string, name: string, description: string): void {
+    fs.mkdirSync(path.join(dir, name), { recursive: true })
+    fs.writeFileSync(
+      path.join(dir, name, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: ${description}\n---\nBody of ${name}.`
+    )
+  }
+
+  beforeEach(() => {
+    writeSkill(path.join(dirs.claudeDir, 'skills'), 'humanizer', 'Remove AI tells')
+
+    const root = path.join(pluginsDir(), 'cache', 'official', 'superpowers', '6.4.1')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name: 'superpowers' })
+    writeSkill(path.join(root, 'skills'), 'brainstorming', 'Explore intent first')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: { 'superpowers@official': [{ installPath: root, version: '6.4.1' }] },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'superpowers@official': true },
+    })
+    copyFixture(
+      'project/dot-claude/commands/ship.md',
+      path.join(projectRoot, '.claude', 'commands', 'ship.md')
+    )
+  })
+
+  const projectWith = (sessions: Array<{ lastTimestamp: string; skillListing?: unknown }>) => ({
+    id: '-tmp-demo-app',
+    name: 'demo-app',
+    path: projectRoot,
+    pathResolved: true,
+    localSkills: [
+      {
+        id: 'repo-skill',
+        name: 'repo-skill',
+        displayName: 'repo-skill',
+        metadata: {},
+        body: 'Project skill.',
+        sizeBytes: 14,
+      },
+    ],
+    sessions: sessions as Array<{
+      lastTimestamp: string
+      skillListing?: Array<{ name: string; description?: string }>
+    }>,
+  })
+
+  it('lists user, project and plugin skills from disk with their sources', async () => {
+    const skills = await readAllSkills([projectWith([])])
+    const byName = new Map(skills.map((s) => [s.name, s]))
+
+    expect(byName.get('humanizer')).toMatchObject({
+      source: { kind: 'user' },
+      description: 'Remove AI tells',
+      filePath: path.join(dirs.claudeDir, 'skills', 'humanizer', 'SKILL.md'),
+    })
+    expect(byName.get('repo-skill')?.source).toMatchObject({ kind: 'project', label: 'demo-app' })
+    expect(byName.get('superpowers:brainstorming')).toMatchObject({
+      source: { kind: 'plugin', id: 'plugin:superpowers@official' },
+      body: 'Body of brainstorming.',
+    })
+    expect(new Set(skills.map((s) => s.id)).size).toBe(skills.length)
+  })
+
+  it('adds the skills sessions listed that have no file, classified by name', async () => {
+    const skills = await readAllSkills([
+      projectWith([
+        {
+          lastTimestamp: '2026-09-01T10:00:00.000Z',
+          skillListing: [
+            { name: 'humanizer', description: 'dup' },
+            { name: 'superpowers:brainstorming' },
+            { name: 'code-review', description: 'Review the diff' },
+            { name: 'anthropic-skills:docx', description: 'Word files' },
+            { name: 'gone-plugin:thing' },
+            { name: 'ship' },
+          ],
+        },
+        {
+          lastTimestamp: '2026-09-20T10:00:00.000Z',
+          skillListing: [{ name: 'code-review' }],
+        },
+      ]),
+    ])
+    const byName = new Map(skills.map((s) => [s.name, s]))
+
+    // On disk already: not listed twice, but usage is attached.
+    expect(skills.filter((s) => s.name === 'humanizer')).toHaveLength(1)
+    expect(byName.get('humanizer')).toMatchObject({
+      sessionCount: 1,
+      lastSeen: '2026-09-01T10:00:00.000Z',
+    })
+    expect(skills.filter((s) => s.name === 'superpowers:brainstorming')).toHaveLength(1)
+
+    expect(byName.get('code-review')).toMatchObject({
+      source: { kind: 'builtin', id: 'builtin', label: 'Built-in' },
+      description: 'Review the diff',
+      sessionOnly: true,
+      sessionCount: 2,
+      lastSeen: '2026-09-20T10:00:00.000Z',
+      body: '',
+    })
+    expect(byName.get('anthropic-skills:docx')?.source).toMatchObject({
+      kind: 'plugin',
+      label: 'anthropic-skills',
+      plugin: { origin: 'claude.ai', enabled: true },
+    })
+    expect(byName.get('gone-plugin:thing')?.source).toMatchObject({
+      kind: 'plugin',
+      label: 'gone-plugin',
+      plugin: { installed: false },
+    })
+    expect(byName.get('ship')).toMatchObject({
+      exposedAs: 'command',
+      source: { kind: 'project', label: 'demo-app' },
+      sessionOnly: true,
+    })
+  })
+})
+
+describe('readPlugins', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+
+  it('lists every installed plugin with what its plugin.json says about it', async () => {
+    const root = path.join(pluginsDir(), 'cache', 'official', 'superpowers', '6.4.1')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), {
+      name: 'superpowers',
+      description: 'Core skills library',
+      author: { name: 'Jesse', email: 'x@example.com' },
+      homepage: 'https://example.com/superpowers',
+    })
+    const bare = path.join(pluginsDir(), 'cache', 'official', 'bare', '1')
+    writeJson(path.join(bare, '.claude-plugin', 'plugin.json'), { name: 'bare', author: 'Solo' })
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: {
+        'superpowers@official': [{ installPath: root, version: '6.4.1' }],
+        'bare@official': [{ installPath: bare }],
+      },
+    })
+
+    const plugins = await readPlugins()
+
+    expect(plugins.map((p) => p.source.label)).toEqual(['bare', 'superpowers'])
+    expect(plugins[1]).toMatchObject({
+      source: { kind: 'plugin', id: 'plugin:superpowers@official' },
+      description: 'Core skills library',
+      author: 'Jesse',
+      homepage: 'https://example.com/superpowers',
+    })
+    expect(plugins[0]).toMatchObject({ author: 'Solo' })
+    expect(plugins[0].description).toBeUndefined()
   })
 })
 
@@ -353,7 +617,7 @@ describe('readMcps', () => {
       mcpServers: { fromLocal: { command: 'd' } },
     })
 
-    const mcps = await readMcps(demoApp())
+    const mcps = await readMcps([demoApp()])
     const byName = Object.fromEntries(mcps.map((m) => [m.name, m]))
     expect(mcps.map((m) => m.name)).toEqual([
       'fromClaudeJson',
@@ -373,6 +637,102 @@ describe('readMcps', () => {
 
     const withoutProject = await readMcps()
     expect(withoutProject.map((m) => m.name)).toEqual(['fromClaudeJson', 'shared', 'fromUser'])
+  })
+
+  const claudeJsonPath = (): string => path.join(dirs.tmp, 'home', '.claude.json')
+
+  it("reads a project's .mcp.json and its ~/.claude.json entry, honouring disabled servers", async () => {
+    writeJson(path.join(projectRoot, '.mcp.json'), {
+      mcpServers: { github: { type: 'http', url: 'https://gh' }, supabase: { command: 's' } },
+    })
+    writeJson(claudeJsonPath(), {
+      projects: {
+        [projectRoot]: {
+          mcpServers: { scratch: { command: 'x' } },
+          disabledMcpjsonServers: ['supabase'],
+        },
+      },
+    })
+
+    const byName = Object.fromEntries((await readMcps([demoApp()])).map((m) => [m.name, m]))
+    expect(byName.github).toMatchObject({
+      level: 'project',
+      type: 'http',
+      projectName: 'demo-app',
+      sourcePath: path.join(projectRoot, '.mcp.json'),
+    })
+    expect(byName.github.disabled).toBeUndefined()
+    expect(byName.supabase.disabled).toBe(true)
+    expect(byName.scratch).toMatchObject({ level: 'local', sourcePath: claudeJsonPath() })
+  })
+
+  it('lists the same project server once per project, and a global one hides it', async () => {
+    const other = path.join(dirs.tmp, 'workspace', 'other')
+    for (const root of [projectRoot, other]) {
+      writeJson(path.join(root, '.mcp.json'), {
+        mcpServers: { github: { url: 'https://gh' }, time: { command: 'project-time' } },
+      })
+    }
+    writeJson(claudeJsonPath(), { mcpServers: { time: { command: 'global-time' } } })
+
+    const mcps = await readMcps([demoApp(), { id: '-tmp-other', name: 'other', path: other }])
+    expect(mcps.filter((m) => m.name === 'github').map((m) => m.projectName)).toEqual([
+      'demo-app',
+      'other',
+    ])
+    expect(new Set(mcps.map((m) => m.id)).size).toBe(mcps.length)
+    expect(mcps.filter((m) => m.name === 'time')).toHaveLength(1)
+  })
+
+  it('names plugin servers plugin:<plugin>:<server>, from .mcp.json or plugin.json', async () => {
+    const pluginsDir = path.join(dirs.claudeDir, 'plugins')
+    const install = (name: string, manifest: Record<string, unknown> = {}): string => {
+      const root = path.join(pluginsDir, 'cache', 'official', name, '1.0.0')
+      writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name, ...manifest })
+      return root
+    }
+    const fileRoot = install('linear')
+    writeJson(path.join(fileRoot, '.mcp.json'), { mcpServers: { api: { url: 'https://l' } } })
+    const inlineRoot = install('notes', { mcpServers: { store: { command: 'n' } } })
+    writeJson(path.join(pluginsDir, 'installed_plugins.json'), {
+      version: 2,
+      plugins: {
+        'linear@official': [{ installPath: fileRoot, version: '1.0.0' }],
+        'notes@official': [{ installPath: inlineRoot, version: '1.0.0' }],
+      },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'linear@official': true, 'notes@official': false },
+    })
+
+    const byName = Object.fromEntries((await readMcps()).map((m) => [m.name, m]))
+    expect(byName['plugin:linear:api']).toMatchObject({ level: 'plugin', pluginName: 'linear' })
+    expect(byName['plugin:linear:api'].disabled).toBeUndefined()
+    expect(byName['plugin:notes:store']).toMatchObject({ level: 'plugin', disabled: true })
+  })
+
+  it('lists claude.ai connectors and the built-in Chrome and VS Code servers', async () => {
+    writeJson(claudeJsonPath(), {
+      claudeAiMcpEverConnected: ['claude.ai Sentry', 'claude.ai Claude Docs'],
+      claudeInChromeDefaultEnabled: true,
+    })
+    writeJson(path.join(dirs.claudeDir, 'ide', '123.lock'), { ideName: 'Visual Studio Code' })
+
+    const mcps = await readMcps()
+    expect(mcps.filter((m) => m.level === 'connector').map((m) => m.name)).toEqual([
+      'claude.ai Sentry',
+      'claude.ai Claude Docs',
+    ])
+    expect(mcps.filter((m) => m.level === 'builtin').map((m) => m.name)).toEqual([
+      'claude-in-chrome',
+      'claude-vscode',
+    ])
+  })
+
+  it('lists no built-ins when Chrome and the IDE extension were never set up', async () => {
+    writeJson(path.join(dirs.claudeDir, 'ide', '1.lock'), { ideName: 'IntelliJ IDEA' })
+    expect((await readMcps()).filter((m) => m.level === 'builtin')).toEqual([])
   })
 })
 
@@ -421,7 +781,7 @@ describe('readCommands', () => {
     expect(cmds.every((c) => c.projectId === 'p1')).toBe(true)
     const ship = cmds.find((c) => c.name === 'ship')!
     expect(ship.filePath).toBe(path.join(projectRoot, '.claude', 'commands', 'ship.md'))
-    expect(ship.id).toBe(`project:${ship.filePath}`)
+    expect(ship.id).toBe(`project:p1:${ship.filePath}`)
     expect(ship.description).toBe('Run the release checklist')
   })
 
@@ -454,6 +814,120 @@ describe('readCommands', () => {
 
     const cmds = await readCommands([])
     expect(cmds.map((c) => c.name)).toEqual(['keep'])
+  })
+
+  it('reads a multi-line frontmatter description (| and >) instead of showing the marker', async () => {
+    const cmdsDir = path.join(dirs.claudeDir, 'commands')
+    fs.mkdirSync(cmdsDir, { recursive: true })
+    fs.writeFileSync(
+      path.join(cmdsDir, 'literal.md'),
+      '---\ndescription: |\n  First line.\n  Second line.\nname: lit\n---\nBody.'
+    )
+    fs.writeFileSync(
+      path.join(cmdsDir, 'folded.md'),
+      '---\ndescription: >\n  Folded\n  together.\n---\nBody.'
+    )
+
+    const cmds = await readCommands([])
+    expect(cmds.find((c) => c.name === 'lit')?.description).toBe('First line.\nSecond line.')
+    expect(cmds.find((c) => c.name === 'folded')?.description).toBe('Folded together.')
+  })
+
+  it('gives user and project commands their source', async () => {
+    copyFixture(
+      'project/dot-claude/commands/ship.md',
+      path.join(projectRoot, '.claude', 'commands', 'ship.md')
+    )
+    const cmds = await readCommands([demoApp()])
+    expect(cmds.find((c) => c.name === 'ship')?.source).toMatchObject({
+      kind: 'project',
+      id: 'project:-tmp-demo-app',
+      label: 'demo-app',
+    })
+  })
+})
+
+describe('readCommands — plugin commands', () => {
+  const pluginsDir = (): string => path.join(dirs.claudeDir, 'plugins')
+
+  function installPlugin(name: string, manifest: Record<string, unknown> = {}): string {
+    const root = path.join(pluginsDir(), 'cache', 'official', name, '2.0.0')
+    writeJson(path.join(root, '.claude-plugin', 'plugin.json'), { name, ...manifest })
+    return root
+  }
+
+  function writeCommand(file: string, content: string): void {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, content)
+  }
+
+  it('names plugin commands <plugin>:<name>, namespaced like Claude Code shows them', async () => {
+    const root = installPlugin('seo')
+    writeCommand(
+      path.join(root, 'commands', 'seo-check.md'),
+      [
+        '---',
+        'description: Quick SEO check',
+        'arguments:',
+        '  - name: url',
+        '    description: Page to check',
+        '    required: true',
+        '  - name: depth',
+        '---',
+        'Check the page.',
+      ].join('\n')
+    )
+    writeCommand(path.join(root, 'commands', 'audit', 'full.md'), 'Full audit.')
+    // List items at column 0, as real plugin commands write them.
+    writeCommand(
+      path.join(root, 'commands', 'flat.md'),
+      '---\ndescription: Flat list\narguments:\n- name: file\n  required: false\n---\nBody.'
+    )
+    writeCommand(path.join(root, 'commands', 'renamed.md'), '---\nname: tidy\n---\nTidy.')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: { 'seo@official': [{ installPath: root, version: '2.0.0' }] },
+    })
+    writeJson(userSettingsPath(), {
+      ...readJson(userSettingsPath()),
+      enabledPlugins: { 'seo@official': true },
+    })
+
+    const cmds = (await readCommands([])).filter((c) => c.scope === 'plugin')
+
+    expect(cmds.map((c) => c.name).sort()).toEqual([
+      'seo:audit:full',
+      'seo:flat',
+      'seo:seo-check',
+      'seo:tidy',
+    ])
+    expect(cmds.find((c) => c.name === 'seo:flat')).toMatchObject({
+      description: 'Flat list',
+      arguments: [{ name: 'file', required: false }],
+    })
+    const check = cmds.find((c) => c.name === 'seo:seo-check')!
+    expect(check).toMatchObject({
+      description: 'Quick SEO check',
+      source: { kind: 'plugin', id: 'plugin:seo@official', plugin: { enabled: true } },
+      arguments: [{ name: 'url', description: 'Page to check', required: true }, { name: 'depth' }],
+    })
+    expect(check.id).toBe(`plugin:seo@official:${check.filePath}`)
+    expect(check.inactive).toBeUndefined()
+  })
+
+  it('also reads the command paths plugin.json declares, and marks a disabled plugin’s commands', async () => {
+    const root = installPlugin('extra', { commands: ['./more', './one.md'] })
+    writeCommand(path.join(root, 'more', 'a.md'), 'A.')
+    writeCommand(path.join(root, 'one.md'), 'One.')
+    writeJson(path.join(pluginsDir(), 'installed_plugins.json'), {
+      version: 2,
+      plugins: { 'extra@official': [{ installPath: root }] },
+    })
+
+    const cmds = (await readCommands([])).filter((c) => c.scope === 'plugin')
+
+    expect(cmds.map((c) => c.name).sort()).toEqual(['extra:a', 'extra:one'])
+    expect(cmds.every((c) => c.inactive === true)).toBe(true)
   })
 })
 
@@ -554,6 +1028,62 @@ describe('a project whose root is a symlink to the home directory', () => {
 
     const cmds = await readCommands([linkedProject()])
     expect(cmds.map((c) => c.scope)).toEqual(['user'])
+  })
+})
+
+describe('readAllAutoMemory', () => {
+  function writeMemory(dirId: string, name: string, content: string): string {
+    const file = path.join(dirs.claudeDir, 'projects', dirId, 'memory', name)
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.writeFileSync(file, content)
+    return file
+  }
+
+  it('reads the memory folders of the scanned projects, naming each file’s project', async () => {
+    const appIndex = writeMemory('-tmp-demo-app', 'MEMORY.md', '- [note](note.md)')
+    writeMemory('-tmp-demo-app', 'note.md', 'remember this')
+    // A worktree folder of the same project, merged into it by the scan.
+    writeMemory('-tmp-demo-app--claude-worktrees-feat', 'MEMORY.md', '- [wt](wt.md)')
+    writeMemory('-tmp-zeta', 'MEMORY.md', 'zeta')
+    // A folder the scan does not know — its transcripts were deleted, so the
+    // Sessions tab does not list the project either: left out.
+    writeMemory('-Users-me-Workspace-other-app', 'MEMORY.md', 'other')
+    // Not memory: no folder, or not markdown.
+    fs.mkdirSync(path.join(dirs.claudeDir, 'projects', '-tmp-no-memory'), { recursive: true })
+    writeMemory('-tmp-demo-app', 'notes.txt', 'ignored')
+
+    const files = await readAllAutoMemory([
+      { id: '-tmp-zeta', name: 'zeta', sessions: [{ projectId: '-tmp-zeta' }] },
+      {
+        id: '-tmp-demo-app',
+        name: 'demo-app',
+        sessions: [
+          { projectId: '-tmp-demo-app' },
+          { projectId: '-tmp-demo-app--claude-worktrees-feat' },
+        ],
+      },
+    ])
+
+    // Sorted by project, then folder, with each folder's MEMORY.md index first.
+    expect(files.map((f) => [f.projectName, f.label])).toEqual([
+      ['demo-app', 'MEMORY'],
+      ['demo-app', 'note'],
+      ['demo-app', 'MEMORY'],
+      ['zeta', 'MEMORY'],
+    ])
+    expect(files.find((f) => f.path === appIndex)).toMatchObject({
+      id: 'memory:-tmp-demo-app:MEMORY.md',
+      sublabel: 'auto-memory',
+      path: appIndex,
+      content: '- [note](note.md)',
+      projectId: '-tmp-demo-app',
+    })
+    expect(Number.isNaN(Date.parse(files[0].modifiedAt ?? ''))).toBe(false)
+    expect(new Set(files.map((f) => f.id)).size).toBe(files.length)
+  })
+
+  it('returns nothing when there is no projects folder', async () => {
+    expect(await readAllAutoMemory([])).toEqual([])
   })
 })
 

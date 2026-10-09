@@ -3,19 +3,22 @@ import { ScrollArea } from '@renderer/components/ui/scroll-area'
 import SettingsSidebar, { type SettingsSection } from './settings-sidebar'
 import AppearanceSettings from './appearance-settings'
 import PricingSettings from './pricing-settings'
+import ModelsSettings from './models-settings'
+import ClaudeFolderSettings from './claude-folder-settings'
 import SecuritySettings from './security-settings'
 import AlertsSettings from './alerts-settings'
 import PrivacySettings from './privacy-settings'
 import AboutPanel from './about-panel'
 import { useUIStore } from '@renderer/store/ui.store'
-import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 import { cn } from '@renderer/lib/cn'
 
 const SECTION_TITLES: Record<SettingsSection, string> = {
   appearance: 'Appearance',
+  'claude-folder': 'Claude folder',
   pricing: 'Pricing',
+  models: 'Models',
   security: 'Security',
-  alerts: 'Alerts',
+  alerts: 'Cost alerts',
   privacy: 'Privacy',
   about: 'About',
 }
@@ -24,8 +27,12 @@ function SectionContent({ section }: { section: SettingsSection }) {
   switch (section) {
     case 'appearance':
       return <AppearanceSettings />
+    case 'claude-folder':
+      return <ClaudeFolderSettings />
     case 'pricing':
       return <PricingSettings />
+    case 'models':
+      return <ModelsSettings />
     case 'security':
       return <SecuritySettings />
     case 'alerts':
@@ -38,13 +45,7 @@ function SectionContent({ section }: { section: SettingsSection }) {
 }
 
 export default function SettingsPanel(): React.JSX.Element {
-  const lintEnabled = useFeatureFlags((s) => s.lint)
-  const costAlertsEnabled = useFeatureFlags((s) => s.costAlerts)
   const [section, setSection] = useState<SettingsSection>('appearance')
-  const activeSection =
-    (section === 'security' && !lintEnabled) || (section === 'alerts' && !costAlertsEnabled)
-      ? 'appearance'
-      : section
   const sidebarWidth = useUIStore((s) => s.sidebarWidth)
   const setSidebarWidth = useUIStore((s) => s.setSidebarWidth)
   const [isResizing, setIsResizing] = useState(false)
@@ -85,7 +86,7 @@ export default function SettingsPanel(): React.JSX.Element {
         className="relative shrink-0 border-r bg-muted/20 overflow-hidden flex flex-col"
         style={{ width: sidebarWidth }}
       >
-        <SettingsSidebar active={activeSection} onChange={setSection} />
+        <SettingsSidebar active={section} onChange={setSection} />
         <div
           onMouseDown={onMouseDown}
           className={cn(
@@ -100,9 +101,9 @@ export default function SettingsPanel(): React.JSX.Element {
       {/* Content */}
       <ScrollArea className="flex-1">
         <div className="max-w-2xl mx-auto p-6">
-          <h2 className="text-xl font-semibold mb-1">{SECTION_TITLES[activeSection]}</h2>
+          <h2 className="text-xl font-semibold mb-1">{SECTION_TITLES[section]}</h2>
           <div className="h-px bg-border mb-6" />
-          <SectionContent section={activeSection} />
+          <SectionContent section={section} />
         </div>
       </ScrollArea>
     </div>
