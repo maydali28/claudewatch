@@ -28,6 +28,7 @@ import {
   isSyntheticAssistant,
   isToolResultCarrierUser,
   parseTokenUsage,
+  promoteQueuedPrompt,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
 import {
@@ -156,8 +157,11 @@ export async function parseSessionFull(
     if (!trimmed) continue
 
     let raw: RawRecord
+    let queued: boolean
     try {
-      raw = JSON.parse(trimmed) as RawRecord
+      const parsed = JSON.parse(trimmed) as RawRecord
+      raw = promoteQueuedPrompt(parsed)
+      queued = raw !== parsed
     } catch {
       malformedLines++
       continue
@@ -301,6 +305,7 @@ export async function parseSessionFull(
       responseId,
       userKind,
       originAgentId,
+      queued: queued || undefined,
     }
 
     const shouldExcludeFromRecords =

@@ -80,15 +80,25 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(16, tz)
+    writeCacheFile(17, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 16, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 15, or a
-    // bump to 17 without a matching migration, would do.
+    // If the constant is not 17, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 16, or a
+    // bump to 18 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
+  })
+
+  it('discards a v16 cache file rather than serving it under the v17 contract', () => {
+    const tz = `${TZ}-stale-v16`
+    writeCacheFile(16, tz)
+
+    // A v16 summary's message counts leave out every prompt queued while
+    // Claude was busy, including each message sent to a running sub-agent.
+    // See `CACHE_VERSION`'s v17 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards a v15 cache file rather than serving it under the v16 contract', () => {

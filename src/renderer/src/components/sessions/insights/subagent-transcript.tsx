@@ -265,7 +265,7 @@ export function SubagentTranscript({
                   record.timestamp ? turnDurationByTimestamp.get(record.timestamp) : undefined
                 }
                 subagents={children}
-                promptAuthor={promptAuthor}
+                promptAuthor={record.queued ? 'Sent by you while it ran' : promptAuthor}
               />
             ))
         )}

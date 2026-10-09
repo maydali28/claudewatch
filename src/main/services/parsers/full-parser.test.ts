@@ -433,6 +433,127 @@ describe('parseSessionFull — user record kinds', () => {
 })
 
 /**
+ * A prompt sent while Claude is busy — every message sent to a running
+ * sub-agent, and a prompt typed mid-turn — is written as a `queued_command`
+ * attachment, never as a user record. Shapes copied from real transcripts.
+ */
+describe('parseSessionFull — prompts queued while Claude was busy', () => {
+  const queuedPrompt = {
+    parentUuid: 'msg_1-c',
+    isSidechain: true,
+    agentId: 'a7f20fecde95440b4',
+    type: 'attachment',
+    uuid: 'q-pause',
+    timestamp: '2026-09-10T10:00:05.000Z',
+    attachment: {
+      type: 'queued_command',
+      prompt: 'pause',
+      source_uuid: '003a4512-8841-4bcb-acdb-11fb2d98bf19',
+      origin: { kind: 'human' },
+      isMeta: true,
+    },
+  }
+  const queuedBlocks = {
+    type: 'attachment',
+    uuid: 'q-blocks',
+    timestamp: '2026-09-10T10:00:06.000Z',
+    attachment: {
+      type: 'queued_command',
+      prompt: [{ type: 'text', text: 'and keep it short' }],
+      commandMode: 'prompt',
+      origin: { kind: 'human' },
+    },
+  }
+  const queuedNotification = {
+    type: 'attachment',
+    uuid: 'q-task',
+    timestamp: '2026-09-10T10:00:07.000Z',
+    attachment: {
+      type: 'queued_command',
+      prompt:
+        '<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n</task-notification>',
+      commandMode: 'task-notification',
+      origin: { kind: 'task-notification' },
+    },
+  }
+  const queuedHandback = {
+    type: 'attachment',
+    uuid: 'q-peer',
+    timestamp: '2026-09-10T10:00:08.000Z',
+    attachment: {
+      type: 'queued_command',
+      prompt: '<agent-message from="a54e9aadee6548810">\nreport\n</agent-message>',
+      origin: { kind: 'peer' },
+    },
+  }
+  const records = [
+    user,
+    ...responseAsThreeRecords('msg_1'),
+    queuedPrompt,
+    queuedBlocks,
+    queuedNotification,
+    queuedHandback,
+  ]
+
+  it('shows a queued prompt a person sent as their message', async () => {
+    const file = write('queued', records)
+    const { records: parsed } = await parseSessionFull(file, 'queued', 'proj', ANTHROPIC_PRICING)
+    const byUuid = new Map(parsed.map((r) => [r.uuid, r]))
+
+    const pause = byUuid.get('q-pause')
+    expect(pause?.type).toBe('user')
+    expect(pause?.role).toBe('user')
+    expect(pause?.userKind).toBe('prompt')
+    expect(pause?.timestamp).toBe('2026-09-10T10:00:05.000Z')
+    expect(pause?.contentBlocks).toEqual([{ type: 'text', text: 'pause' }])
+    expect(pause?.queued).toBe(true)
+    expect(byUuid.get('u1')?.queued).toBeUndefined()
+    expect(byUuid.get('q-blocks')?.contentBlocks).toEqual([
+      { type: 'text', text: 'and keep it short' },
+    ])
+  })
+
+  it('leaves queued notifications and hand-backs as attachments', async () => {
+    const file = write('queued-machine', records)
+    const { records: parsed } = await parseSessionFull(
+      file,
+      'queued-machine',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+    const byUuid = new Map(parsed.map((r) => [r.uuid, r]))
+    expect(byUuid.get('q-task')?.type).toBe('attachment')
+    expect(byUuid.get('q-peer')?.type).toBe('attachment')
+  })
+
+  it('counts queued prompts as user messages, in step with the sessions sidebar', async () => {
+    const file = write('queued-count', records)
+    const full = await parseSessionFull(file, 'queued-count', 'proj', ANTHROPIC_PRICING)
+    const summary = await parseSessionMetadata(file, 'queued-count', 'proj', ANTHROPIC_PRICING)
+
+    expect(full.metadata.userMessageCount).toBe(3)
+    expect(full.metadata.messageCount).toBe(4)
+    expect(full.metadata.messageCount).toBe(summary.parentMessageCount)
+  })
+
+  it("counts a message sent to a running sub-agent in that sub-agent's total", async () => {
+    write('queued-sub', [user, ...responseAsThreeRecords('msg_1')])
+    writeSubagent('queued-sub', 'a7f20fecde95440b4', [
+      { ...user, uuid: 'sub-u1' },
+      ...responseAsThreeRecords('msg_sub'),
+      queuedPrompt,
+    ])
+    const summary = await parseSessionMetadata(
+      path.join(dir, 'queued-sub.jsonl'),
+      'queued-sub',
+      'proj',
+      ANTHROPIC_PRICING
+    )
+    expect(summary.subagents[0]?.messageCount).toBe(3)
+  })
+})
+
+/**
  * A response's content blocks land as separate records with separate
  * timestamps. Effort and turn-duration must be judged from the whole
  * response, once — not once per record, which either inflates the vote

@@ -25,6 +25,7 @@ import {
   isToolResultCarrierUser,
   LOCAL_COMMAND_PREFIXES,
   parseTokenUsage,
+  promoteQueuedPrompt,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
 import { createAgentResultCollector } from './agent-results'
@@ -672,7 +673,7 @@ export async function parseSessionMetadata(
 
     let raw: RawRecord
     try {
-      raw = JSON.parse(trimmed) as RawRecord
+      raw = promoteQueuedPrompt(JSON.parse(trimmed) as RawRecord)
     } catch {
       malformedLines++
       continue

@@ -170,9 +170,17 @@ interface CacheFile {
 // first release past v13, so users rebuild once either way. Tokens, cost and
 // counts are unaffected.
 //
+// v17: a prompt sent while Claude was busy — every message sent to a running
+// sub-agent, and a prompt typed mid-turn — is written as a `queued_command`
+// attachment, and is now counted as the user message it is
+// (`promoteQueuedPrompt`). A v16 entry's `messageCount`, `parentMessageCount`,
+// `subagents[].messageCount` and `dailyUsage[].messageCount` leave those out,
+// and nothing about the transcript changes when the parser learns to read
+// them. Discard, so the first scan recounts. Tokens and cost are unaffected.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 16
+const CACHE_VERSION = 17
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

@@ -14,6 +14,7 @@ import { projectUsage } from '@main/services/accounting/projection'
 import { createActivityAccumulator, type DayActivity } from './activity-reducer'
 import { createToolUsageAccumulator, mergeToolUsage } from './tool-usage'
 import type { AgentResultCollector } from './agent-results'
+import { promoteQueuedPrompt } from './parser-helpers'
 
 /**
  * See `SessionSummary.diagnostics` — this is that shape, scoped to subagents.
@@ -247,7 +248,7 @@ async function parseSingleSubagent(
       if (!line.trim()) continue
       let raw: RawRecord
       try {
-        raw = JSON.parse(line) as RawRecord
+        raw = promoteQueuedPrompt(JSON.parse(line) as RawRecord)
       } catch {
         malformedLines++
         continue

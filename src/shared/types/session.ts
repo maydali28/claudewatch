@@ -223,6 +223,12 @@ export interface ParsedRecord {
   userKind?: UserRecordKind
   /** The sub-agent that sent an `'agent-message'` record (`origin.from`), when known. */
   originAgentId?: string
+  /**
+   * A prompt the person sent while Claude was busy, written by Claude Code as
+   * a `queued_command` attachment (see `promoteQueuedPrompt`). In a sub-agent
+   * transcript this is a message sent to the running agent directly.
+   */
+  queued?: boolean
 }
 
 // ─── Tool Result Map ───────────────────────────────────────────────────────────
