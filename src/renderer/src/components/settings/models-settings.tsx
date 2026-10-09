@@ -28,6 +28,7 @@ import type {
   ModelPreference,
   ModelPreferences,
   ModelPricing,
+  RateKey,
   SeenModel,
 } from '@shared/types'
 import { RateCell } from './pricing-settings'
@@ -35,7 +36,7 @@ import { editModelPreference, suggestModelFamily } from './model-preferences'
 
 const AUTO = 'auto'
 
-const RATE_FIELDS: { field: keyof ModelPricing; label: string }[] = [
+const RATE_FIELDS: { field: RateKey; label: string }[] = [
   { field: 'input', label: 'Input' },
   { field: 'output', label: 'Output' },
   { field: 'cacheRead', label: 'Cache read' },

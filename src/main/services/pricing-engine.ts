@@ -46,7 +46,10 @@ export function pricingFingerprint(table: Record<ModelFamily, ModelPricing>): st
   return Object.entries(table)
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([f, p]: [string, ModelPricing & Partial<Pick<ModelRate, 'family'>>]) => {
-      const rates = `${p.input},${p.output},${p.cacheRead},${p.cache5m},${p.cache1h}`
+      const l = p.longContext
+      const rates =
+        `${p.input},${p.output},${p.cacheRead},${p.cache5m},${p.cache1h}` +
+        (l ? `>${l.above}:${l.input},${l.output},${l.cacheRead},${l.cache5m},${l.cache1h}` : '')
       return p.family ? `${f}=${p.family}:${rates}` : `${f}:${rates}`
     })
     .join('|')

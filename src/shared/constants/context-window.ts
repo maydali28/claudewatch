@@ -26,6 +26,7 @@ const WINDOW_RULES: Record<ModelFamily, WindowRule> = {
   'opus-5': '1m',
   'sonnet-5-5': '1m',
   'sonnet-5': '1m',
+  'haiku-5-5': '1m',
   'opus-4-8': '200k-or-1m',
   'opus-4-7': '200k-or-1m',
   'opus-4-6': '200k-or-1m',

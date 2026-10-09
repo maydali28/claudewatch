@@ -15,7 +15,7 @@ import { getModelMeta } from '@renderer/lib/model-meta'
 import { cn } from '@renderer/lib/cn'
 import { ANTHROPIC_PRICING, getPricingTable } from '@shared/constants/pricing'
 import { COST_ESTIMATE_NOTE } from '@shared/constants/copy'
-import type { PricingProvider, ModelFamily, ModelPricing } from '@shared/types'
+import type { PricingProvider, ModelFamily, RateKey } from '@shared/types'
 import {
   applyOverrideEdit,
   countOverriddenFields,
@@ -32,7 +32,7 @@ const MODEL_FAMILIES = Object.keys(ANTHROPIC_PRICING).filter(
   (k) => k !== 'unknown'
 ) as ModelFamily[]
 
-const RATE_FIELDS: { field: keyof ModelPricing; label: string }[] = [
+const RATE_FIELDS: { field: RateKey; label: string }[] = [
   { field: 'input', label: 'Input' },
   { field: 'output', label: 'Output' },
   { field: 'cacheRead', label: 'Cache read' },
@@ -238,6 +238,13 @@ export default function PricingSettings(): React.JSX.Element {
                       )}
                     >
                       {modelLabel}
+                      {base.longContext && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">
+                          {hasOverride
+                            ? 'Your rates apply at any prompt length'
+                            : `Prompts over ${base.longContext.above / 1000}K: $${base.longContext.input} in, $${base.longContext.output} out`}
+                        </span>
+                      )}
                     </td>
                     {RATE_FIELDS.map(({ field, label }) => (
                       <td key={field} className="px-2 py-1 text-right">

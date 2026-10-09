@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ANTHROPIC_PRICING, estimateCost } from './pricing'
+import { ANTHROPIC_PRICING, estimateCost, getActivePricingTable } from './pricing'
 import type { ModelFamily } from '@shared/types/pricing'
 
 describe('ANTHROPIC_PRICING — published input/output rates', () => {
@@ -13,6 +13,7 @@ describe('ANTHROPIC_PRICING — published input/output rates', () => {
     ['sonnet-5-5', 2, 10],
     ['sonnet-5', 2, 10],
     ['sonnet-4-6', 3, 15],
+    ['haiku-5-5', 0.1, 0.5],
     ['haiku-4-5', 1, 5],
   ]
 
@@ -55,6 +56,11 @@ describe('ANTHROPIC_PRICING — cache read rates', () => {
     expect(ANTHROPIC_PRICING['sonnet-5-5'].cacheRead).toBe(0.1)
   })
 
+  it('prices Haiku 5.5 cache reads at 0.1x input in both prompt tiers', () => {
+    expect(ANTHROPIC_PRICING['haiku-5-5'].cacheRead).toBe(0.01)
+    expect(ANTHROPIC_PRICING['haiku-5-5'].longContext?.cacheRead).toBe(0.05)
+  })
+
   it('prices Sonnet 5 cache reads at 0.1x input', () => {
     expect(ANTHROPIC_PRICING['sonnet-5'].cacheRead).toBe(0.2)
   })
@@ -69,10 +75,61 @@ describe('ANTHROPIC_PRICING — cache write tiers', () => {
     'opus-5',
     'sonnet-5-5',
     'sonnet-5',
+    'haiku-5-5',
   ] as ModelFamily[])('%s writes cost 1.25x input for 5m and 2x input for 1h', (family) => {
     const p = ANTHROPIC_PRICING[family]
     expect(p.cache5m).toBeCloseTo(p.input * 1.25, 10)
     expect(p.cache1h).toBeCloseTo(p.input * 2, 10)
+  })
+})
+
+/**
+ * Haiku 5.5 is priced by prompt length: a request whose prompt is over 100,000
+ * tokens, counting cache reads and writes, pays $0.50 / $2.50 instead of
+ * $0.10 / $0.50, on every pool of that request.
+ */
+describe('estimateCost — Haiku 5.5 prompt-length pricing', () => {
+  const cost = (input: number, output: number, read = 0, w5 = 0, w1 = 0): number | null =>
+    estimateCost('haiku-5-5', input, output, read, w5, w1, ANTHROPIC_PRICING)
+
+  it('prices a prompt of exactly 100,000 tokens at the lower rates', () => {
+    // 0.1 * 0.1 + 0.5 * 0.001
+    expect(cost(100_000, 1_000)).toBeCloseTo(0.0105, 10)
+  })
+
+  it('prices every pool of a longer prompt at the higher rates', () => {
+    // 0.5 * 0.100001 + 2.5 * 0.001
+    expect(cost(100_001, 1_000)).toBeCloseTo(0.0525005, 10)
+  })
+
+  it('counts cache reads and writes toward the prompt length', () => {
+    // 10K input + 80K read + 6K 5m + 5K 1h = 101K: over the threshold.
+    // 0.5 * 0.01 + 2.5 * 0.001 + 0.05 * 0.08 + 0.625 * 0.006 + 1 * 0.005
+    expect(cost(10_000, 1_000, 80_000, 6_000, 5_000)).toBeCloseTo(0.02025, 10)
+  })
+
+  it('leaves models without long-prompt rates at one rate', () => {
+    expect(estimateCost('sonnet-5-5', 900_000, 0, 0, 0, 0, ANTHROPIC_PRICING)).toBeCloseTo(1.8, 10)
+  })
+
+  it('prices rates the user entered as entered, at any prompt length', () => {
+    const table = getActivePricingTable({
+      pricingProvider: 'anthropic',
+      pricingOverrides: { 'haiku-5-5': { input: 0.2 } },
+    })
+    expect(estimateCost('haiku-5-5', 200_000, 0, 0, 0, 0, table)).toBeCloseTo(0.04, 10)
+  })
+
+  it('keeps the long-prompt rates for a model only mapped to Haiku 5.5', () => {
+    const table = getActivePricingTable({
+      pricingProvider: 'anthropic',
+      pricingOverrides: {},
+      modelPreferences: { 'my-gateway-haiku': { family: 'haiku-5-5' } },
+    })
+    expect(estimateCost('haiku-5-5', 200_000, 0, 0, 0, 0, table, 'my-gateway-haiku')).toBeCloseTo(
+      0.1,
+      10
+    )
   })
 })
 

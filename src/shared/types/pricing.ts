@@ -6,6 +6,25 @@ export interface ModelPricing {
   cacheRead: number
   cache5m: number
   cache1h: number
+  /**
+   * Higher rates for a request whose prompt is longer than `above` tokens,
+   * counting every input token: uncached input, cache reads and cache
+   * writes. Each response is priced on its own prompt. Only Haiku 5.5 is
+   * priced this way; every other model has one rate across its window.
+   */
+  longContext?: LongContextPricing
+}
+
+/** One of the five per-token rates, the fields a user can override. */
+export type RateKey = Exclude<keyof ModelPricing, 'longContext'>
+
+export interface LongContextPricing {
+  above: number
+  input: number
+  output: number
+  cacheRead: number
+  cache5m: number
+  cache1h: number
 }
 
 // ─── Providers ────────────────────────────────────────────────────────────────
@@ -38,6 +57,8 @@ export type ModelFamily =
   | 'sonnet-4-6'
   | 'sonnet-4-5'
   | 'sonnet-4'
+  // Haiku 5.5 — $0.10/$0.50, $0.50/$2.50 for prompts over 100K tokens
+  | 'haiku-5-5'
   // Haiku 4.5 — $1/$5
   | 'haiku-4-5'
   // Haiku 3.5 — $0.80/$4

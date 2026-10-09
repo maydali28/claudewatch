@@ -75,6 +75,11 @@ const META: Record<ModelFamily, ModelMeta> = {
     color: '#818cf8',
   },
   // ── Haiku — greens / cyans ───────────────────────────────────────────────────
+  'haiku-5-5': {
+    label: 'Haiku 5.5',
+    badgeClass: 'bg-green-500/10 text-green-500',
+    color: '#22c55e',
+  },
   'haiku-4-5': {
     label: 'Haiku 4.5',
     badgeClass: 'bg-emerald-500/10 text-emerald-500',

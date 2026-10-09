@@ -13,6 +13,7 @@ describe('contextWindowFor', () => {
     'claude-opus-5',
     'claude-sonnet-5-5',
     'claude-sonnet-5',
+    'claude-haiku-5-5',
   ])('%s has a fixed 1M window', (model) => {
     expect(contextWindowFor(model, 0)).toEqual({ tokens: 1_000_000, estimated: false })
   })

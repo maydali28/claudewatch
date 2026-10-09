@@ -25,6 +25,11 @@ import { getModelFamily } from '@shared/constants/models'
 //     1.25x / 2x write multipliers ($5 / $8).
 //   - Sonnet 5.5 is $2 / $10 with cache reads at 0.05x ($0.10), not the 0.1x
 //     ($0.20) Sonnet 5 has.
+//   - Haiku 5.5 is the one model priced by prompt length: $0.10 / $0.50
+//     ($0.125 / $0.20 writes, $0.01 reads) for a prompt of up to 100,000
+//     tokens, and $0.50 / $2.50 ($0.625 / $1 writes, $0.05 reads) over that.
+//     A prompt counts every input token, cache reads and writes included,
+//     and each request is priced on its own (see `estimateCost`).
 
 /**
  * Bump whenever any rate below changes, or whenever `getModelFamily` starts
@@ -43,8 +48,11 @@ import { getModelFamily } from '@shared/constants/models'
  *     recognised are repriced instead of staying unpriced.
  * 5 — corrected the Sonnet 5.5 cache-read rate from $0.20 to the published
  *     $0.10.
+ * 6 — added haiku-5-5 and its long-prompt rates, so sessions cached as
+ *     `unknown` before it was recognised are repriced instead of staying
+ *     unpriced.
  */
-export const PRICING_REVISION = 5
+export const PRICING_REVISION = 6
 
 export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   // ── Fable 5.1 / Mythos 5.1 — $10 input / $50 output, $0.25 cache read ────
@@ -79,6 +87,23 @@ export const ANTHROPIC_PRICING: Record<ModelFamily, ModelPricing> = {
   'sonnet-4-6': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
   'sonnet-4-5': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
   'sonnet-4': { input: 3.0, output: 15.0, cacheRead: 0.3, cache5m: 3.75, cache1h: 6.0 },
+
+  // ── Haiku 5.5 — $0.10 input / $0.50 output; 5x for prompts over 100K ─────
+  'haiku-5-5': {
+    input: 0.1,
+    output: 0.5,
+    cacheRead: 0.01,
+    cache5m: 0.125,
+    cache1h: 0.2,
+    longContext: {
+      above: 100_000,
+      input: 0.5,
+      output: 2.5,
+      cacheRead: 0.05,
+      cache5m: 0.625,
+      cache1h: 1.0,
+    },
+  },
 
   // ── Haiku 4.5 — $1 input / $5 output ─────────────────────────────────────
   'haiku-4-5': { input: 1.0, output: 5.0, cacheRead: 0.1, cache5m: 1.25, cache1h: 2.0 },
@@ -138,7 +163,10 @@ export function getActivePricingTable(
     Partial<ModelPricing>,
   ][]) {
     if (overrides && Object.keys(overrides).length > 0) {
-      table[family] = { ...table[family], ...overrides }
+      // Rates the user entered are used as entered, at any prompt length:
+      // the built-in long-prompt tier was priced against the built-in base
+      // rates, not theirs.
+      table[family] = { ...table[family], ...overrides, longContext: undefined }
     }
   }
 
@@ -153,7 +181,10 @@ export function getActivePricingTable(
     const mapped = isPricedFamily(pref.family) ? pref.family : undefined
     if (!mapped && Object.keys(own).length === 0) continue
     const family = mapped ?? getModelFamily(model)
-    const rates = { ...(family === 'unknown' ? {} : table[family]), ...own }
+    const rates: Partial<ModelPricing> = { ...(family === 'unknown' ? {} : table[family]), ...own }
+    // Same rule as the family overrides above: a model the user priced
+    // themselves pays their rates at any prompt length.
+    if (Object.keys(own).length > 0) delete rates.longContext
     if (!isCompleteRates(rates)) continue
     table[`model:${model}`] = { family, ...rates }
   }
@@ -212,7 +243,9 @@ export function ratesFor(
 
 /**
  * Cost in USD for one response's token usage, or `null` when the model is not
- * recognised and therefore cannot be priced. Callers must propagate the `null`
+ * recognised and therefore cannot be priced. A model with long-prompt rates
+ * (`ModelPricing.longContext`) is priced at them when this response's prompt
+ * (every input token, cache reads and writes included) is past the threshold. Callers must propagate the `null`
  * as an explicit "unpriced" state rather than coercing it to zero in a total
  * that is presented as complete.
  */
@@ -226,8 +259,10 @@ export function estimateCost(
   table: Record<ModelFamily, ModelPricing>,
   model?: string | null
 ): number | null {
-  const p = ratesFor(table, family, model)
-  if (!p) return null
+  const base = ratesFor(table, family, model)
+  if (!base) return null
+  const prompt = inputTokens + cacheReadTokens + cache5mTokens + cache1hTokens
+  const p = base.longContext && prompt > base.longContext.above ? base.longContext : base
   return (
     (inputTokens / 1_000_000) * p.input +
     (outputTokens / 1_000_000) * p.output +

@@ -66,3 +66,14 @@ describe('model preferences', () => {
     expect(a).not.toBe(pricingFingerprint(table({})))
   })
 })
+
+describe('pricingFingerprint — long-prompt rates', () => {
+  it('changes when only a long-prompt rate changes', () => {
+    const haiku = ANTHROPIC_PRICING['haiku-5-5']
+    const changed = {
+      ...ANTHROPIC_PRICING,
+      'haiku-5-5': { ...haiku, longContext: { ...haiku.longContext!, input: 0.6 } },
+    }
+    expect(pricingFingerprint(changed)).not.toBe(pricingFingerprint(ANTHROPIC_PRICING))
+  })
+})

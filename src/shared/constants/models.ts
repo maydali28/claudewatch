@@ -36,6 +36,7 @@ const EXACT_MODEL_FAMILIES: Record<string, ModelFamily> = {
   'claude-sonnet-4': 'sonnet-4',
 
   // ── Haiku ─────────────────────────────────────────────────────────────────
+  'claude-haiku-5-5': 'haiku-5-5',
   'claude-haiku-4-5': 'haiku-4-5',
 
   // ── Zero-minor aliases for the base releases ──────────────────────────────
