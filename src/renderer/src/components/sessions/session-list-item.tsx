@@ -234,19 +234,35 @@ export default function SessionListItem({
             {formatShortRelativeTime(session.lastTimestamp)}
             {fill.label && ` · ${fill.label}`}
           </span>
-          {/* Latest, not dominant: the badge answers "what is this session on
-              now", which is not the same question as "what did it use most". */}
-          {(session.latestModel ?? session.dominantModel) &&
-            (() => {
-              const meta = getModelMeta(session.latestModel ?? session.dominantModel)
-              return (
-                <span
-                  className={`rounded-sm px-1 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}
-                >
-                  {meta.label}
-                </span>
-              )
-            })()}
+          <div className="flex shrink-0 items-center gap-1">
+            {session.isBackground && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="cursor-default rounded-sm bg-muted px-1 py-0.5 text-[10px] font-medium text-muted-foreground">
+                    Background
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="left" className="max-w-56 text-[10px]">
+                  {session.continuesSessionIds?.length
+                    ? 'Moved to the background by Claude Code, which continued it as this session. The earlier session is included here and counted once.'
+                    : 'Moved to the background by Claude Code, which continues it as a new session. Its first messages are copied from the session it came from.'}
+                </TooltipContent>
+              </Tooltip>
+            )}
+            {/* Latest, not dominant: the badge answers "what is this session on
+                now", which is not the same question as "what did it use most". */}
+            {(session.latestModel ?? session.dominantModel) &&
+              (() => {
+                const meta = getModelMeta(session.latestModel ?? session.dominantModel)
+                return (
+                  <span
+                    className={`rounded-sm px-1 py-0.5 text-[10px] font-medium ${meta.badgeClass}`}
+                  >
+                    {meta.label}
+                  </span>
+                )
+              })()}
+          </div>
         </div>
       </button>
     </TooltipProvider>

@@ -107,6 +107,11 @@ export interface RawRecord {
    */
   aiTitle?: string
   /**
+   * `'bg'` on every record of a session Claude Code moved to the background.
+   * See `SessionSummary.isBackground`.
+   */
+  sessionKind?: string
+  /**
    * The payload of a `type: 'attachment'` record: context Claude Code adds to
    * a session (the skill listing, environment, hook output, …). Only the
    * `skill_listing` kind is read, by `parsers/skill-listing.ts`.
@@ -552,6 +557,26 @@ export interface SessionSummary {
    * until the session has a response.
    */
   contextFill?: ContextFill
+  /**
+   * Claude Code moved this session to the background (`sessionKind: 'bg'`).
+   * It does so by copying the session so far into a new session id, so the
+   * copy starts with the same messages as the session it came from and both
+   * appear in the list under the same title.
+   */
+  isBackground?: boolean
+  /**
+   * Sessions this background session was copied from, hidden from the list
+   * and from every total because all of their records are repeated here
+   * (see `foldBackgroundContinuations`). Absent when there are none.
+   */
+  continuesSessionIds?: string[]
+  /**
+   * `uuid` of the transcript's first and last records. A background copy
+   * starts with the same `firstUuid` as the session it came from, and holds
+   * that session's `lastUuid` unless the session went on after the move.
+   */
+  firstUuid?: string
+  lastUuid?: string
   /** Every exact model seen in this session, parent and subagents. */
   modelsUsed: string[]
   /** Responses whose model is unrecognised and therefore excluded from cost. */

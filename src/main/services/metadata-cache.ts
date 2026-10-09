@@ -178,9 +178,16 @@ interface CacheFile {
 // and nothing about the transcript changes when the parser learns to read
 // them. Discard, so the first scan recounts. Tokens and cost are unaffected.
 //
+// v18: `SessionSummary.isBackground` marks a session Claude Code moved to the
+// background, which it does by copying the session into a new id, and
+// `firstUuid`/`lastUuid` let a scan fold the original into that copy
+// (`foldBackgroundContinuations`). A v17 entry has none of them, so the
+// original would stay listed and counted twice beside its copy until either
+// transcript changed. Discard, so the first scan reads them.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 17
+const CACHE_VERSION = 18
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

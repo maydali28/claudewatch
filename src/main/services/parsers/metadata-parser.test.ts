@@ -1519,6 +1519,23 @@ describe('parseSessionMetadata — turnOpen reflects whether the last turn is st
   })
 })
 
+describe('parseSessionMetadata — background sessions', () => {
+  it('marks a session Claude Code moved to the background', async () => {
+    const file = session('bg', [
+      { ...user('u1'), sessionKind: 'bg' },
+      { ...assistant({ uuid: 'a', id: 'msg_1' }), sessionKind: 'bg' },
+    ])
+    const summary = await parseSessionMetadata(file, 'bg', 'proj', ANTHROPIC_PRICING)
+    expect(summary.isBackground).toBe(true)
+  })
+
+  it('leaves an ordinary session unmarked', async () => {
+    const file = session('fg', [user('u1'), assistant({ uuid: 'a', id: 'msg_1' })])
+    const summary = await parseSessionMetadata(file, 'fg', 'proj', ANTHROPIC_PRICING)
+    expect(summary.isBackground).toBeUndefined()
+  })
+})
+
 describe('parseSessionMetadata — session title', () => {
   const aiTitle = (title: string): Record<string, unknown> => ({
     type: 'ai-title',

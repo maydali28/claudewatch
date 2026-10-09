@@ -130,7 +130,15 @@ export function registerSessionsHandlers(): void {
     try {
       const searchRequest = validate(SearchSchema, payload)
       const results = await searchSessions(searchRequest)
-      return ok(results)
+      // Search reads transcripts straight off disk, so it still finds a
+      // session folded into its background copy; every hit there is also a
+      // hit in the copy, which is the session the list shows.
+      const folded = new Set(
+        (await getOrScanProjects()).flatMap((p) =>
+          p.sessions.flatMap((s) => s.continuesSessionIds ?? [])
+        )
+      )
+      return ok(folded.size ? results.filter((r) => !folded.has(r.sessionId)) : results)
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'SEARCH_FAILED')

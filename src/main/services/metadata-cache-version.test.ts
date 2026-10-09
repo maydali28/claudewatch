@@ -80,15 +80,25 @@ function writeCacheFile(version: number, timezone: string): void {
 describe('CACHE_VERSION', () => {
   it('serves an entry from a cache file stamped with the current version', () => {
     const tz = `${TZ}-current`
-    writeCacheFile(17, tz)
+    writeCacheFile(18, tz)
 
     const hit = getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)
 
-    // If the constant is not 17, this file is rejected as a shape mismatch and
-    // the entry vanishes — which is exactly what a silent revert to 16, or a
-    // bump to 18 without a matching migration, would do.
+    // If the constant is not 18, this file is rejected as a shape mismatch and
+    // the entry vanishes — which is exactly what a silent revert to 17, or a
+    // bump to 19 without a matching migration, would do.
     expect(hit).toBeDefined()
     expect(hit!.id).toBe('pinned-session')
+  })
+
+  it('discards a v17 cache file rather than serving it under the v18 contract', () => {
+    const tz = `${TZ}-stale-v17`
+    writeCacheFile(17, tz)
+
+    // A v17 summary has no `isBackground`, `firstUuid` or `lastUuid`, so a
+    // session moved to the background could not be folded into its copy and
+    // would be counted twice. See `CACHE_VERSION`'s v18 note.
+    expect(getCachedSummary(ENTRY_PATH, 1000, 500, 'child-fp', FP, tz)).toBeUndefined()
   })
 
   it('discards a v16 cache file rather than serving it under the v17 contract', () => {

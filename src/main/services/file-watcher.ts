@@ -18,6 +18,7 @@ import { invalidateCachedSummary } from './metadata-cache'
 import { createLogger } from '@main/lib/logger'
 import { resolveSessionFileLocation, type SessionFileLocation } from './session-file-location'
 import { ReparseScheduler } from './reparse-scheduler'
+import { foldBackgroundContinuations } from './background-continuations'
 import {
   FILE_WATCHER_DEBOUNCE_MS,
   FILE_WATCHER_WRITE_FINISH_STABILITY_MS,
@@ -228,14 +229,79 @@ export class FileWatcher {
 
       sessionCache.invalidate(projectId, sessionId)
 
-      patchCachedSessionSummary(sessionSummary)
+      const folded = await this.foldIntoSiblings(sessionSummary, parentPath, projectId)
+      if (!folded) return
 
-      const channel = isNewFile ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
-      this.deps.broadcast(channel, sessionSummary)
-      this.deps.onSessionUpdated?.(sessionSummary)
+      patchCachedSessionSummary(folded.summary)
+
+      const channel =
+        isNewFile || folded.unfolded ? CHANNELS.PUSH_SESSION_CREATED : CHANNELS.PUSH_SESSION_UPDATED
+      this.deps.broadcast(channel, folded.summary)
+      this.deps.onSessionUpdated?.(folded.summary)
     } catch (error) {
       log.error('Failed to re-parse session:', sessionId, error)
     }
+  }
+
+  /**
+   * Applies `foldBackgroundContinuations` to one re-parsed session against
+   * the project's cached sessions, the same fold a full scan applies.
+   *
+   * Returns null when the session stays folded into a background copy (the
+   * renderer already left it out). Otherwise returns the summary to publish,
+   * and `unfolded` when it was hidden until now — it went on after the move —
+   * so the renderer adds it back. Siblings the fold changes are published
+   * here: an original hidden for the first time is removed, and a copy loses
+   * or gains the ids it names.
+   */
+  private async foldIntoSiblings(
+    summary: SessionSummary,
+    parentPath: string,
+    projectId: string
+  ): Promise<{ summary: SessionSummary; unfolded: boolean } | null> {
+    const cached = peekCachedSessionsForProject(projectId)
+    const previous = cached.find((s) => s.id === summary.id)
+    const siblings = cached.filter((s) => s.id !== summary.id)
+    const holder = siblings.find((s) => s.continuesSessionIds?.includes(summary.id))
+
+    const { foldedIds } = await foldBackgroundContinuations(
+      [summary, ...siblings],
+      path.dirname(parentPath)
+    )
+
+    if (foldedIds.has(summary.id)) {
+      if (!holder) {
+        // Folded for the first time: the copy that holds it is the session
+        // whose write got us here, or arrives with its own push.
+        removeCachedSession(projectId, summary.id)
+        this.deps.broadcast(CHANNELS.PUSH_SESSION_DELETED, { sessionId: summary.id, projectId })
+      }
+      return null
+    }
+
+    // Hidden originals are not among the cached siblings, so the fold above
+    // cannot find them again: keep what this copy already named.
+    const names = new Set(previous?.continuesSessionIds ?? [])
+    for (const id of foldedIds) {
+      names.add(id)
+      removeCachedSession(projectId, id)
+      this.deps.broadcast(CHANNELS.PUSH_SESSION_DELETED, { sessionId: id, projectId })
+    }
+    const published: SessionSummary = names.size
+      ? { ...summary, continuesSessionIds: [...names] }
+      : summary
+
+    if (holder) {
+      // It went on after the move: it is a session of its own again.
+      const ids = holder.continuesSessionIds!.filter((id) => id !== summary.id)
+      const updated: SessionSummary = {
+        ...holder,
+        continuesSessionIds: ids.length ? ids : undefined,
+      }
+      patchCachedSessionSummary(updated)
+      this.deps.broadcast(CHANNELS.PUSH_SESSION_UPDATED, updated)
+    }
+    return { summary: published, unfolded: holder !== undefined }
   }
 
   /**

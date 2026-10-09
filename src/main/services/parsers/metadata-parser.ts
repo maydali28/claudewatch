@@ -52,6 +52,9 @@ interface MetadataAccumulator {
   // Identity
   slug: string | undefined
   aiTitle: string | undefined
+  isBackground: boolean
+  firstUuid: string | undefined
+  lastUuid: string | undefined
   cwd: string | undefined
 
   // Timestamps
@@ -112,6 +115,9 @@ function createMetadataAccumulator(): MetadataAccumulator {
   return {
     slug: undefined,
     aiTitle: undefined,
+    isBackground: false,
+    firstUuid: undefined,
+    lastUuid: undefined,
     cwd: undefined,
     firstTimestamp: undefined,
     lastTimestamp: undefined,
@@ -515,6 +521,9 @@ function buildSessionSummary(
     latestModel: usage.latestParentModel,
     dominantModel: usage.dominantParentModel,
     contextFill: buildContextFill(usage),
+    isBackground: acc.isBackground || undefined,
+    firstUuid: acc.firstUuid,
+    lastUuid: acc.lastUuid,
     modelsUsed: usage.modelsUsed,
     unpricedResponses,
     totalInputTokens,
@@ -685,6 +694,11 @@ export async function parseSessionMetadata(
     agentResults.add(raw)
     tools.add(raw)
     if (raw.slug && !acc.slug) acc.slug = raw.slug
+    if (raw.sessionKind === 'bg') acc.isBackground = true
+    if (raw.uuid) {
+      acc.firstUuid ??= raw.uuid
+      acc.lastUuid = raw.uuid
+    }
     if (raw.type === 'ai-title') {
       const title = raw.aiTitle?.trim()
       if (title) acc.aiTitle = title

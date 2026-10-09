@@ -287,3 +287,117 @@ describe('FileWatcher — secret scanning', () => {
     expect(mockScanFileDelta).not.toHaveBeenCalled()
   })
 })
+
+describe('FileWatcher — background continuations', () => {
+  let claudeDir: string
+  const projectId = 'proj'
+  let projectDir: string
+
+  const original = {
+    id: 'orig',
+    projectId,
+    firstUuid: 'u1',
+    lastUuid: 'u3',
+    subagents: [],
+  } as unknown as SessionSummary
+  const copy = {
+    id: 'copy',
+    projectId,
+    isBackground: true,
+    firstUuid: 'u1',
+    lastUuid: 'u5',
+    subagents: [],
+  } as unknown as SessionSummary
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    watchedInstances = []
+    mockPreferencesGet.mockReturnValue({ ...BASE_PREFS })
+    mockParseSession.mockReset()
+    mockPatchCachedSessionSummary.mockReset()
+    mockRemoveCachedSession.mockReset()
+    mockPeekCachedSessionsForProject.mockReset()
+
+    claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'file-watcher-bg-'))
+    projectDir = path.join(claudeDir, 'projects', projectId)
+    fs.mkdirSync(projectDir, { recursive: true })
+    // The copy repeats the original's records, in order, then goes on.
+    fs.writeFileSync(
+      path.join(projectDir, 'copy.jsonl'),
+      ['u1', 'u2', 'u3', 'u4', 'u5'].map((uuid) => JSON.stringify({ uuid })).join('\n') + '\n'
+    )
+    fs.writeFileSync(path.join(projectDir, 'orig.jsonl'), '')
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    fs.rmSync(claudeDir, { recursive: true, force: true })
+  })
+
+  async function change(id: string): Promise<ReturnType<typeof vi.fn>> {
+    const broadcast = vi.fn()
+    new FileWatcher(claudeDir, { broadcast, getMainWindow: vi.fn(() => null) }).start()
+    watchedInstances[0].emit('change', path.join(projectDir, `${id}.jsonl`))
+    await vi.runAllTimersAsync()
+    // The fold reads the copy's transcript from disk, which fake timers do
+    // not drive: let real I/O finish before asserting.
+    vi.useRealTimers()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    return broadcast
+  }
+
+  it('folds the original away when its background copy is written', async () => {
+    mockPeekCachedSessionsForProject.mockReturnValue([original])
+    mockParseSession.mockResolvedValue(copy)
+
+    const broadcast = await change('copy')
+
+    expect(mockRemoveCachedSession).toHaveBeenCalledWith(projectId, 'orig')
+    expect(broadcast).toHaveBeenCalledWith(CHANNELS.PUSH_SESSION_DELETED, {
+      sessionId: 'orig',
+      projectId,
+    })
+    expect(mockPatchCachedSessionSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'copy', continuesSessionIds: ['orig'] })
+    )
+  })
+
+  it('keeps naming a folded original on later writes to the copy', async () => {
+    // The original is no longer cached once folded.
+    mockPeekCachedSessionsForProject.mockReturnValue([{ ...copy, continuesSessionIds: ['orig'] }])
+    mockParseSession.mockResolvedValue(copy)
+
+    await change('copy')
+
+    expect(mockPatchCachedSessionSummary).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'copy', continuesSessionIds: ['orig'] })
+    )
+  })
+
+  it('keeps a folded original hidden when it changes without going on', async () => {
+    mockPeekCachedSessionsForProject.mockReturnValue([{ ...copy, continuesSessionIds: ['orig'] }])
+    mockParseSession.mockResolvedValue(original)
+
+    const broadcast = await change('orig')
+
+    expect(mockParseSession).toHaveBeenCalled()
+    expect(mockPatchCachedSessionSummary).not.toHaveBeenCalled()
+    expect(broadcast).not.toHaveBeenCalled()
+  })
+
+  it('brings a folded original back when it goes on after the move', async () => {
+    mockPeekCachedSessionsForProject.mockReturnValue([{ ...copy, continuesSessionIds: ['orig'] }])
+    mockParseSession.mockResolvedValue({ ...original, lastUuid: 'u9' })
+
+    const broadcast = await change('orig')
+
+    expect(broadcast).toHaveBeenCalledWith(
+      CHANNELS.PUSH_SESSION_CREATED,
+      expect.objectContaining({ id: 'orig' })
+    )
+    expect(broadcast).toHaveBeenCalledWith(
+      CHANNELS.PUSH_SESSION_UPDATED,
+      expect.objectContaining({ id: 'copy', continuesSessionIds: undefined })
+    )
+  })
+})
