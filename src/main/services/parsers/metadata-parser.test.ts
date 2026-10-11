@@ -1185,6 +1185,15 @@ describe('parseSessionMetadata + computeAnalytics — partial TTL has one price 
  * disclosure is a claim the numbers contradict.
  */
 describe('parseSessionMetadata + computeAnalytics — an undated response keeps its spend', () => {
+  // The fixtures are dated 2026-09-10; pin the clock so '30d' still covers them.
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-20T12:00:00.000Z'))
+  })
+  afterAll(() => {
+    vi.useRealTimers()
+  })
+
   const PROJECTS: Project[] = [
     {
       id: 'proj',
@@ -1267,6 +1276,15 @@ describe('parseSessionMetadata + computeAnalytics — an undated response keeps 
  * repair that moves only some of the response would leave one behind.
  */
 describe('parseSessionMetadata + computeAnalytics — a repaired response lands in one bucket', () => {
+  // The fixtures are dated 2026-09-10; pin the clock so '30d' still covers them.
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-20T12:00:00.000Z'))
+  })
+  afterAll(() => {
+    vi.useRealTimers()
+  })
+
   const PROJECTS: Project[] = [
     {
       id: 'proj',
