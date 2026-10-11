@@ -21,6 +21,7 @@ describe('getModelFamily — current models', () => {
     ['claude-opus-4-7', 'opus-4-7'],
     ['claude-opus-4-6', 'opus-4-6'],
     ['claude-sonnet-4-6', 'sonnet-4-6'],
+    ['claude-haiku-5-5', 'haiku-5-5'],
     ['claude-haiku-4-5', 'haiku-4-5'],
   ]
 
@@ -54,6 +55,7 @@ describe('getModelFamily — provider-decorated IDs', () => {
     ['anthropic.claude-opus-5', 'opus-5'],
     ['us.anthropic.claude-sonnet-5', 'sonnet-5'],
     ['us.anthropic.claude-sonnet-5-5', 'sonnet-5-5'],
+    ['anthropic.claude-haiku-5-5', 'haiku-5-5'],
     ['eu.anthropic.claude-opus-4-6', 'opus-4-6'],
     ['apac.anthropic.claude-sonnet-4-6', 'sonnet-4-6'],
     ['claude-sonnet-4-5-20250929-v1:0', 'sonnet-4-5'],
@@ -123,6 +125,7 @@ describe('getModelFamily — resolving a family is idempotent', () => {
     'sonnet-4-6',
     'sonnet-4-5',
     'sonnet-4',
+    'haiku-5-5',
     'haiku-4-5',
     'haiku-3-5',
     'unknown',
@@ -154,6 +157,7 @@ describe('getModelFamily — unrecognised models resolve to unknown, never an ol
     'claude-opus-4-9',
     'claude-sonnet-4-9',
     'claude-haiku-4-9',
+    'claude-haiku-5-6',
     'claude-opus-6',
     'claude-sonnet-6',
     'claude-fable-6',

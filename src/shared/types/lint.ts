@@ -74,6 +74,8 @@ export interface LintResult {
   contextLines?: string[]
   maskedSecret?: string
   subagentFileName?: string
+  /** The session a session check or secret finding is about, so it can be opened. */
+  session?: { sessionId: string; projectId: string }
   detectedAt?: string // ISO date string
 }
 

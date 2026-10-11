@@ -1,7 +1,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as readline from 'readline'
-import type { RawRecord, SubagentSummary } from '@shared/types/session'
+import type { RawRecord, SubagentSummary, ToolUsageRow } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { pLimit } from '@main/lib/p-limit'
 import { SUBAGENT_PARSE_CONCURRENCY } from '@shared/constants/tuning'
@@ -12,6 +12,9 @@ import {
 } from '@main/services/accounting/ledger'
 import { projectUsage } from '@main/services/accounting/projection'
 import { createActivityAccumulator, type DayActivity } from './activity-reducer'
+import { createToolUsageAccumulator, mergeToolUsage } from './tool-usage'
+import type { AgentResultCollector } from './agent-results'
+import { promoteQueuedPrompt } from './parser-helpers'
 
 /**
  * See `SessionSummary.diagnostics` — this is that shape, scoped to subagents.
@@ -48,6 +51,8 @@ export interface SubagentParseResult {
   childActivityByDay: Map<string, DayActivity>
   /** Summed across every subagent file discovered, readable or not. */
   diagnostics: SubagentDiagnostics
+  /** Every subagent's tool calls, merged per day and tool. */
+  toolUsage: ToolUsageRow[]
 }
 
 /**
@@ -62,7 +67,13 @@ export async function parseSubagents(
   sessionFilePath: string,
   sessionId: string,
   projectId: string,
-  pricingTable: Record<ModelFamily, ModelPricing>
+  pricingTable: Record<ModelFamily, ModelPricing>,
+  /**
+   * Also fed every sub-agent record: a sub-agent that starts sub-agents of its
+   * own receives their Agent tool results and task notifications in its own
+   * transcript, not in the session's.
+   */
+  agentResults?: AgentResultCollector
 ): Promise<SubagentParseResult> {
   const sessionDir = sessionFilePath.replace(/\.jsonl$/, '')
   const subagentsDir = path.join(sessionDir, 'subagents')
@@ -80,6 +91,7 @@ export async function parseSubagents(
       summaries: [],
       entries: [],
       childActivityByDay: new Map(),
+      toolUsage: [],
       diagnostics: {
         malformedLines: 0,
         unreadableChildren: 0,
@@ -101,7 +113,14 @@ export async function parseSubagents(
   const parsed = await Promise.all(
     files.map((file) =>
       limit(() =>
-        parseSingleSubagent(path.join(subagentsDir, file), file, sessionId, projectId, pricingTable)
+        parseSingleSubagent(
+          path.join(subagentsDir, file),
+          file,
+          sessionId,
+          projectId,
+          pricingTable,
+          agentResults
+        )
       )
     )
   )
@@ -111,6 +130,7 @@ export async function parseSubagents(
   // Summed rather than kept per-child: the parent only needs one figure per
   // day, and a child's own byDay map is not otherwise exposed anywhere.
   const childActivityByDay = new Map<string, DayActivity>()
+  const toolUsage: ToolUsageRow[] = []
   const diagnostics: SubagentDiagnostics = {
     malformedLines: 0,
     unreadableChildren: 0,
@@ -138,6 +158,7 @@ export async function parseSubagents(
     if (!result.summary) continue
     summaries.push(result.summary)
     entries.push(...result.entries)
+    mergeToolUsage(toolUsage, result.toolUsage)
     for (const [day, activity] of result.activityByDay) {
       const existing = childActivityByDay.get(day)
       childActivityByDay.set(
@@ -151,7 +172,44 @@ export async function parseSubagents(
       )
     }
   }
-  return { summaries, entries, childActivityByDay, diagnostics }
+  return { summaries, entries, childActivityByDay, diagnostics, toolUsage }
+}
+
+type SubagentMeta = Pick<
+  SubagentSummary,
+  'agentType' | 'description' | 'toolUseId' | 'parentAgentId' | 'spawnDepth' | 'isBackground'
+>
+
+/**
+ * Read `agent-<id>.meta.json`, which Claude Code writes beside each sub-agent
+ * transcript: `{ agentType, description, toolUseId, parentAgentId?,
+ * spawnDepth, requestShape: 'foreground' | 'background', … }`. Older agents
+ * have no meta file, and any field may be missing; a missing or unreadable
+ * file leaves the summary without these fields rather than failing the parse.
+ */
+async function readSubagentMeta(transcriptPath: string): Promise<SubagentMeta> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(
+      await fs.promises.readFile(transcriptPath.replace(/\.jsonl$/, '.meta.json'), 'utf-8')
+    )
+  } catch {
+    return {}
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+  const m = parsed as Record<string, unknown>
+  const text = (v: unknown): string | undefined =>
+    typeof v === 'string' && v.trim() ? v.trim() : undefined
+  const meta: SubagentMeta = {}
+  if (text(m.agentType)) meta.agentType = text(m.agentType)
+  if (text(m.description)) meta.description = text(m.description)
+  if (text(m.toolUseId)) meta.toolUseId = text(m.toolUseId)
+  if (text(m.parentAgentId)) meta.parentAgentId = text(m.parentAgentId)
+  if (typeof m.spawnDepth === 'number' && Number.isInteger(m.spawnDepth) && m.spawnDepth > 0) {
+    meta.spawnDepth = m.spawnDepth
+  }
+  if (m.requestShape === 'background') meta.isBackground = true
+  return meta
 }
 
 async function parseSingleSubagent(
@@ -159,12 +217,14 @@ async function parseSingleSubagent(
   fileName: string,
   sessionId: string,
   projectId: string,
-  pricingTable: Record<ModelFamily, ModelPricing>
+  pricingTable: Record<ModelFamily, ModelPricing>,
+  agentResults?: AgentResultCollector
 ): Promise<{
   summary: SubagentSummary | null
   entries: ResponseEntry[]
   activityByDay: Map<string, DayActivity>
   diagnostics: SubagentDiagnostics
+  toolUsage: ToolUsageRow[]
 }> {
   const agentId = fileName.replace(/^agent-/, '').replace(/\.jsonl$/, '')
   const source: SourceIdentity = { kind: 'subagent', projectId, sessionId, agentId }
@@ -173,6 +233,7 @@ async function parseSingleSubagent(
   // Message counts come from the same response-grouping the ledger uses for
   // usage, so a block-split child response counts once for both.
   const activity = createActivityAccumulator()
+  const tools = createToolUsageAccumulator('subagent')
   let firstTimestamp: string | undefined
   let lastTimestamp: string | undefined
   let malformedLines = 0
@@ -187,7 +248,7 @@ async function parseSingleSubagent(
       if (!line.trim()) continue
       let raw: RawRecord
       try {
-        raw = JSON.parse(line) as RawRecord
+        raw = promoteQueuedPrompt(JSON.parse(line) as RawRecord)
       } catch {
         malformedLines++
         continue
@@ -198,6 +259,8 @@ async function parseSingleSubagent(
 
       activity.add(raw)
       accumulator.add(raw)
+      tools.add(raw)
+      agentResults?.add(raw)
     }
   } catch {
     // The file exists (it came from `readdir`) but could not be read — a
@@ -208,6 +271,7 @@ async function parseSingleSubagent(
       summary: null,
       entries: [],
       activityByDay: new Map(),
+      toolUsage: [],
       diagnostics: {
         malformedLines,
         unreadableChildren: 1,
@@ -224,6 +288,7 @@ async function parseSingleSubagent(
   }
 
   const activityCounts = activity.counts()
+  const meta = await readSubagentMeta(filePath)
   // Computed before `diagnostics` (unlike the pre-widening version of this
   // function) so the four usage-completeness fields below can read off the
   // same projection the summary itself is built from, rather than being
@@ -243,12 +308,13 @@ async function parseSingleSubagent(
     serverToolRequests: usage.combined.serverToolRequests,
   }
   if (activityCounts.total === 0) {
-    return { summary: null, entries: [], activityByDay: new Map(), diagnostics }
+    return { summary: null, entries: [], activityByDay: new Map(), diagnostics, toolUsage: [] }
   }
 
   return {
     summary: {
       agentId,
+      ...meta,
       messageCount: activityCounts.total,
       totalInputTokens: usage.combined.inputTokens,
       totalOutputTokens: usage.combined.outputTokens,
@@ -271,5 +337,6 @@ async function parseSingleSubagent(
     entries,
     activityByDay: activityCounts.byDay,
     diagnostics,
+    toolUsage: tools.rows(entries),
   }
 }

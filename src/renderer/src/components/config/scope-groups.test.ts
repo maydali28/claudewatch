@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { groupByScope, groupCommandsByScope, groupHooksByScope } from './scope-groups'
-import type { CommandEntry, HookEventGroup, HookRule } from '@shared/types'
+import {
+  countBySourceFilter,
+  groupByScope,
+  groupCommandsByScope,
+  groupHooksByScope,
+  matchesSourceFilter,
+  sourceFilterOf,
+} from './scope-groups'
+import type { CommandEntry, ConfigSource, HookEventGroup, HookRule } from '@shared/types'
 
 // ─── groupByScope ─────────────────────────────────────────────────────────────
 
@@ -83,6 +90,22 @@ describe('groupByScope', () => {
 
 // ─── groupHooksByScope ────────────────────────────────────────────────────────
 
+function sourceFor(rule: Partial<HookRule>): ConfigSource {
+  switch (rule.scope) {
+    case 'project':
+    case 'local':
+      return {
+        kind: rule.scope,
+        id: `${rule.scope}:${rule.projectId}`,
+        label: rule.projectName ?? '',
+        projectId: rule.projectId,
+        projectName: rule.projectName,
+      }
+    default:
+      return USER_SOURCE
+  }
+}
+
 function hookRule(overrides: Partial<HookRule>): HookRule {
   return {
     id: 'user:PreToolUse-0',
@@ -90,9 +113,20 @@ function hookRule(overrides: Partial<HookRule>): HookRule {
     hooks: [],
     scope: 'user',
     sourcePath: '/settings.json',
+    source: sourceFor(overrides),
     ...overrides,
   }
 }
+
+const USER_SOURCE: ConfigSource = { kind: 'user', id: 'user', label: 'Global' }
+const pluginSource = (name: string, enabled = true): ConfigSource => ({
+  kind: 'plugin',
+  id: `plugin:${name}@m`,
+  label: name,
+  root: `/plugins/${name}`,
+  plugin: { name, marketplace: 'm', origin: 'marketplace', enabled },
+})
+const MANAGED: ConfigSource = { kind: 'managed', id: 'managed', label: 'Managed' }
 
 describe('groupHooksByScope', () => {
   it('groups user-scope rules under Global', () => {
@@ -182,17 +216,99 @@ describe('groupHooksByScope', () => {
   it('returns no groups for an empty hooks list', () => {
     expect(groupHooksByScope([])).toEqual([])
   })
+
+  it('puts plugin groups after projects, sorted by name, and Managed last', () => {
+    const hooks: HookEventGroup[] = [
+      {
+        id: 'SessionStart',
+        event: 'SessionStart',
+        rules: [
+          hookRule({ id: 'managed:SessionStart-0', scope: 'managed', source: MANAGED }),
+          hookRule({
+            id: 'plugin:zz@m:SessionStart-0',
+            scope: 'plugin',
+            source: pluginSource('zz'),
+          }),
+          hookRule({
+            id: 'plugin:aa@m:SessionStart-0',
+            scope: 'plugin',
+            source: pluginSource('aa'),
+          }),
+          hookRule({
+            id: 'project:p:SessionStart-0',
+            scope: 'project',
+            projectId: 'p',
+            projectName: 'zzz-project',
+          }),
+          hookRule({ id: 'user:SessionStart-0' }),
+        ],
+      },
+    ]
+    const groups = groupHooksByScope(hooks)
+    expect(groups.map((g) => [g.kind, g.label])).toEqual([
+      ['global', 'Global'],
+      ['project', 'zzz-project'],
+      ['plugin', 'aa'],
+      ['plugin', 'zz'],
+      ['managed', 'Managed'],
+    ])
+    expect(groups[2].source).toEqual(pluginSource('aa'))
+  })
+})
+
+// ─── Source filter ────────────────────────────────────────────────────────────
+
+describe('sourceFilterOf, matchesSourceFilter and countBySourceFilter', () => {
+  const local: ConfigSource = { kind: 'local', id: 'local:p', label: 'p', projectId: 'p' }
+  const builtin: ConfigSource = { kind: 'builtin', id: 'builtin', label: 'Built-in' }
+
+  it('files a local item under Project, everything else under its own kind', () => {
+    expect(sourceFilterOf(USER_SOURCE)).toBe('user')
+    expect(sourceFilterOf(local)).toBe('project')
+    expect(sourceFilterOf(pluginSource('a'))).toBe('plugin')
+    expect(sourceFilterOf(MANAGED)).toBe('managed')
+    expect(sourceFilterOf(builtin)).toBe('builtin')
+  })
+
+  it('matches every source for "all" and only its own kind otherwise', () => {
+    expect(matchesSourceFilter(MANAGED, 'all')).toBe(true)
+    expect(matchesSourceFilter(local, 'project')).toBe(true)
+    expect(matchesSourceFilter(local, 'user')).toBe(false)
+  })
+
+  it('counts items per filter, with All covering every item', () => {
+    const items = [USER_SOURCE, local, local, pluginSource('a'), MANAGED]
+    expect(countBySourceFilter(items, (s) => s)).toEqual({
+      all: 5,
+      user: 1,
+      project: 2,
+      plugin: 1,
+      managed: 1,
+      builtin: 0,
+    })
+  })
 })
 
 // ─── groupCommandsByScope ─────────────────────────────────────────────────────
 
 function command(overrides: Partial<CommandEntry>): CommandEntry {
+  const source: ConfigSource =
+    overrides.scope === 'project'
+      ? {
+          kind: 'project',
+          id: `project:${overrides.projectId}`,
+          label: overrides.projectName ?? '',
+          projectId: overrides.projectId,
+          projectName: overrides.projectName,
+        }
+      : USER_SOURCE
   return {
     id: 'user:review',
     name: 'review',
     content: '',
     sizeBytes: 0,
     scope: 'user',
+    source,
     filePath: '/commands/review.md',
     ...overrides,
   }
@@ -225,5 +341,22 @@ describe('groupCommandsByScope', () => {
     expect(groups.map((g) => g.label)).toEqual(['alpha', 'zeta'])
     expect(groups[0].items.map((c) => c.name)).toEqual(['build'])
     expect(groups[1].items.map((c) => c.name)).toEqual(['ship'])
+  })
+
+  it('gives each plugin its own group after the projects', () => {
+    const groups = groupCommandsByScope([
+      command({
+        id: 'plugin:seo@m:/c.md',
+        name: 'seo:check',
+        scope: 'plugin',
+        source: pluginSource('seo'),
+      }),
+      command({ id: 'user:review' }),
+    ])
+    expect(groups.map((g) => [g.kind, g.label])).toEqual([
+      ['global', 'Global'],
+      ['plugin', 'seo'],
+    ])
+    expect(groups[1].source).toEqual(pluginSource('seo'))
   })
 })

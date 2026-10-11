@@ -9,22 +9,34 @@
  * reach the part that was still in progress.
  *
  * Kept as plain functions so the rule is testable without mounting React.
+ *
+ * A sub-agent's conversation is read from its prompt down, so it mounts a
+ * prefix instead and grows toward the tail; the same `windowAfterScroll` rule
+ * applies, measured from the bottom.
  */
 
+/** Records mounted when a transcript opens. */
+export const INITIAL_RENDER_BATCH = 50
+/** Records mounted each time the reader nears the unmounted edge. */
+export const INCREMENT_RENDER_BATCH = 50
+/** How close to the unmounted edge, in pixels, the next batch is mounted. */
+export const RENDER_AHEAD_PX = 1500
+
 /**
- * New window size after a scroll event. `distanceFromTopPx` is how far the
- * reader is from the oldest mounted record; the window grows when they come
- * within `renderAheadPx` of it.
+ * New window size after a scroll event. `distanceFromEdgePx` is how far the
+ * reader is from the edge where unmounted records begin (the top of a
+ * session, the bottom of a sub-agent's conversation); the window grows when
+ * they come within `renderAheadPx` of it.
  */
 export function windowAfterScroll(
   visibleCount: number,
   total: number,
-  distanceFromTopPx: number,
+  distanceFromEdgePx: number,
   batch: number,
   renderAheadPx: number
 ): number {
   if (visibleCount >= total) return total
-  if (distanceFromTopPx > renderAheadPx) return visibleCount
+  if (distanceFromEdgePx > renderAheadPx) return visibleCount
   return Math.min(total, visibleCount + batch)
 }
 
@@ -58,4 +70,22 @@ export function scrollTopAfterPrepend(
   scrollHeight: number
 ): number {
   return scrollTop + (scrollHeight - previousScrollHeight)
+}
+
+/**
+ * New window size after a prefix window's record set changes — a running
+ * sub-agent writing more. A reader who had every record mounted keeps seeing
+ * the conversation as it grows; one still partway down keeps their window, and
+ * the new records are mounted as they scroll toward them.
+ */
+export function prefixWindowAfterAppend(
+  visibleCount: number,
+  previousTotal: number,
+  total: number
+): number {
+  // Nothing loaded on one side: a transcript opening or being swapped out,
+  // not an append. The window keeps its size for the records that arrive.
+  if (previousTotal === 0 || total === 0) return visibleCount
+  if (visibleCount >= previousTotal) return Math.max(visibleCount, total)
+  return Math.min(visibleCount, total)
 }

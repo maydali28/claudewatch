@@ -2,8 +2,7 @@ import * as fs from 'fs'
 import * as readline from 'readline'
 import type { RawRecord } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
-import { getModelFamily } from '@shared/constants/models'
-import { estimateCost, PRICING_REVISION } from '@shared/constants/pricing'
+import { estimateCost, PRICING_REVISION, resolveModelFamily } from '@shared/constants/pricing'
 import { toDayKeyOrUndated, UNDATED_DAY } from '@shared/utils/date-ranges'
 
 /**
@@ -434,7 +433,7 @@ function toEntry(
   const dayLocal = toDayKeyOrUndated(timestamp)
 
   const modelRaw = raw.message?.model ?? undefined
-  const modelFamily = getModelFamily(modelRaw)
+  const modelFamily = resolveModelFamily(modelRaw, pricingTable)
 
   const inputC = requiredCounter(usage.input_tokens)
   const outputC = requiredCounter(usage.output_tokens)
@@ -532,7 +531,8 @@ function toEntry(
     cacheReadTokens,
     cacheWrite5m + unknownTtl,
     cacheWrite1h,
-    pricingTable
+    pricingTable,
+    modelRaw
   )
 
   const responseId = ledgerResponseId(raw)
@@ -748,7 +748,8 @@ export function createResponseAccumulator(
       e.cacheReadTokens,
       e.cacheWrite5m + unknownTtl,
       e.cacheWrite1h,
-      pricingTable
+      pricingTable,
+      e.modelRaw
     )
   }
 

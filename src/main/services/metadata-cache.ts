@@ -150,9 +150,44 @@ interface CacheFile {
 // to tell them apart. Discard, so the first scan recounts. Tokens and cost
 // are unaffected.
 //
+// v14: `SessionSummary.skillListing` holds the skills a session's
+// `skill_listing` records named — the only source for skills with no file on
+// disk. A v13 entry has none, and nothing about the transcript changes when
+// the parser learns to read them. Discard, so the first scan collects them.
+// Tokens, cost and counts are unaffected.
+//
+// v15: each `SessionSummary.subagents[]` entry gained the meta file's
+// `agentType`, `description`, `toolUseId`, `parentAgentId`, `spawnDepth` and
+// `isBackground`, plus `durationMs`/`durationSource` and `stoppedAt` from the
+// parent's Agent tool results and task notifications; and `SessionSummary`
+// gained `toolUsage`, its tool calls per day, tool and side. A v14 entry has
+// none of them, and would show no tool calls at all. Tokens, cost and counts
+// are unaffected.
+//
+// v16: `SessionSummary.contextFill` holds the latest parent context and the
+// window of the model it ran on, for the session bars. A v15 entry has none,
+// and every bar would sit empty until its transcript changed. 1.6.0 is the
+// first release past v13, so users rebuild once either way. Tokens, cost and
+// counts are unaffected.
+//
+// v17: a prompt sent while Claude was busy — every message sent to a running
+// sub-agent, and a prompt typed mid-turn — is written as a `queued_command`
+// attachment, and is now counted as the user message it is
+// (`promoteQueuedPrompt`). A v16 entry's `messageCount`, `parentMessageCount`,
+// `subagents[].messageCount` and `dailyUsage[].messageCount` leave those out,
+// and nothing about the transcript changes when the parser learns to read
+// them. Discard, so the first scan recounts. Tokens and cost are unaffected.
+//
+// v18: `SessionSummary.isBackground` marks a session Claude Code moved to the
+// background, which it does by copying the session into a new id, and
+// `firstUuid`/`lastUuid` let a scan fold the original into that copy
+// (`foldBackgroundContinuations`). A v17 entry has none of them, so the
+// original would stay listed and counted twice beside its copy until either
+// transcript changed. Discard, so the first scan reads them.
+//
 // Pinned by `metadata-cache-version.test.ts`, in both directions — reverting
 // this number to 8 used to leave the whole suite green.
-const CACHE_VERSION = 13
+const CACHE_VERSION = 18
 const CACHE_FILENAME = 'session-metadata-cache.json'
 
 // The cache lives wherever the owner says. This module runs inside the

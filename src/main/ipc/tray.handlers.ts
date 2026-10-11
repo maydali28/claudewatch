@@ -14,6 +14,7 @@ import { buildTraySnapshot } from '@main/services/tray-snapshot'
 import { getOrScanProjects } from './sessions.handlers'
 import { getActivePricingTable } from '@main/services/pricing-engine'
 import { Preferences } from '@main/store/preferences'
+import { costAlertThresholds } from '@shared/utils/cost-alert-settings'
 
 /**
  * Handle tray:open-dashboard — show and focus the main dashboard window.
@@ -28,7 +29,15 @@ export function registerTrayHandlers(getMainWindow: () => BrowserWindow | null):
   ipcMain.handle(CHANNELS.TRAY_GET_SNAPSHOT, async () => {
     try {
       const projects = await getOrScanProjects()
-      return ok(buildTraySnapshot(projects, getActivePricingTable(Preferences.get())))
+      const prefs = Preferences.get()
+      return ok(
+        buildTraySnapshot(
+          projects,
+          getActivePricingTable(prefs),
+          Date.now(),
+          costAlertThresholds(prefs)
+        )
+      )
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'TRAY_SNAPSHOT_FAILED')

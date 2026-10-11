@@ -9,6 +9,7 @@ import { broadcastToRenderers } from '@main/window-manager'
 import { scanCache } from '@main/services/scan-cache'
 import { sessionCache } from '@shared/utils'
 import { createLogger } from '@main/lib/logger'
+import { getSecretScanService } from '@main/services/secret-scan-service'
 
 const log = createLogger('Settings')
 
@@ -35,13 +36,22 @@ export function registerSettingsHandlers(): void {
         setSentryEnabled(settingsPatch.sentryEnabled)
       }
 
+      // Start or stop live secret scanning to match the switch and consent.
+      if ('secretScanEnabled' in settingsPatch || 'secretScanConsent' in settingsPatch) {
+        void getSecretScanService()?.sync()
+      }
+
       // A rate change leaves every already-scanned session's cost stale: the
       // in-memory scan cache holds summaries computed under the old table,
       // and the worker's on-disk metadata cache would otherwise keep serving
       // them right back on the next read. Refreshing here recomputes with
       // the new active table and, via its pricing fingerprint, discards the
       // stale disk entries too — one call covers both caches.
-      if ('pricingProvider' in settingsPatch || 'pricingOverrides' in settingsPatch) {
+      if (
+        'pricingProvider' in settingsPatch ||
+        'pricingOverrides' in settingsPatch ||
+        'modelPreferences' in settingsPatch
+      ) {
         // Full parses carry an estimated cost too; drop them so an open
         // session is re-parsed at the new rates.
         sessionCache.clear()

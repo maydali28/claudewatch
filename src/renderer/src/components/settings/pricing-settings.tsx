@@ -15,7 +15,7 @@ import { getModelMeta } from '@renderer/lib/model-meta'
 import { cn } from '@renderer/lib/cn'
 import { ANTHROPIC_PRICING, getPricingTable } from '@shared/constants/pricing'
 import { COST_ESTIMATE_NOTE } from '@shared/constants/copy'
-import type { PricingProvider, ModelFamily, ModelPricing } from '@shared/types'
+import type { PricingProvider, ModelFamily, RateKey } from '@shared/types'
 import {
   applyOverrideEdit,
   countOverriddenFields,
@@ -32,7 +32,7 @@ const MODEL_FAMILIES = Object.keys(ANTHROPIC_PRICING).filter(
   (k) => k !== 'unknown'
 ) as ModelFamily[]
 
-const RATE_FIELDS: { field: keyof ModelPricing; label: string }[] = [
+const RATE_FIELDS: { field: RateKey; label: string }[] = [
   { field: 'input', label: 'Input' },
   { field: 'output', label: 'Output' },
   { field: 'cacheRead', label: 'Cache read' },
@@ -45,7 +45,8 @@ function formatRate(rate: number): string {
 interface RateCellProps {
   modelLabel: string
   fieldLabel: string
-  defaultRate: number
+  /** Undefined when there is no rate to fall back on (a model with no family). */
+  defaultRate: number | undefined
   override: number | undefined
   onCommit: (value: number | undefined) => void
 }
@@ -53,7 +54,7 @@ interface RateCellProps {
 // Shows the default rate as a placeholder and the override, if any, as the
 // value. The draft is local so a half-typed or invalid entry never reaches the
 // store; it is committed on blur or Enter and reverted with Escape.
-function RateCell({
+export function RateCell({
   modelLabel,
   fieldLabel,
   defaultRate,
@@ -94,10 +95,14 @@ function RateCell({
         type="text"
         inputMode="decimal"
         value={draft}
-        placeholder={formatRate(defaultRate)}
+        placeholder={defaultRate === undefined ? '—' : formatRate(defaultRate)}
         aria-label={`${modelLabel} ${fieldLabel.toLowerCase()} rate, dollars per million tokens`}
         aria-invalid={error !== null}
-        title={isOverridden ? `Default ${formatRate(defaultRate)}` : undefined}
+        title={
+          isOverridden && defaultRate !== undefined
+            ? `Default ${formatRate(defaultRate)}`
+            : undefined
+        }
         onChange={(e) => {
           setDraft(e.target.value)
           if (error) setError(null)
@@ -233,6 +238,13 @@ export default function PricingSettings(): React.JSX.Element {
                       )}
                     >
                       {modelLabel}
+                      {base.longContext && (
+                        <span className="block text-[10px] font-normal text-muted-foreground">
+                          {hasOverride
+                            ? 'Your rates apply at any prompt length'
+                            : `Prompts over ${base.longContext.above / 1000}K: $${base.longContext.input} in, $${base.longContext.output} out`}
+                        </span>
+                      )}
                     </td>
                     {RATE_FIELDS.map(({ field, label }) => (
                       <td key={field} className="px-2 py-1 text-right">

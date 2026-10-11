@@ -28,6 +28,33 @@ export function isSessionLive(session: LiveSessionSignal, nowMs: number): boolea
   return session.turnOpen && ageMs < OPEN_TURN_ACTIVE_MS
 }
 
+/** The fields sub-agent liveness is judged on; see `SubagentSummary`. */
+export interface LiveSubagentSignal {
+  lastTimestamp: string
+  stoppedAt?: string
+  toolUseId?: string
+  isBackground?: boolean
+}
+
+/**
+ * Whether a sub-agent is still working. It is running when the parent has not
+ * seen it stop since its last write (no Agent tool result, or for a
+ * background agent no task notification) and it wrote within
+ * `OPEN_TURN_ACTIVE_MS` — the same cap an open session turn gets, past which
+ * it is taken to be abandoned. An agent that was resumed after it stopped
+ * counts as running again. A sub-agent with no meta file has no stop signal
+ * to read, so only `ACTIVE_SESSION_MS` recency applies.
+ */
+export function isSubagentRunning(sub: LiveSubagentSignal, nowMs: number): boolean {
+  const ageMs = nowMs - new Date(sub.lastTimestamp).getTime()
+  if (!(ageMs < OPEN_TURN_ACTIVE_MS)) return false
+  if (sub.stoppedAt && compareTimestampsAscending(sub.stoppedAt, sub.lastTimestamp) >= 0) {
+    return false
+  }
+  const canSeeStop = sub.isBackground === true || sub.toolUseId !== undefined
+  return canSeeStop || ageMs < ACTIVE_SESSION_MS
+}
+
 /**
  * The tray's active/recent split, in one place: live sessions in their given
  * order, then the newest `TRAY_RECENT_SESSION_COUNT` of the rest, newest

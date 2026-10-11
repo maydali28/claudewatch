@@ -88,7 +88,8 @@ const config: ForgeConfig = {
     appCategoryType: 'public.app-category.developer-tools',
     icon: 'resources/icons/icon',
     asar: {
-      unpack: '{node_modules/chokidar/**/*,node_modules/fsevents/**/*}',
+      // out/native: the notification-permission addon (scripts/build-native.mjs).
+      unpack: '{node_modules/chokidar/**/*,node_modules/fsevents/**/*,out/native/**/*}',
     },
     ...macSigning,
     // Forge hardcodes ignore:[/^\/out\//g] but our electron-vite builds into out/.
@@ -177,9 +178,7 @@ const config: ForgeConfig = {
     // Portable ZIP for macOS (manual distribution) and Windows (fallback).
     new MakerZIP({}, ['darwin', 'win32']),
   ],
-  plugins: [
-    new AutoUnpackNativesPlugin({}),
-  ],
+  plugins: [new AutoUnpackNativesPlugin({})],
   publishers: [
     new PublisherGithub({
       repository: UPDATE_REPO,

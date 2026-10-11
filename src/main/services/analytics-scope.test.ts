@@ -101,6 +101,7 @@ function session(
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
     ...extra,
   }
 }

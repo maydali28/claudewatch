@@ -7,14 +7,32 @@ import {
   getProjectsDirPath,
   getUserCommandsDirPath,
   getUserSettingsPath,
+  getUserSkillsDirPath,
 } from '@main/lib/claude-paths'
 import { assertSafePath } from '@main/lib/safe-path'
 import { samePath } from '@main/lib/same-path'
+import {
+  MANAGED_SOURCE,
+  discoverPluginSources,
+  effectiveEnabledPlugins,
+  readManagedSettings,
+  readPluginHooks,
+  readPluginManifest,
+  resolvePluginPath,
+  sourceForLayer,
+} from './config-sources'
+import { readTranscriptMcpInfo } from './mcp-status'
+import { mcpToolServerName } from '@shared/utils/mcp-tool-name'
 import type {
+  CommandArgument,
   ConfigScope,
+  ConfigSource,
+  PluginEntry,
   ExtendedConfig,
   HookEventGroup,
   HookCommand,
+  HookInactiveReason,
+  HookScope,
   McpServerEntry,
   McpCapabilities,
   CommandEntry,
@@ -56,7 +74,12 @@ async function fileExists(filePath: string): Promise<boolean> {
 /**
  * Parse YAML-style frontmatter from a markdown file.
  * Returns { meta: Record<string,string>, body: string }.
- * Only handles simple key: value pairs (no nested structures).
+ *
+ * Reads top-level `key: value` pairs only; indented lines belong to the key
+ * above them (a nested list such as a command's `arguments`, read by
+ * `parseFrontmatterArguments`) and never become keys of their own. A block
+ * value — `key: |` keeps line breaks, `key: >` folds them into spaces — is
+ * read from the indented lines that follow it.
  */
 function parseFrontmatter(content: string): { meta: Record<string, string>; body: string } {
   const meta: Record<string, string> = {}
@@ -64,21 +87,80 @@ function parseFrontmatter(content: string): { meta: Record<string, string>; body
 
   const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/)
   if (fmMatch) {
-    const rawMeta = fmMatch[1]
+    const lines = fmMatch[1].split(/\r?\n/)
     body = fmMatch[2] ?? ''
-    for (const line of rawMeta.split('\n')) {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      // Indented lines and list items belong to the key above them.
+      if (/^\s/.test(line) || line.startsWith('-')) continue
       const colonIdx = line.indexOf(':')
-      if (colonIdx > 0) {
-        const key = line.slice(0, colonIdx).trim()
-        const val = line
-          .slice(colonIdx + 1)
-          .trim()
-          .replace(/^["']|["']$/g, '')
-        if (key) meta[key] = val
+      if (colonIdx <= 0) continue
+      const key = line.slice(0, colonIdx).trim()
+      const raw = line.slice(colonIdx + 1).trim()
+      if (!key) continue
+
+      const block = raw.match(/^([|>])[+-]?$/)
+      if (block) {
+        const blockLines: string[] = []
+        while (i + 1 < lines.length && (/^\s/.test(lines[i + 1]) || lines[i + 1] === '')) {
+          blockLines.push(lines[++i].trim())
+        }
+        while (blockLines.length > 0 && blockLines[blockLines.length - 1] === '') blockLines.pop()
+        meta[key] = block[1] === '|' ? blockLines.join('\n') : blockLines.join(' ')
+        continue
       }
+      meta[key] = raw.replace(/^["']|["']$/g, '')
     }
   }
   return { meta, body }
+}
+
+/**
+ * The `arguments` list of a command's frontmatter — the one nested structure
+ * commands use, which `parseFrontmatter` does not read:
+ *
+ *   arguments:
+ *     - name: url
+ *       description: Page to check
+ *       required: true
+ *
+ * The items may also start at column 0 (`- name: url`), as real plugin
+ * commands write them.
+ *
+ * Entries without a name are dropped. Returns undefined when there is no list.
+ */
+export function parseFrontmatterArguments(content: string): CommandArgument[] | undefined {
+  const fm = content.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  if (!fm) return undefined
+  const lines = fm[1].split(/\r?\n/)
+  const start = lines.findIndex((l) => /^arguments:\s*$/.test(l))
+  if (start === -1) return undefined
+
+  const args: CommandArgument[] = []
+  let current: Record<string, string> | null = null
+  const flush = (): void => {
+    if (current?.name) {
+      args.push({
+        name: current.name,
+        ...(current.description ? { description: current.description } : {}),
+        ...(current.required !== undefined ? { required: current.required === 'true' } : {}),
+      })
+    }
+  }
+  for (const line of lines.slice(start + 1)) {
+    // List items may sit at column 0 (`- name: x`) or be indented; the next
+    // top-level key ends the list.
+    if (!/^\s/.test(line) && !line.startsWith('-')) break
+    const item = line.match(/^\s*-\s*(.*)$/)
+    const field = (item ? item[1] : line).match(/^\s*([\w-]+):\s*(.*)$/)
+    if (item) {
+      flush()
+      current = {}
+    }
+    if (field && current) current[field[1]] = field[2].trim().replace(/^["']|["']$/g, '')
+  }
+  flush()
+  return args
 }
 
 // ─── Settings layers ─────────────────────────────────────────────────────────
@@ -185,20 +267,43 @@ export function mergeSettingsLayers(layers: SettingsLayer[]): RawSettings {
 // ─── parseHooks ──────────────────────────────────────────────────────────────
 
 /**
- * Every hook rule from every layer, in layer order. Claude Code runs the
- * hooks of all scopes, so nothing is replaced; each rule records the scope
- * and file it came from. Ids are built from the scope, the project id (when
- * the layer belongs to a project) and an index counted within that single
- * layer's rules for that event — never across the whole event group. That
- * keeps an id stable when another project or scope later gains a rule for
- * the same event, and keeps two projects' rules for the same event distinct.
- * Segments are joined so the id never contains `::` (the separator
- * `hooks-panel.tsx` uses to split a group id from a rule id).
+ * One file's hooks block: a settings layer, a plugin's hooks file or the
+ * managed settings. `inactiveReason` marks rules Claude Code will not run.
  */
-export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
+export interface HookLayer {
+  scope: HookScope
+  path: string
+  hooks: unknown
+  source: ConfigSource
+  project?: ProjectRootRef
+  inactiveReason?: HookInactiveReason
+}
+
+function hookLayerOf(layer: SettingsLayer): HookLayer {
+  return {
+    scope: layer.scope,
+    path: layer.path,
+    hooks: layer.settings.hooks,
+    source: sourceForLayer(layer),
+    project: layer.project,
+  }
+}
+
+/**
+ * Every hook rule from every layer, in layer order. Claude Code runs the
+ * hooks of all sources, so nothing is replaced; each rule records the source
+ * and file it came from. An id is the source id plus an index counted within
+ * that single layer's rules for that event — never across the whole event
+ * group. That keeps an id stable when another source later gains a rule for
+ * the same event, and keeps two projects' rules for the same event distinct.
+ * Source ids never contain `::` (the separator `hooks-panel.tsx` uses to
+ * split a group id from a rule id), so neither does a rule id.
+ */
+export function parseHookLayers(layers: HookLayer[]): HookEventGroup[] {
   const byEvent = new Map<string, HookEventGroup>()
   for (const layer of layers) {
-    for (const [event, entries] of Object.entries(layer.settings.hooks ?? {})) {
+    if (!isPlainObject(layer.hooks)) continue
+    for (const [event, entries] of Object.entries(layer.hooks)) {
       if (!Array.isArray(entries)) continue
       let group = byEvent.get(event)
       if (!group) {
@@ -208,16 +313,15 @@ export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
       const base = {
         scope: layer.scope,
         sourcePath: layer.path,
+        source: layer.source,
         projectId: layer.project?.id,
         projectName: layer.project?.name,
+        ...(layer.inactiveReason ? { inactiveReason: layer.inactiveReason } : {}),
       }
       let localIndex = 0
       for (const entry of entries) {
         if (!entry || typeof entry !== 'object') continue
-        const idSegments = [layer.scope, layer.project?.id, `${event}-${localIndex}`].filter(
-          (s): s is string => s !== undefined
-        )
-        const id = idSegments.join(':')
+        const id = `${layer.source.id}:${event}-${localIndex}`
         if ('command' in entry) {
           // Bare HookCommand — wrap in a rule with an empty matcher
           group.rules.push({ ...base, id, matcher: '', hooks: [entry as HookCommand] })
@@ -237,21 +341,73 @@ export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
   return [...byEvent.values()]
 }
 
+/** The hooks of user, project and local settings layers. See {@link parseHookLayers}. */
+export function parseHooks(layers: SettingsLayer[]): HookEventGroup[] {
+  return parseHookLayers(layers.map(hookLayerOf))
+}
+
 // ─── readExtendedConfig ───────────────────────────────────────────────────────
 
+/** The hooks blocks of every installed plugin, disabled ones marked as not running. */
+async function pluginHookLayers(enabledPlugins: Record<string, boolean>): Promise<HookLayer[]> {
+  const plugins = await discoverPluginSources(enabledPlugins)
+  const layers = await Promise.all(
+    plugins.map(async (source): Promise<HookLayer | null> => {
+      const read = await readPluginHooks(source)
+      if (!read) return null
+      return {
+        scope: 'plugin',
+        path: read.path,
+        hooks: read.hooks,
+        source,
+        ...(source.plugin?.enabled ? {} : { inactiveReason: 'plugin-disabled' as const }),
+      }
+    })
+  )
+  return layers.filter((l): l is HookLayer => l !== null)
+}
+
 /**
- * Hooks from the user layers plus the project and local layers of every
- * project passed. The panel's scalar settings come from the user layers only.
+ * Hooks from the user layers, the project and local layers of every project
+ * passed, every installed plugin and the managed settings file, in that
+ * order. With `allowManagedHooksOnly` set in managed settings, every other
+ * rule is marked as not running (a disabled plugin keeps its own reason).
+ * The panel's scalar settings come from the user layers only.
  */
 export async function readExtendedConfig(projects: ProjectRootRef[]): Promise<ExtendedConfig> {
-  const userLayers = await readSettingsLayers()
-  const projectLayers = (await Promise.all(projects.map((p) => readSettingsLayers(p))))
+  const [userLayers, projectLayersPerRoot, managed] = await Promise.all([
+    readSettingsLayers(),
+    Promise.all(projects.map((p) => readSettingsLayers(p))),
+    readManagedSettings(),
+  ])
+  const projectLayers = projectLayersPerRoot
     .flat()
     .filter((l) => l.scope === 'project' || l.scope === 'local')
   const settings = mergeSettingsLayers(userLayers)
+  const plugins = await pluginHookLayers(effectiveEnabledPlugins(settings, managed?.settings))
+
+  let hookLayers: HookLayer[] = [
+    ...[...userLayers, ...projectLayers].map(hookLayerOf),
+    ...plugins,
+    ...(managed
+      ? [
+          {
+            scope: 'managed' as const,
+            path: managed.path,
+            hooks: managed.settings.hooks,
+            source: MANAGED_SOURCE,
+          },
+        ]
+      : []),
+  ]
+  if (managed?.settings.allowManagedHooksOnly === true) {
+    hookLayers = hookLayers.map((l) =>
+      l.scope === 'managed' || l.inactiveReason ? l : { ...l, inactiveReason: 'managed-only' }
+    )
+  }
 
   return {
-    hooks: parseHooks([...userLayers, ...projectLayers]),
+    hooks: parseHookLayers(hookLayers),
     sandbox: settings.sandbox,
     skipDangerousModePermissionPrompt: settings.skipDangerousModePermissionPrompt ?? false,
     disableSkillShellExecution: settings.disableSkillShellExecution ?? false,
@@ -265,9 +421,12 @@ export async function readExtendedConfig(projects: ProjectRootRef[]): Promise<Ex
 }
 
 // ─── readMcps ─────────────────────────────────────────────────────────────────
-// Claude Code stores MCP servers in ~/.claude.json (top-level mcpServers),
-// not in ~/.claude/settings.json. We read both and merge, deduplicating by name.
-// Status is parsed from ~/.claude/debug/latest which Claude Code writes on startup.
+// Claude Code reads MCP servers from ~/.claude.json (globally and per project),
+// a project's .mcp.json, the settings files and installed plugins, and adds
+// claude.ai connectors and its own built-in servers. See readMcps.
+// Status comes from the latest session transcripts (see mcp-status.ts), or
+// from ~/.claude/debug/latest, which Claude Code only writes with --debug.
+// The more recent of the two wins.
 
 interface ClaudeJsonMcpServer {
   type?: string
@@ -275,10 +434,23 @@ interface ClaudeJsonMcpServer {
   args?: string[]
   url?: string
   env?: Record<string, string>
+  headers?: Record<string, string>
+}
+
+interface ClaudeJsonProject {
+  mcpServers?: Record<string, ClaudeJsonMcpServer>
+  disabledMcpServers?: string[]
+  disabledMcpjsonServers?: string[]
 }
 
 interface ClaudeJson {
   mcpServers?: Record<string, ClaudeJsonMcpServer>
+  projects?: Record<string, ClaudeJsonProject>
+  /** claude.ai connectors this account has used, as `claude.ai <Name>`. */
+  claudeAiMcpEverConnected?: string[]
+  claudeInChromeDefaultEnabled?: boolean
+  hasCompletedClaudeInChromeOnboarding?: boolean
+  hasIdeOnboardingBeenShown?: Record<string, boolean>
 }
 
 interface McpRuntimeStatus {
@@ -356,46 +528,204 @@ function mcpLevelFor(scope: ConfigScope): McpLevel {
   return 'global'
 }
 
-export async function readMcps(project?: ProjectRootRef): Promise<McpServerEntry[]> {
+/** A `mcpServers` map, or an empty one when the value is anything else. */
+function mcpServersOf(value: unknown): Record<string, ClaudeJsonMcpServer> {
+  if (!isPlainObject(value)) return {}
+  return Object.fromEntries(
+    Object.entries(value).filter((e): e is [string, ClaudeJsonMcpServer] => isPlainObject(e[1]))
+  )
+}
+
+/**
+ * A plugin's MCP servers: `mcpServers` in its `plugin.json` (inline, or a
+ * path to a JSON file), else its root `.mcp.json`. Either file may wrap the
+ * map in `mcpServers` or be the map itself.
+ */
+async function readPluginMcps(
+  source: ConfigSource
+): Promise<{ path: string; servers: Record<string, ClaudeJsonMcpServer> } | null> {
+  if (!source.root) return null
+  const manifest = await readPluginManifest(source.root)
+  if (isPlainObject(manifest.mcpServers)) {
+    return {
+      path: path.join(source.root, '.claude-plugin', 'plugin.json'),
+      servers: mcpServersOf(manifest.mcpServers),
+    }
+  }
+  const declared = typeof manifest.mcpServers === 'string' ? manifest.mcpServers : '.mcp.json'
+  const file = await resolvePluginPath(source.root, declared)
+  if (!file) return null
+  const json = await readJsonFile<Record<string, unknown>>(file)
+  if (!isPlainObject(json)) return null
+  return { path: file, servers: mcpServersOf(json.mcpServers ?? json) }
+}
+
+/** IDE names in `<claudeDir>/ide/*.lock`, written by each running IDE extension. */
+async function ideLockNames(): Promise<string[]> {
+  const dir = path.join(getClaudeDir(), 'ide')
+  let files: string[]
+  try {
+    files = (await fs.promises.readdir(dir)).filter((f) => f.endsWith('.lock'))
+  } catch {
+    return []
+  }
+  const locks = await Promise.all(
+    files.map((f) => readJsonFile<{ ideName?: unknown }>(path.join(dir, f)))
+  )
+  return locks.map((l) => (typeof l?.ideName === 'string' ? l.ideName : '')).filter(Boolean)
+}
+
+/**
+ * The servers Claude Code adds itself, as named in tool calls: `claude-in-chrome`
+ * once the Chrome extension is set up, `claude-vscode` once a VS Code-family
+ * editor (VS Code, Cursor, Windsurf) has the Claude Code extension.
+ */
+async function builtinMcpNames(claudeJson: ClaudeJson | null): Promise<string[]> {
+  const names: string[] = []
+  if (
+    claudeJson?.claudeInChromeDefaultEnabled === true ||
+    claudeJson?.hasCompletedClaudeInChromeOnboarding === true
+  ) {
+    names.push('claude-in-chrome')
+  }
+  const vscodeFamily = /visual studio code|vs ?code|cursor|windsurf/i
+  if (
+    claudeJson?.hasIdeOnboardingBeenShown?.vscode === true ||
+    (await ideLockNames()).some((n) => vscodeFamily.test(n))
+  ) {
+    names.push('claude-vscode')
+  }
+  return names
+}
+
+/**
+ * Every MCP server Claude Code would start, in this order: `~/.claude.json`
+ * and the user settings (global); for each project its `.mcp.json` and
+ * `.claude/settings.json` (project), then `.claude/settings.local.json` and its
+ * entry in `~/.claude.json` (local); installed plugins' servers, named
+ * `plugin:<plugin>:<server>`; the claude.ai connectors this account has
+ * used; and Claude Code's built-in servers.
+ *
+ * A name is listed once per project: the first definition wins, and a global
+ * one hides a project's server of the same name. Names match Claude Code's
+ * own, so `mcpToolServerName` turns them into the `mcp__<server>__` prefix.
+ */
+export async function readMcps(projects: ProjectRootRef[] = []): Promise<McpServerEntry[]> {
   const seen = new Set<string>()
   const entries: McpServerEntry[] = []
 
-  const statuses = await readMcpStatuses()
+  const [debugStatuses, transcriptInfo, claudeJson, userLayers, managed] = await Promise.all([
+    readMcpStatuses(),
+    readTranscriptMcpInfo(),
+    readJsonFile<ClaudeJson>(getClaudeJsonPath()),
+    readSettingsLayers(),
+    readManagedSettings(),
+  ])
 
-  const add = (name: string, cfg: ClaudeJsonMcpServer, level: McpLevel): void => {
-    // First definition wins, as before.
-    if (seen.has(name)) return
-    seen.add(name)
-    const s = statuses.get(name)
+  const add = (
+    name: string,
+    cfg: ClaudeJsonMcpServer,
+    level: McpLevel,
+    extra: Partial<McpServerEntry> = {}
+  ): void => {
+    const projectKey = extra.projectId ? `${extra.projectId}\0${name}` : null
+    if (seen.has(name) || (projectKey && seen.has(projectKey))) return
+    seen.add(projectKey ?? name)
+    const fromDebug = debugStatuses.get(name)
+    const toolName = mcpToolServerName(name)
+    const fromTranscript = transcriptInfo.statuses.get(toolName)
+    const instructions = transcriptInfo.instructions.get(toolName)
+    const s =
+      fromTranscript && (!fromDebug?.lastSeen || fromDebug.lastSeen < fromTranscript.lastSeen)
+        ? fromTranscript
+        : fromDebug
     entries.push({
-      id: name,
+      id: projectKey ? `${extra.projectId}:${name}` : name,
       name,
       type: cfg.type ?? (cfg.command ? 'stdio' : cfg.url ? 'sse' : undefined),
       command: cfg.command,
-      args: cfg.args ?? [],
+      args: Array.isArray(cfg.args) ? cfg.args : [],
       url: cfg.url,
-      env: cfg.env ?? {},
+      env: isPlainObject(cfg.env) ? cfg.env : {},
+      // Header values carry tokens: only their names leave the main process.
+      ...(isPlainObject(cfg.headers) && Object.keys(cfg.headers).length > 0
+        ? { headerNames: Object.keys(cfg.headers) }
+        : {}),
       level,
+      ...extra,
       status: s?.status ?? 'unknown',
       error: s?.error,
-      capabilities: s?.capabilities,
+      ...(s && 'capabilities' in s && s.capabilities ? { capabilities: s.capabilities } : {}),
+      ...(s && 'toolCount' in s && s.toolCount ? { toolCount: s.toolCount } : {}),
+      ...(s && 'tools' in s && s.tools ? { tools: s.tools } : {}),
+      ...(instructions ? { instructions } : {}),
       lastSeen: s?.lastSeen,
     })
   }
 
-  // 1. ~/.claude.json (primary source for global MCPs)
-  const claudeJson = await readJsonFile<ClaudeJson>(getClaudeJsonPath())
-  for (const [name, cfg] of Object.entries(claudeJson?.mcpServers ?? {})) {
-    add(name, cfg, 'global')
+  // 1. Global: ~/.claude.json, then the user settings.
+  const claudeJsonPath = getClaudeJsonPath()
+  for (const [name, cfg] of Object.entries(mcpServersOf(claudeJson?.mcpServers))) {
+    add(name, cfg, 'global', { sourcePath: claudeJsonPath })
+  }
+  for (const layer of userLayers) {
+    for (const [name, cfg] of Object.entries(mcpServersOf(layer.settings.mcpServers))) {
+      add(name, cfg, 'global', { sourcePath: layer.path })
+    }
   }
 
-  // 2. The settings layers (some setups use these). Walk the layers rather
-  // than the merged object so each server keeps the level of the file that
-  // defined it.
-  for (const layer of await readSettingsLayers(project)) {
-    for (const [name, cfg] of Object.entries(layer.settings.mcpServers ?? {})) {
-      add(name, cfg, mcpLevelFor(layer.scope))
+  // 2. Per project: .mcp.json, the project and local settings, then the
+  // project's entry in ~/.claude.json (Claude Code's "local" scope).
+  for (const project of projects) {
+    const state = claudeJson?.projects?.[project.path]
+    const disabled = new Set([
+      ...asList(state?.disabledMcpServers),
+      ...asList(state?.disabledMcpjsonServers),
+    ])
+    const base = { projectId: project.id, projectName: project.name }
+    const flags = (name: string): Partial<McpServerEntry> =>
+      disabled.has(name) ? { ...base, disabled: true } : base
+
+    const mcpJsonPath = path.join(project.path, '.mcp.json')
+    const mcpJson = await readJsonFile<{ mcpServers?: unknown }>(mcpJsonPath)
+    for (const [name, cfg] of Object.entries(mcpServersOf(mcpJson?.mcpServers))) {
+      add(name, cfg, 'project', { ...flags(name), sourcePath: mcpJsonPath })
     }
+    const projectLayers = (await readSettingsLayers(project)).filter((l) => l.scope !== 'user')
+    for (const layer of projectLayers) {
+      for (const [name, cfg] of Object.entries(mcpServersOf(layer.settings.mcpServers))) {
+        add(name, cfg, mcpLevelFor(layer.scope), { ...flags(name), sourcePath: layer.path })
+      }
+    }
+    for (const [name, cfg] of Object.entries(mcpServersOf(state?.mcpServers))) {
+      add(name, cfg, 'local', { ...flags(name), sourcePath: claudeJsonPath })
+    }
+  }
+
+  // 3. Installed plugins; a disabled plugin's servers are listed, marked.
+  const plugins = await discoverPluginSources(
+    effectiveEnabledPlugins(mergeSettingsLayers(userLayers), managed?.settings)
+  )
+  for (const source of plugins) {
+    const read = await readPluginMcps(source)
+    if (!read) continue
+    const pluginName = source.plugin?.name ?? source.label
+    for (const [server, cfg] of Object.entries(read.servers)) {
+      add(`plugin:${pluginName}:${server}`, cfg, 'plugin', {
+        pluginName,
+        sourcePath: read.path,
+        ...(source.plugin?.enabled === false ? { disabled: true } : {}),
+      })
+    }
+  }
+
+  // 4. claude.ai connectors, then Claude Code's own servers. Neither has a
+  // config file: they are known from ~/.claude.json flags.
+  for (const name of asList(claudeJson?.claudeAiMcpEverConnected)) {
+    if (typeof name === 'string' && name) add(name, { type: 'http' }, 'connector')
+  }
+  for (const name of await builtinMcpNames(claudeJson)) {
+    add(name, {}, 'builtin')
   }
 
   return entries
@@ -435,18 +765,25 @@ async function walkMarkdown(dir: string, rel: string[] = []): Promise<MarkdownFi
   return results
 }
 
-/**
- * Reads every command markdown file under `dir` (recursively). The display
- * name for a namespaced file joins its directory segments and base name with
- * `:` (e.g. `git/commit.md` -> `git:commit`), unless the frontmatter sets an
- * explicit `name`, which replaces that computed name entirely.
- */
-async function readCommandsFromDir(
-  dir: string,
-  scope: 'user' | 'project',
+interface CommandContext {
+  scope: 'user' | 'project' | 'plugin'
+  source: ConfigSource
   project?: ProjectRootRef
+  /** `<plugin>:` for plugin commands, which Claude Code namespaces by plugin. */
+  namePrefix?: string
+  inactive?: boolean
+}
+
+/**
+ * The display name for a namespaced file joins its directory segments and
+ * base name with `:` (e.g. `git/commit.md` -> `git:commit`), unless the
+ * frontmatter sets an explicit `name`, which replaces that computed name. A
+ * plugin's commands get the plugin name in front (`seo:seo-check`).
+ */
+async function commandsFromFiles(
+  files: MarkdownFile[],
+  ctx: CommandContext
 ): Promise<CommandEntry[]> {
-  const files = await walkMarkdown(dir)
   const entries: CommandEntry[] = []
 
   for (const { file, rel } of files) {
@@ -458,48 +795,134 @@ async function readCommandsFromDir(
     const { meta, body } = parseFrontmatter(content)
     const baseName = rel[rel.length - 1].replace(/\.md$/, '')
     const defaultName = [...rel.slice(0, -1), baseName].join(':')
+    const args = parseFrontmatterArguments(content)
 
     entries.push({
-      id: `${scope}:${file}`,
-      name: meta['name'] ?? defaultName,
+      id: `${ctx.source.id}:${file}`,
+      name: `${ctx.namePrefix ?? ''}${meta['name'] || defaultName}`,
       description: meta['description'],
       content: body.trim() || content,
       sizeBytes,
-      scope,
+      scope: ctx.scope,
+      source: ctx.source,
       filePath: file,
-      projectId: project?.id,
-      projectName: project?.name,
+      ...(args && args.length > 0 ? { arguments: args } : {}),
+      ...(ctx.inactive ? { inactive: true as const } : {}),
+      projectId: ctx.project?.id,
+      projectName: ctx.project?.name,
     })
   }
 
   return entries
 }
 
+/** Every command markdown file under `dir` (recursively). */
+async function readCommandsFromDir(dir: string, ctx: CommandContext): Promise<CommandEntry[]> {
+  return commandsFromFiles(await walkMarkdown(dir), ctx)
+}
+
 /**
- * User commands from `getUserCommandsDirPath()`, then each project's
- * `<root>/.claude/commands`, recursively. Never
- * `<claudeDir>/projects/<id>/commands` — that directory only holds
- * transcripts and `memory/`, never commands.
+ * A plugin's command files: its `commands/` folder plus every path its
+ * `plugin.json` lists under `commands` (folders or single `.md` files), each
+ * resolved inside the plugin folder. A file reached twice is read once.
+ */
+async function pluginCommandFiles(root: string): Promise<MarkdownFile[]> {
+  const manifest = await readPluginManifest(root)
+  const declared =
+    typeof manifest.commands === 'string'
+      ? [manifest.commands]
+      : Array.isArray(manifest.commands)
+        ? manifest.commands.filter((c): c is string => typeof c === 'string')
+        : []
+
+  const files: MarkdownFile[] = []
+  for (const entry of ['commands', ...declared]) {
+    const resolved = await resolvePluginPath(root, entry)
+    if (!resolved) continue
+    const stat = await fs.promises.stat(resolved).catch(() => null)
+    if (stat?.isDirectory()) files.push(...(await walkMarkdown(resolved)))
+    else if (stat?.isFile() && resolved.endsWith('.md')) {
+      files.push({ file: resolved, rel: [path.basename(resolved)] })
+    }
+  }
+  const seen = new Set<string>()
+  return files.filter((f) => !seen.has(f.file) && !!seen.add(f.file))
+}
+
+/** Installed plugins, enabled as the user and managed settings say. */
+async function currentPluginSources(): Promise<ConfigSource[]> {
+  const [userLayers, managed] = await Promise.all([readSettingsLayers(), readManagedSettings()])
+  return discoverPluginSources(
+    effectiveEnabledPlugins(mergeSettingsLayers(userLayers), managed?.settings)
+  )
+}
+
+/**
+ * User commands from `getUserCommandsDirPath()`, each project's
+ * `<root>/.claude/commands` and every installed plugin's commands,
+ * recursively. Never `<claudeDir>/projects/<id>/commands` — that directory
+ * only holds transcripts and `memory/`, never commands.
  *
  * A project rooted at the home directory shares its commands directory with
  * the user one, and every command in it was listed twice. Such a project is
  * skipped here, exactly as its settings layer is in `readSettingsLayers`.
+ * A disabled plugin's commands are listed, marked `inactive`.
  */
 export async function readCommands(projects: ProjectRootRef[]): Promise<CommandEntry[]> {
   const userCommandsDir = getUserCommandsDirPath()
-  const userCommands = await readCommandsFromDir(userCommandsDir, 'user')
-  const projectCommands = await Promise.all(
-    projects
-      .map((project) => ({ project, dir: path.join(project.path, '.claude', 'commands') }))
-      .filter(({ dir }) => !samePath(dir, userCommandsDir))
-      .map(({ project, dir }) => readCommandsFromDir(dir, 'project', project))
-  )
-  return [...userCommands, ...projectCommands.flat()]
+  const [userCommands, projectCommands, pluginCommands] = await Promise.all([
+    readCommandsFromDir(userCommandsDir, {
+      scope: 'user',
+      source: sourceForLayer({ scope: 'user', path: '', settings: {} }),
+    }),
+    Promise.all(
+      projects
+        .map((project) => ({ project, dir: path.join(project.path, '.claude', 'commands') }))
+        .filter(({ dir }) => !samePath(dir, userCommandsDir))
+        .map(({ project, dir }) =>
+          readCommandsFromDir(dir, {
+            scope: 'project',
+            source: sourceForLayer({ scope: 'project', path: '', settings: {}, project }),
+            project,
+          })
+        )
+    ),
+    currentPluginSources().then((plugins) =>
+      Promise.all(
+        plugins.map(async (source) =>
+          source.root
+            ? commandsFromFiles(await pluginCommandFiles(source.root), {
+                scope: 'plugin',
+                source,
+                namePrefix: `${source.label}:`,
+                inactive: source.plugin?.enabled === false,
+              })
+            : []
+        )
+      )
+    ),
+  ])
+  return [...userCommands, ...projectCommands.flat(), ...pluginCommands.flat()]
 }
 
 // ─── readSkills ───────────────────────────────────────────────────────────────
 
-export async function readSkillsFromDir(skillsDir: string): Promise<SkillEntry[]> {
+interface SkillDirOptions {
+  /** Labels each skill; ids become `<source.id>:<dir>` so two sources never collide. */
+  source?: ConfigSource
+  /** `<plugin>:` for plugin skills, which Claude Code names by plugin. */
+  namePrefix?: string
+}
+
+/**
+ * Every `<skillsDir>/<name>/SKILL.md`. Without a source the id is the folder
+ * name (a project's raw `localSkills`); with one, each skill carries it and
+ * its file path.
+ */
+export async function readSkillsFromDir(
+  skillsDir: string,
+  opts: SkillDirOptions = {}
+): Promise<SkillEntry[]> {
   let skillDirs: string[] = []
   try {
     const entries = await fs.promises.readdir(skillsDir, { withFileTypes: true })
@@ -520,24 +943,199 @@ export async function readSkillsFromDir(skillsDir: string): Promise<SkillEntry[]
     const { meta, body } = parseFrontmatter(content)
 
     const { name, displayName, description, ...extraMeta } = meta
+    const fullName = `${opts.namePrefix ?? ''}${name || dirName}`
 
     skills.push({
-      id: dirName,
-      name: name ?? dirName,
-      displayName: displayName ?? name ?? dirName,
+      id: opts.source ? `${opts.source.id}:${dirName}` : dirName,
+      name: fullName,
+      displayName: opts.namePrefix ? fullName : displayName || name || dirName,
       description: description,
       metadata: extraMeta,
       body: body.trim(),
       sizeBytes,
+      ...(opts.source ? { source: opts.source, filePath: skillFile } : {}),
     })
   }
 
   return skills
 }
 
-export async function readSkills(): Promise<SkillEntry[]> {
-  const claudeDir = getClaudeDir()
-  return readSkillsFromDir(path.join(claudeDir, 'skills'))
+/** What `readAllSkills` needs from a scanned project. */
+export interface SkillScanProject {
+  id: string
+  name: string
+  path: string
+  pathResolved?: boolean
+  localSkills: SkillEntry[]
+  sessions: Array<{
+    lastTimestamp: string
+    skillListing?: Array<{ name: string; description?: string }>
+  }>
+}
+
+interface SkillUsage {
+  description?: string
+  lastSeen: string
+  sessionCount: number
+}
+
+function skillUsageAcross(projects: SkillScanProject[]): Map<string, SkillUsage> {
+  const usage = new Map<string, SkillUsage>()
+  for (const project of projects) {
+    for (const session of project.sessions) {
+      for (const { name, description } of session.skillListing ?? []) {
+        const u = usage.get(name)
+        if (!u) {
+          usage.set(name, { description, lastSeen: session.lastTimestamp, sessionCount: 1 })
+          continue
+        }
+        u.sessionCount++
+        if (session.lastTimestamp > u.lastSeen) u.lastSeen = session.lastTimestamp
+        u.description ??= description
+      }
+    }
+  }
+  return usage
+}
+
+const BUILTIN_SOURCE: ConfigSource = { kind: 'builtin', id: 'builtin', label: 'Built-in' }
+const CLAUDE_AI_SKILLS_PREFIX = 'anthropic-skills'
+
+/**
+ * The source of a skill a session listed that no file on disk provides:
+ * `anthropic-skills:<x>` is the claude.ai account's skills; `<plugin>:<x>`
+ * an installed plugin, or one no longer installed; a bare name is built into
+ * Claude Code.
+ */
+function sessionSkillSource(name: string, plugins: Map<string, ConfigSource>): ConfigSource {
+  const colon = name.indexOf(':')
+  if (colon <= 0) return BUILTIN_SOURCE
+  const prefix = name.slice(0, colon)
+  if (prefix === CLAUDE_AI_SKILLS_PREFIX) {
+    return {
+      kind: 'plugin',
+      id: `plugin:${prefix}@claude.ai`,
+      label: prefix,
+      plugin: { name: prefix, origin: 'claude.ai', enabled: true },
+    }
+  }
+  return (
+    plugins.get(prefix) ?? {
+      kind: 'plugin',
+      id: `plugin:${prefix}@unknown`,
+      label: prefix,
+      plugin: { name: prefix, origin: 'marketplace', enabled: false, installed: false },
+    }
+  )
+}
+
+/**
+ * Every skill Claude Code can load, for the Skills panel: user skills
+ * (`<claudeDir>/skills`), each resolved project's `.claude/skills`, every
+ * installed plugin's `skills/` (named `<plugin>:<skill>`), and every skill a
+ * scanned session listed that none of those provide — built-in skills,
+ * claude.ai skills, skills of a plugin since removed, and commands Claude
+ * Code also offers as skills. Session-listed skills have a name and a
+ * description, no body. Every skill a session listed carries when it was last
+ * listed and in how many sessions.
+ */
+export async function readAllSkills(projects: SkillScanProject[]): Promise<SkillEntry[]> {
+  const roots = projects
+    .filter((p) => p.pathResolved !== false)
+    .map((p) => ({ id: p.id, name: p.name, path: p.path }))
+  const userSource = sourceForLayer({ scope: 'user', path: '', settings: {} })
+
+  const [userSkills, plugins, commands] = await Promise.all([
+    readSkillsFromDir(getUserSkillsDirPath(), { source: userSource }),
+    currentPluginSources(),
+    readCommands(roots),
+  ])
+  const projectSkills = projects.flatMap((project) => {
+    const source = sourceForLayer({ scope: 'project', path: '', settings: {}, project })
+    return project.localSkills.map((skill): SkillEntry => ({
+      ...skill,
+      id: `${source.id}:${skill.id}`,
+      source,
+      filePath: path.join(project.path, '.claude', 'skills', skill.id, 'SKILL.md'),
+    }))
+  })
+  const pluginSkills = (
+    await Promise.all(
+      plugins.map((source) =>
+        source.root
+          ? readSkillsFromDir(path.join(source.root, 'skills'), {
+              source,
+              namePrefix: `${source.label}:`,
+            })
+          : []
+      )
+    )
+  ).flat()
+
+  const usage = skillUsageAcross(projects)
+  const withUsage = (skill: SkillEntry): SkillEntry => {
+    const u = usage.get(skill.name)
+    return u ? { ...skill, lastSeen: u.lastSeen, sessionCount: u.sessionCount } : skill
+  }
+
+  const onDisk = [...userSkills, ...projectSkills, ...pluginSkills].map(withUsage)
+  const known = new Set(onDisk.map((s) => s.name))
+  const pluginsByName = new Map(plugins.map((p) => [p.label, p]))
+  const commandsByName = new Map(commands.map((c) => [c.name, c]))
+
+  const fromSessions: SkillEntry[] = []
+  for (const [name, u] of usage) {
+    if (known.has(name)) continue
+    const command = commandsByName.get(name)
+    const source = command ? command.source : sessionSkillSource(name, pluginsByName)
+    fromSessions.push({
+      id: `${source.id}:session:${name}`,
+      name,
+      displayName: name,
+      description: u.description ?? command?.description,
+      metadata: {},
+      body: '',
+      sizeBytes: 0,
+      source,
+      sessionOnly: true,
+      ...(command ? { exposedAs: 'command' as const, filePath: command.filePath } : {}),
+      lastSeen: u.lastSeen,
+      sessionCount: u.sessionCount,
+    })
+  }
+
+  return [...onDisk, ...fromSessions]
+}
+
+// ─── readPlugins ──────────────────────────────────────────────────────────────
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+/**
+ * Every installed plugin (see `discoverPluginSources`), with the description,
+ * author and homepage its `plugin.json` gives. `author` may be a name or an
+ * object with a `name`.
+ */
+export async function readPlugins(): Promise<PluginEntry[]> {
+  const sources = await currentPluginSources()
+  return Promise.all(
+    sources.map(async (source): Promise<PluginEntry> => {
+      const manifest = source.root ? await readPluginManifest(source.root) : {}
+      const author =
+        nonEmptyString(manifest.author) ??
+        (isPlainObject(manifest.author) ? nonEmptyString(manifest.author.name) : undefined)
+      const description = nonEmptyString(manifest.description)
+      const homepage = nonEmptyString(manifest.homepage)
+      return {
+        source,
+        ...(description ? { description } : {}),
+        ...(author ? { author } : {}),
+        ...(homepage ? { homepage } : {}),
+      }
+    })
+  )
 }
 
 // ─── readMemoryFiles ──────────────────────────────────────────────────────────
@@ -566,6 +1164,7 @@ export async function readMemoryFiles(
       path: globalClaudeMd,
       content: content ?? undefined,
       sizeBytes: stat?.size,
+      modifiedAt: stat?.mtime.toISOString(),
     })
   }
 
@@ -582,6 +1181,7 @@ export async function readMemoryFiles(
         path: projectClaudeMd,
         content: content ?? undefined,
         sizeBytes: stat?.size,
+        modifiedAt: stat?.mtime.toISOString(),
       })
     }
   }
@@ -606,6 +1206,7 @@ export async function readMemoryFiles(
           path: memPath,
           content: content ?? undefined,
           sizeBytes: stat?.size,
+          modifiedAt: stat?.mtime.toISOString(),
         })
       }
     } catch {
@@ -614,6 +1215,92 @@ export async function readMemoryFiles(
   }
 
   return files
+}
+
+/** What `readAllAutoMemory` needs from a scanned project to name its memory folders. */
+export interface MemoryScanProject {
+  id: string
+  name: string
+  /** Each session's `projectId` is the folder it was scanned from (worktree folders included). */
+  sessions: Array<{ projectId: string }>
+}
+
+/**
+ * The auto-memory notes Claude Code keeps in `projects/<dir>/memory`, for the
+ * Memory tab's all-projects view, for the same projects the Sessions tab
+ * lists: those the scan found. Each file is named after the scanned project
+ * that owns its folder — a worktree folder merged into a project counts as
+ * that project. A folder the scan does not know (its transcripts were
+ * deleted) is left out. Sorted by project, then folder, with each folder's
+ * `MEMORY.md` index first.
+ */
+export async function readAllAutoMemory(projects: MemoryScanProject[]): Promise<MemoryFile[]> {
+  const projectsDir = getProjectsDirPath()
+  let dirIds: string[]
+  try {
+    dirIds = (await fs.promises.readdir(projectsDir, { withFileTypes: true }))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+  } catch {
+    return []
+  }
+
+  const owner = new Map<string, { id: string; name: string }>()
+  for (const project of projects) {
+    const ref = { id: project.id, name: project.name }
+    owner.set(project.id, ref)
+    for (const session of project.sessions) owner.set(session.projectId, ref)
+  }
+
+  const perDir = await Promise.all(
+    dirIds.map(async (dirId): Promise<MemoryFile[]> => {
+      const project = owner.get(dirId)
+      if (!project) return []
+      const memoryDir = path.join(projectsDir, dirId, 'memory')
+      let names: string[]
+      try {
+        names = (await fs.promises.readdir(memoryDir, { withFileTypes: true }))
+          .filter((e) => e.isFile() && e.name.endsWith('.md'))
+          .map((e) => e.name)
+      } catch {
+        return []
+      }
+      names.sort((a, b) => (a === 'MEMORY.md' ? -1 : b === 'MEMORY.md' ? 1 : a.localeCompare(b)))
+      return Promise.all(
+        names.map(async (name): Promise<MemoryFile> => {
+          const filePath = path.join(memoryDir, name)
+          const [content, stat] = await Promise.all([
+            readTextFile(filePath),
+            fs.promises.stat(filePath).catch(() => null),
+          ])
+          return {
+            id: `memory:${dirId}:${name}`,
+            label: name.replace(/\.md$/, ''),
+            sublabel: 'auto-memory',
+            path: filePath,
+            content: content ?? undefined,
+            sizeBytes: stat?.size,
+            modifiedAt: stat?.mtime.toISOString(),
+            projectId: project.id,
+            projectName: project.name,
+          }
+        })
+      )
+    })
+  )
+
+  // The project's own folder before its worktree folders, then by folder name.
+  const folderOf = (f: MemoryFile): string => path.basename(path.dirname(path.dirname(f.path)))
+  const isOwnFolder = (f: MemoryFile): number => (folderOf(f) === f.projectId ? 0 : 1)
+  return perDir
+    .filter((files) => files.length > 0)
+    .sort(
+      (a, b) =>
+        (a[0].projectName ?? '').localeCompare(b[0].projectName ?? '') ||
+        isOwnFolder(a[0]) - isOwnFolder(b[0]) ||
+        folderOf(a[0]).localeCompare(folderOf(b[0]))
+    )
+    .flat()
 }
 
 // ─── readRawSettings ──────────────────────────────────────────────────────────

@@ -1,11 +1,10 @@
 import * as fs from 'fs/promises'
-import { createReadStream, type Dirent } from 'fs'
-import * as readline from 'readline'
+import { type Dirent } from 'fs'
 import * as path from 'path'
-import { getDefaultPlansDirPath, getProjectsDirPath } from '@main/lib/claude-paths'
+import { getDefaultPlansDirPath } from '@main/lib/claude-paths'
 import { readSettingsLayers, mergeSettingsLayers } from './config-service'
 import type { ProjectRootRef, RawSettings } from '@shared/types/config'
-import type { PlanSummary, PlanDetail } from '@shared/types/plan'
+import type { PlanSummary, PlanDetail, PlanProjectRef } from '@shared/types/plan'
 
 // A directory plans were resolved from, plus enough context to label the
 // plans found in it: the default `<claudeDir>/plans` (`scope: 'default'`) or
@@ -19,35 +18,35 @@ export interface PlanDirectory {
 // Structurally compatible with `Project` (from `@shared/types/project`) —
 // declared narrower here so this module stays free of that type (and the
 // IPC-adjacent scanning code that produces it). Only `id`, `name` and each
-// session's `projectId` are read.
-export interface ProjectNameLookup {
+// session's `slug` are read.
+export interface ProjectSlugLookup {
   id: string
   name: string
-  sessions: Array<{ projectId: string }>
+  sessions: Array<{ slug?: string }>
 }
 
-// Scan a JSONL for a slug occurrence line-by-line and return as soon as one
-// is found. Session files put the slug on the first summary line, so the
-// common case reads a single line instead of the full megabytes-large file.
-async function jsonlContainsSlug(filePath: string, slug: string): Promise<boolean> {
-  const needleA = `"slug":"${slug}"`
-  const needleB = `"slug": "${slug}"`
-  let stream: ReturnType<typeof createReadStream> | null = null
-  try {
-    stream = createReadStream(filePath, { encoding: 'utf-8' })
-    const rl = readline.createInterface({ input: stream, crlfDelay: Infinity })
-    for await (const line of rl) {
-      if (line.includes(needleA) || line.includes(needleB)) {
-        rl.close()
-        return true
-      }
+/** Which projects used each plan, keyed by plan slug (the filename without `.md`). */
+export type PlanUsage = Map<string, PlanProjectRef[]>
+
+/**
+ * Plan files in the shared folder are named after the slug of the session
+ * that wrote them, and every scanned session summary already carries its
+ * slug. One pass over the scan replaces reading every transcript once per
+ * plan. Projects are listed once each, sorted by name; a merged worktree
+ * project counts once however many of its sessions share the slug.
+ */
+export function planUsageBySlug(projects: ProjectSlugLookup[]): PlanUsage {
+  const usage: PlanUsage = new Map()
+  for (const project of projects) {
+    const slugs = new Set(project.sessions.map((s) => s.slug).filter((s): s is string => !!s))
+    for (const slug of slugs) {
+      const refs = usage.get(slug) ?? []
+      refs.push({ projectId: project.id, projectName: project.name })
+      usage.set(slug, refs)
     }
-    return false
-  } catch {
-    return false
-  } finally {
-    stream?.destroy()
   }
+  for (const refs of usage.values()) refs.sort((a, b) => a.projectName.localeCompare(b.projectName))
+  return usage
 }
 
 function extractTitle(content: string, filename: string): string {
@@ -111,7 +110,7 @@ export async function resolvePlanDirectories(projects: ProjectRootRef[]): Promis
   return dirs
 }
 
-async function listPlansInDir(dir: PlanDirectory): Promise<PlanSummary[]> {
+async function listPlansInDir(dir: PlanDirectory, usage?: PlanUsage): Promise<PlanSummary[]> {
   let entries: Dirent[]
   try {
     entries = await fs.readdir(dir.directory, { withFileTypes: true })
@@ -142,6 +141,9 @@ async function listPlansInDir(dir: PlanDirectory): Promise<PlanSummary[]> {
           projectName: dir.project?.name,
           createdAt: stat.birthtime.toISOString(),
           sizeBytes: stat.size,
+          ...(dir.scope === 'default' && usage
+            ? { usedBy: usage.get(filename.replace(/\.md$/, '')) ?? [] }
+            : {}),
         }
       } catch {
         return null
@@ -154,9 +156,10 @@ async function listPlansInDir(dir: PlanDirectory): Promise<PlanSummary[]> {
 
 /** Every plan across `dirs`, most recently created first. A missing directory
  * (a project `plansDirectory` that doesn't exist yet) yields no plans rather
- * than failing the whole list. */
-export async function listPlans(dirs: PlanDirectory[]): Promise<PlanSummary[]> {
-  const perDir = await Promise.all(dirs.map(listPlansInDir))
+ * than failing the whole list. With `usage`, each shared-folder plan gets the
+ * projects whose sessions used it (`usedBy`). */
+export async function listPlans(dirs: PlanDirectory[], usage?: PlanUsage): Promise<PlanSummary[]> {
+  const perDir = await Promise.all(dirs.map((dir) => listPlansInDir(dir, usage)))
   return perDir.flat().sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''))
 }
 
@@ -206,62 +209,4 @@ export async function readPlan(id: string, dirs: PlanDirectory[]): Promise<PlanD
     content,
     directory: dir.directory,
   }
-}
-
-/**
- * Display names of the projects whose transcripts mention `slug`, resolved
- * by scanning `~/.claude/projects/<dir>` for a matching JSONL and mapping
- * each matched directory back to the (possibly worktree-merged) project
- * that owns it via `session.projectId`, which — unlike `Project.id` — keeps
- * the raw scanned directory name for every member of a merged group. Each
- * name appears once even when several of a merged project's directories match.
- */
-export async function projectNamesForSlug(
-  slug: string,
-  projects: ProjectNameLookup[]
-): Promise<string[]> {
-  const projectsDir = getProjectsDirPath()
-  let dirNames: string[]
-  try {
-    dirNames = await fs.readdir(projectsDir)
-  } catch {
-    return []
-  }
-
-  const matchedDirNames = new Set<string>()
-  await Promise.all(
-    dirNames.map(async (dirName) => {
-      const dirPath = path.join(projectsDir, dirName)
-      let stat: Awaited<ReturnType<typeof fs.stat>>
-      try {
-        stat = await fs.stat(dirPath)
-      } catch {
-        return
-      }
-      if (!stat.isDirectory()) return
-
-      let files: string[]
-      try {
-        files = await fs.readdir(dirPath)
-      } catch {
-        return
-      }
-
-      for (const file of files.filter((f) => f.endsWith('.jsonl'))) {
-        if (await jsonlContainsSlug(path.join(dirPath, file), slug)) {
-          matchedDirNames.add(dirName)
-          break
-        }
-      }
-    })
-  )
-
-  const names = new Set<string>()
-  for (const project of projects) {
-    const ownedDirNames = new Set([project.id, ...project.sessions.map((s) => s.projectId)])
-    if ([...matchedDirNames].some((d) => ownedDirNames.has(d))) {
-      names.add(project.name)
-    }
-  }
-  return [...names].sort()
 }
