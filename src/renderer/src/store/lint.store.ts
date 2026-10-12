@@ -1,28 +1,32 @@
 import { create } from 'zustand'
-import type { LintResult, LintSummary, LintSeverity } from '@shared/types'
+import type { LintResult, LintSummary } from '@shared/types'
 import { ipc } from '@renderer/lib/ipc-client'
+import type { SeverityFilter } from '@renderer/components/lint/health-view'
 
 interface LintState {
   lintResults: LintResult[]
   lintSummary: LintSummary | null
-  severityFilter: LintSeverity | 'all'
-  ruleFilter: string
+  severityFilter: SeverityFilter
+  /** Sidebar filter text, matched against check id, message, area and path. */
+  search: string
+  /** The result open in the main panel; null shows the overview. */
+  selectedResultId: string | null
   isRunning: boolean
   lastRunAt: Date | null
   error: string | null
 
   runLint(projectId?: string): Promise<void>
-  setSeverityFilter(s: LintSeverity | 'all'): void
-  setRuleFilter(id: string): void
-  filteredResults(): LintResult[]
-  secrets(): LintResult[]
+  setSeverityFilter(s: SeverityFilter): void
+  setSearch(text: string): void
+  setSelectedResult(id: string | null): void
 }
 
 export const useLintStore = create<LintState>((set, get) => ({
   lintResults: [],
   lintSummary: null,
   severityFilter: 'all',
-  ruleFilter: '',
+  search: '',
+  selectedResultId: null,
   isRunning: false,
   lastRunAt: null,
   error: null,
@@ -36,9 +40,21 @@ export const useLintStore = create<LintState>((set, get) => ({
         return
       }
       const summaryResult = await ipc.lint.getSummary()
+      // Result ids are new on every run; keep the selection only if the same
+      // check on the same target is still failing.
+      const prev = get().lintResults.find((r) => r.id === get().selectedResultId)
+      const same = prev
+        ? runResult.data.find(
+            (r) =>
+              r.checkId === prev.checkId &&
+              r.filePath === prev.filePath &&
+              r.message === prev.message
+          )
+        : undefined
       set({
         lintResults: runResult.data,
         lintSummary: summaryResult.ok ? summaryResult.data : null,
+        selectedResultId: same?.id ?? null,
         lastRunAt: new Date(),
       })
     } catch (err) {
@@ -52,20 +68,11 @@ export const useLintStore = create<LintState>((set, get) => ({
     set({ severityFilter: s })
   },
 
-  setRuleFilter(id) {
-    set({ ruleFilter: id })
+  setSearch(text) {
+    set({ search: text })
   },
 
-  filteredResults() {
-    const { lintResults, severityFilter, ruleFilter } = get()
-    return lintResults.filter((r) => {
-      if (severityFilter !== 'all' && r.severity !== severityFilter) return false
-      if (ruleFilter && !r.checkId.toLowerCase().includes(ruleFilter.toLowerCase())) return false
-      return true
-    })
-  },
-
-  secrets() {
-    return get().lintResults.filter((r) => r.checkId.startsWith('SEC'))
+  setSelectedResult(id) {
+    set({ selectedResultId: id })
   },
 }))

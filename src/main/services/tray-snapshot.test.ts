@@ -96,6 +96,7 @@ function session(id: string, projectId: string, dailyUsage: SessionDayUsage[]): 
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
   }
 }
 
@@ -351,5 +352,38 @@ describe('buildTraySnapshot — liveness considers an open turn, not only the la
     const snapshot = buildTraySnapshot([project('alpha', [closed])], ANTHROPIC_PRICING)
     expect(snapshot.activeSessions).toEqual([])
     expect(snapshot.recentSessions.map((s) => s.id)).toEqual(['closed-1'])
+  })
+})
+
+describe('buildTraySnapshot — context fill', () => {
+  it('passes each session’s context fill through to the tray rows', () => {
+    const fill = { tokens: 120_000, window: 200_000, windowEstimated: false }
+    const live: SessionSummary = {
+      ...session('live-1', 'alpha', [day({ day: TODAY_KEY, messageCount: 1 })]),
+      lastTimestamp: new Date().toISOString(),
+      contextFill: fill,
+    }
+    const snapshot = buildTraySnapshot([project('alpha', [live])], ANTHROPIC_PRICING)
+    expect(snapshot.activeSessions[0].contextFill).toEqual(fill)
+  })
+})
+
+describe('buildTraySnapshot — cost limits', () => {
+  it('carries the active cost limits and each session’s cost for the tray’s over-limit hints', () => {
+    const live: SessionSummary = {
+      ...session('live-1', 'alpha', [day({ day: TODAY_KEY, messageCount: 1, estimatedCost: 12 })]),
+      lastTimestamp: new Date().toISOString(),
+    }
+    const snapshot = buildTraySnapshot([project('alpha', [live])], ANTHROPIC_PRICING, Date.now(), {
+      daily: 25,
+      session: 10,
+    })
+    expect(snapshot.costLimits).toEqual({ daily: 25, session: 10 })
+    expect(snapshot.activeSessions[0].estimatedCost).toBe(12)
+  })
+
+  it('reports every limit off when none is given', () => {
+    const snapshot = buildTraySnapshot([], ANTHROPIC_PRICING)
+    expect(snapshot.costLimits).toEqual({ daily: 0, session: 0 })
   })
 })

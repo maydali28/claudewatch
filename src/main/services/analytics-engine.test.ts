@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import type { SessionSummary, SessionDayUsage } from '@shared/types/session'
 import type { Project } from '@shared/types/project'
 import { ANTHROPIC_PRICING } from '@shared/constants/pricing'
@@ -103,6 +103,7 @@ function session(id: string, dailyUsage: SessionDayUsage[]): SessionSummary {
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
   }
 }
 
@@ -1306,6 +1307,15 @@ describe('computeAnalytics — session health trend keys off active days, not la
  * fed a real-but-unparsable timestamp.
  */
 describe('computeAnalytics — latency ignores a turn duration with an unparsable timestamp', () => {
+  // The fixtures are dated 2026-09-10; pin the clock so '30d' still covers them.
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-20T12:00:00.000Z'))
+  })
+  afterAll(() => {
+    vi.useRealTimers()
+  })
+
   it('excludes a malformed-timestamp turn from the histogram and slowest turns without crashing', () => {
     const withDurations: SessionSummary = {
       ...session('latency-1', [day({ day: '2026-09-10', responseCount: 1, messageCount: 1 })]),
@@ -1343,6 +1353,15 @@ describe('computeAnalytics — latency ignores a turn duration with an unparsabl
  * directory would silently drop out of a merged project's latency tab.
  */
 describe('computeAnalytics — slow turns key by the owning (merged) project, not the physical directory', () => {
+  // The fixtures are dated 2026-09-10; pin the clock so '30d' still covers them.
+  beforeAll(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-09-20T12:00:00.000Z'))
+  })
+  afterAll(() => {
+    vi.useRealTimers()
+  })
+
   it('tags a slow turn with the merged survivor id even when its session physically lives in a non-survivor directory', () => {
     const worktreeSession: SessionSummary = {
       ...session('s-worktree', [day({ day: '2026-09-10', responseCount: 1, messageCount: 1 })]),
@@ -1738,5 +1757,87 @@ describe('computeAnalytics — bounded ranges zero-fill idle days', () => {
     // bounded preset where the chart's branch stays legitimately reachable.
     const a = computeAnalytics([], PROJECTS, 'today', ANTHROPIC_PRICING)
     expect(a.sessionHealthSummary.dailyHealthTrend).toHaveLength(1)
+  })
+})
+
+describe('computeAnalytics — tool usage', () => {
+  const s: SessionSummary = {
+    ...session('tools', [
+      day({ day: '2026-09-08', estimatedCost: 4 }),
+      day({ day: '2026-09-09', estimatedCost: 6 }),
+    ]),
+    toolUsage: [
+      {
+        day: '2026-09-08',
+        tool: 'Read',
+        source: 'parent',
+        calls: 3,
+        errors: 1,
+        resultChars: 9,
+        costUsd: 1,
+      },
+      {
+        day: '2026-09-09',
+        tool: 'Read',
+        source: 'subagent',
+        calls: 2,
+        errors: 0,
+        resultChars: 1,
+        costUsd: 2,
+      },
+      {
+        day: '2026-09-09',
+        tool: 'mcp__github__get_me',
+        mcpServer: 'github',
+        source: 'parent',
+        calls: 1,
+        errors: 0,
+        resultChars: 1,
+        costUsd: 0.5,
+      },
+    ],
+    subagents: [
+      {
+        agentId: 'a',
+        agentType: 'Explore',
+        messageCount: 1,
+        totalInputTokens: 0,
+        totalOutputTokens: 0,
+        firstTimestamp: '2026-09-09T10:00:00',
+        lastTimestamp: '2026-09-09T10:01:00',
+        estimatedCost: 2,
+        modelBreakdown: [],
+      },
+    ],
+  }
+
+  it('keeps only in-range days and shares cost against the period total', () => {
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-09', to: '2026-09-09' },
+      ANTHROPIC_PRICING
+    )
+    const read = a.toolUsage.tools.find((t) => t.tool === 'Read')!
+    expect(read).toMatchObject({ calls: 2, subagentCalls: 2, errors: 0, costUsd: 2 })
+    expect(read.costShare).toBeCloseTo(2 / a.totalCost)
+    expect(a.toolUsage.totalCalls).toBe(3)
+    expect(a.toolUsage.mcpServers).toEqual([
+      expect.objectContaining({ server: 'github', calls: 1, configured: false }),
+    ])
+    expect(a.toolUsage.agentTypes).toEqual([
+      { agentType: 'Explore', runs: 1, costUsd: 2, durationMs: 0 },
+    ])
+  })
+
+  it('leaves out sub-agents that started outside the range', () => {
+    const a = computeAnalytics(
+      [s],
+      PROJECTS,
+      { preset: 'custom' as const, from: '2026-09-08', to: '2026-09-08' },
+      ANTHROPIC_PRICING
+    )
+    expect(a.toolUsage.agentTypes).toEqual([])
+    expect(a.toolUsage.totalErrors).toBe(1)
   })
 })

@@ -14,6 +14,7 @@ import { readSkillsFromDir } from './config-service'
 import { getCachedSummary, pruneCachedSummaries, setCachedSummary } from './metadata-cache'
 import { pricingFingerprint } from './pricing-engine'
 import { pLimit } from '@main/lib/p-limit'
+import { foldBackgroundContinuations } from './background-continuations'
 
 // Cap concurrent JSONL parses across the entire scan. Empirically the parse
 // is CPU-bound (JSON.parse + per-record arithmetic), so going above the core
@@ -385,11 +386,13 @@ async function getValidSortedSessionForProject(
     )
   )
 
-  return sortSessionsByLatestTimestamp(
+  const { sessions } = await foldBackgroundContinuations(
     summaries.filter(
       (summary): summary is SessionSummary => summary !== null && summary.lastTimestamp !== ''
-    )
+    ),
+    projectPath
   )
+  return sortSessionsByLatestTimestamp(sessions)
 }
 
 /**

@@ -388,6 +388,14 @@ export function exportAsMarkdown(session: ParsedSession): string {
 
 // ─── writeExport ──────────────────────────────────────────────────────────────
 
+const EXTENSIONS: Record<ExportFormat, string> = { json: 'json', csv: 'csv', markdown: 'md' }
+
+/** `claudewatch-<slug or id>.<ext>`, safe as a file name on every platform. */
+export function exportFileName(session: ParsedSession, format: ExportFormat): string {
+  const base = (session.slug || session.id).replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 80)
+  return `claudewatch-${base}.${EXTENSIONS[format]}`
+}
+
 export async function writeExport(
   session: ParsedSession,
   format: ExportFormat,

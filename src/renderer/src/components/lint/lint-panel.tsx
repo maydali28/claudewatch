@@ -1,55 +1,308 @@
-import React, { useEffect } from 'react'
-import { Play, ShieldCheck, AlertCircle, AlertTriangle, Info } from 'lucide-react'
+import React, { useState } from 'react'
+import {
+  AlertCircle,
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  Copy,
+  Info,
+  ShieldCheck,
+  X,
+} from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useLintStore } from '@renderer/store/lint.store'
+import { useSessionsStore } from '@renderer/store/sessions.store'
 import { Skeleton } from '@renderer/components/ui/skeleton'
-import { HealthScoreGauge } from './health-score-gauge'
-import { LintResultRow } from './lint-result-row'
-import { SecretFindings } from './secret-findings'
+import { EmptyState } from '@renderer/components/shared/empty-state'
+import { useOpenSessionHealth } from '@renderer/hooks/use-session-health'
+import {
+  InsightSection,
+  StatTiles,
+  TH,
+} from '@renderer/components/sessions/insights/insight-section'
+import { LINT_RULE_MAP } from '@shared/constants/lint-rules'
+import type { LintResult, LintSeverity } from '@shared/types'
+import { areaOf, countBySeverity, groupByArea, scoreLabel } from './health-view'
 
-// ─── Stat chip ────────────────────────────────────────────────────────────────
+const SEVERITY: Record<
+  LintSeverity,
+  { Icon: typeof Info; text: string; box: string; badge: string }
+> = {
+  error: {
+    Icon: AlertCircle,
+    text: 'text-red-500',
+    box: 'bg-red-500/10',
+    badge: 'bg-red-500/10 text-red-600 dark:text-red-400',
+  },
+  warning: {
+    Icon: AlertTriangle,
+    text: 'text-amber-500',
+    box: 'bg-amber-500/10',
+    badge: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  },
+  info: {
+    Icon: Info,
+    text: 'text-blue-500',
+    box: 'bg-blue-500/10',
+    badge: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
+  },
+}
 
-function StatChip({
-  icon: Icon,
-  count,
+const TONE_TEXT: Record<LintSeverity, string> = {
+  error: 'text-red-500',
+  warning: 'text-amber-500',
+  info: 'text-emerald-500',
+}
+
+function CopyButton({ value }: { value: string }): React.JSX.Element {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() =>
+        void navigator.clipboard.writeText(value).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
+      }
+      className="ml-auto shrink-0 p-1 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+      title="Copy"
+    >
+      {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+    </button>
+  )
+}
+
+function DetailRow({
   label,
-  color,
+  children,
+  copyValue,
 }: {
-  icon: React.ElementType
-  count: number
   label: string
-  color: string
+  children: React.ReactNode
+  copyValue?: string
 }): React.JSX.Element {
   return (
-    <div className="flex flex-col items-center gap-1 px-4 py-3 rounded-lg border border-border bg-card">
-      <Icon className={cn('h-5 w-5', color)} />
-      <span className={cn('text-2xl font-bold tabular-nums', color)}>{count}</span>
-      <span className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</span>
+    <div className="grid grid-cols-[6rem_1fr] gap-3 items-start px-4 py-3 border-b border-border/30 last:border-0">
+      <span className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold pt-0.5">
+        {label}
+      </span>
+      <div className="flex items-start gap-1 min-w-0">
+        <div className="flex-1 min-w-0 text-xs">{children}</div>
+        {copyValue && <CopyButton value={copyValue} />}
+      </div>
     </div>
   )
 }
 
-// ─── Category group ───────────────────────────────────────────────────────────
+function useSessionTitle(sessionId: string | undefined): string | undefined {
+  return useSessionsStore((s) => {
+    if (!sessionId) return undefined
+    for (const p of s.projects) {
+      const found = p.sessions.find((x) => x.id === sessionId)
+      if (found) return found.title || sessionId.slice(0, 8)
+    }
+    return sessionId.slice(0, 8)
+  })
+}
 
-function CategoryGroup({
-  category,
-  results,
+// ─── One result ───────────────────────────────────────────────────────────────
+
+function ResultDetail({
+  result,
+  onClose,
 }: {
-  category: string
-  results: ReturnType<ReturnType<typeof useLintStore.getState>['filteredResults']>
+  result: LintResult
+  onClose: () => void
 }): React.JSX.Element {
+  const rule = LINT_RULE_MAP.get(result.checkId)
+  const sev = SEVERITY[result.severity]
+  const openSessionHealth = useOpenSessionHealth()
+  const sessionTitle = useSessionTitle(result.session?.sessionId)
+  const where = result.displayPath
+    ? `${result.displayPath}${result.line !== undefined ? `:${result.line}` : ''}`
+    : null
+
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-          {category}
-        </h3>
-        <span className="text-[10px] text-muted-foreground">({results.length})</span>
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-border/50 shrink-0">
+        <div
+          className={cn('flex items-center justify-center h-8 w-8 rounded-lg shrink-0', sev.box)}
+        >
+          <sev.Icon className={cn('h-4 w-4', sev.text)} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-semibold truncate">{rule?.description ?? result.message}</h2>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <code className="text-[10px] font-mono text-muted-foreground">{result.checkId}</code>
+            <span
+              className={cn(
+                'text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide',
+                sev.badge
+              )}
+            >
+              {result.severity}
+            </span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+              {areaOf(result.checkId)}
+            </span>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className="p-1.5 rounded hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+          title="Back to the overview"
+          aria-label="Back to the overview"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
-      <div className="space-y-2">
-        {results.map((r) => (
-          <LintResultRow key={r.id} result={r} />
-        ))}
+
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="rounded-lg border border-border/60 bg-card overflow-hidden">
+          <DetailRow label="Found">{result.message}</DetailRow>
+          {where && (
+            <DetailRow label="Where" copyValue={result.filePath || undefined}>
+              <span className="font-mono break-all">{where}</span>
+            </DetailRow>
+          )}
+          {result.session && (
+            <DetailRow label="Session">
+              <button
+                onClick={() =>
+                  openSessionHealth(result.session!.sessionId, result.session!.projectId)
+                }
+                className="inline-flex max-w-full items-center gap-1 text-primary hover:underline"
+              >
+                <span className="truncate">{sessionTitle}</span>
+                <ArrowRight className="h-3 w-3 shrink-0" />
+              </button>
+            </DetailRow>
+          )}
+          {result.maskedSecret && (
+            <DetailRow label="Value">
+              <code className="font-mono rounded bg-muted px-1.5 py-0.5">
+                {result.maskedSecret}
+              </code>
+              <span className="ml-2 text-muted-foreground">masked</span>
+            </DetailRow>
+          )}
+          {result.contextLines && result.contextLines.length > 0 && (
+            <DetailRow label="Context">
+              <pre className="font-mono text-[11px] bg-muted/40 rounded p-2 whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+                {result.contextLines.join('\n')}
+              </pre>
+            </DetailRow>
+          )}
+          {result.fix && <DetailRow label="Fix">{result.fix}</DetailRow>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Overview ─────────────────────────────────────────────────────────────────
+
+function Overview(): React.JSX.Element {
+  const lintResults = useLintStore((s) => s.lintResults)
+  const lintSummary = useLintStore((s) => s.lintSummary)
+  const lastRunAt = useLintStore((s) => s.lastRunAt)
+  const setSearch = useLintStore((s) => s.setSearch)
+  const setSeverityFilter = useLintStore((s) => s.setSeverityFilter)
+
+  const counts = countBySeverity(lintResults)
+  const groups = groupByArea(lintResults)
+  const score = lintSummary ? scoreLabel(lintSummary.healthScore) : null
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="flex items-center gap-3 px-6 py-4 border-b border-border/50 shrink-0">
+        <div className="flex items-center justify-center h-8 w-8 rounded-lg shrink-0 bg-primary/10">
+          <ShieldCheck className="h-4 w-4 text-primary" />
+        </div>
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">Health</h2>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            {LINT_RULE_MAP.size} checks over your setup, sessions and transcripts
+            {lastRunAt &&
+              ` · last run ${lastRunAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        <StatTiles
+          tiles={[
+            {
+              label: 'Score',
+              value: score ? <span className={TONE_TEXT[score.tone]}>{score.pct}%</span> : '—',
+              hint: score?.label,
+            },
+            { label: 'Errors', value: counts.error, hint: 'fix these first' },
+            { label: 'Warnings', value: counts.warning },
+            { label: 'Info', value: counts.info },
+          ]}
+        />
+
+        {lintResults.length === 0 ? (
+          <EmptyState
+            icon={ShieldCheck}
+            title="Every check passes"
+            description="Nothing to fix in your setup, sessions or transcripts"
+          />
+        ) : (
+          <InsightSection
+            title="By area"
+            note="Pick an area to list its checks in the sidebar, or a check there to see what it means and how to fix it."
+          >
+            <table className="w-full text-xs tabular-nums">
+              <thead>
+                <tr className="text-left">
+                  <th className={TH}>Area</th>
+                  <th className={`${TH} pl-3 text-right`}>Errors</th>
+                  <th className={`${TH} pl-3 text-right`}>Warnings</th>
+                  <th className={`${TH} pl-3 text-right`}>Info</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.map((g) => {
+                  const c = countBySeverity(g.results)
+                  return (
+                    <tr key={g.area} className="border-t border-border/40">
+                      <td className="py-1.5 pr-3">
+                        <button
+                          onClick={() => {
+                            setSeverityFilter('all')
+                            setSearch(g.area)
+                          }}
+                          className="text-foreground hover:text-primary hover:underline"
+                        >
+                          {g.area}
+                        </button>
+                      </td>
+                      <td
+                        className={cn(
+                          'py-1.5 pl-3 text-right',
+                          c.error > 0 ? 'text-red-500 font-medium' : 'text-muted-foreground'
+                        )}
+                      >
+                        {c.error}
+                      </td>
+                      <td
+                        className={cn(
+                          'py-1.5 pl-3 text-right',
+                          c.warning > 0 ? 'text-amber-600' : 'text-muted-foreground'
+                        )}
+                      >
+                        {c.warning}
+                      </td>
+                      <td className="py-1.5 pl-3 text-right text-muted-foreground">{c.info}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </InsightSection>
+        )}
       </div>
     </div>
   )
@@ -58,131 +311,39 @@ function CategoryGroup({
 // ─── Main panel ───────────────────────────────────────────────────────────────
 
 export default function LintPanel(): React.JSX.Element {
-  const { lintSummary, isRunning, lastRunAt, runLint, filteredResults, secrets } = useLintStore()
+  const lintResults = useLintStore((s) => s.lintResults)
+  const isRunning = useLintStore((s) => s.isRunning)
+  const lastRunAt = useLintStore((s) => s.lastRunAt)
+  const error = useLintStore((s) => s.error)
+  const selectedResultId = useLintStore((s) => s.selectedResultId)
+  const setSelectedResult = useLintStore((s) => s.setSelectedResult)
 
-  useEffect(() => {
-    runLint()
-  }, [runLint])
+  const selected = lintResults.find((r) => r.id === selectedResultId)
+  if (selected) return <ResultDetail result={selected} onClose={() => setSelectedResult(null)} />
 
-  const filtered = filteredResults()
-  const secretResults = secrets()
-
-  // Group by category
-  const grouped = React.useMemo(() => {
-    const map = new Map<string, typeof filtered>()
-    for (const r of filtered) {
-      const cat = r.checkId.startsWith('SEC')
-        ? 'Secrets'
-        : r.checkId.startsWith('SES')
-          ? 'Sessions'
-          : r.checkId.startsWith('CFG')
-            ? 'Config'
-            : r.checkId.startsWith('CMD')
-              ? 'CLAUDE.md'
-              : r.checkId.startsWith('RUL')
-                ? 'Rules'
-                : r.checkId.startsWith('SKL')
-                  ? 'Skills'
-                  : r.checkId.startsWith('XCT')
-                    ? 'Cross-cutting'
-                    : 'Other'
-      if (!map.has(cat)) map.set(cat, [])
-      map.get(cat)!.push(r)
+  if (!lastRunAt) {
+    if (error) {
+      return (
+        <EmptyState
+          icon={AlertCircle}
+          title="The checks could not run"
+          description={error}
+          className="h-full"
+        />
+      )
     }
-    return map
-  }, [filtered])
-
-  if (isRunning && !lintSummary) {
     return (
       <div className="p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <Play className="h-4 w-4 text-primary animate-pulse" />
-          <span className="text-sm text-muted-foreground">Running lint checks…</span>
-        </div>
-        <div className="space-y-3">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-16" />
+        <p className="text-sm text-muted-foreground">{isRunning ? 'Running the checks…' : ''}</p>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-20" />
           ))}
         </div>
+        <Skeleton className="h-48" />
       </div>
     )
   }
 
-  if (!lintSummary) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-center gap-3">
-        <ShieldCheck className="h-10 w-10 text-muted-foreground/40" />
-        <p className="text-sm text-muted-foreground">No results yet</p>
-        <button
-          onClick={() => runLint()}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-xs font-medium hover:opacity-90 transition-opacity"
-        >
-          <Play className="h-3.5 w-3.5" />
-          Run Lint
-        </button>
-      </div>
-    )
-  }
-
-  return (
-    <div className="overflow-y-auto h-full p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h2 className="text-sm font-semibold">Config Health</h2>
-          {lastRunAt && (
-            <p className="text-[10px] text-muted-foreground mt-0.5">
-              Last run {lastRunAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={() => runLint()}
-          disabled={isRunning}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors disabled:opacity-50"
-        >
-          <Play className={cn('h-3.5 w-3.5', isRunning && 'animate-pulse')} />
-          {isRunning ? 'Running…' : 'Re-run'}
-        </button>
-      </div>
-
-      {/* Health gauge + stat chips */}
-      <div className="flex items-center gap-6">
-        <HealthScoreGauge score={lintSummary.healthScore} size={120} />
-        <div className="grid grid-cols-3 gap-2 flex-1">
-          <StatChip
-            icon={AlertCircle}
-            count={lintSummary.errorCount}
-            label="Errors"
-            color="text-red-500"
-          />
-          <StatChip
-            icon={AlertTriangle}
-            count={lintSummary.warningCount}
-            label="Warnings"
-            color="text-amber-500"
-          />
-          <StatChip icon={Info} count={lintSummary.infoCount} label="Info" color="text-blue-500" />
-        </div>
-      </div>
-
-      {/* Secret findings (prioritized at top) */}
-      {secretResults.length > 0 && <SecretFindings findings={secretResults} />}
-
-      {/* Result groups */}
-      {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center gap-2">
-          <ShieldCheck className="h-8 w-8 text-green-500" />
-          <p className="text-sm font-medium text-green-600 dark:text-green-400">
-            All checks passed
-          </p>
-          <p className="text-xs text-muted-foreground">No issues found with current filters</p>
-        </div>
-      ) : (
-        Array.from(grouped.entries()).map(([cat, results]) => (
-          <CategoryGroup key={cat} category={cat} results={results} />
-        ))
-      )}
-    </div>
-  )
+  return <Overview />
 }

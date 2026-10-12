@@ -56,6 +56,7 @@ function makeParsedSession(sessionId: string, marker: number): ParsedSession {
     isSubagent: false,
     subagentTotals: { inputTokens: 0, outputTokens: 0, messageCount: 0, estimatedCost: 0 },
     responseUsage: {},
+    responseTimeline: [],
     diagnostics: {
       malformedLines: 0,
       unreadableChildren: 0,
@@ -135,6 +136,7 @@ function makeSummary(id: string, projectId: string, lastTimestamp: string): Sess
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
   }
 }
 

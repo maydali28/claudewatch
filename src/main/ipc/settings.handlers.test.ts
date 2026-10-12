@@ -68,13 +68,15 @@ vi.mock('@main/services/scan-cache', () => ({
 const BASE_PREFS: AppPreferences = {
   pricingProvider: 'anthropic',
   pricingOverrides: {},
+  modelPreferences: {},
   secretScanEnabled: false,
   redactionLevel: 'none',
   launchAtLogin: false,
   trayTipDismissed: false,
   theme: 'system',
   sidebarWidth: 280,
-  alertedSecrets: [],
+  secretScanConsent: 'unasked',
+  secretScanNotify: true,
   sentryEnabled: false,
 }
 
@@ -152,5 +154,21 @@ describe('settings:set — pricing change cascade', () => {
     const result = await callSettingsSet({ pricingOverrides: { 'opus-5': { input: 42 } } })
 
     expect(result).toEqual({ ok: true, data: undefined })
+  })
+})
+
+describe('settings:set — cost alert thresholds', () => {
+  it('accepts both thresholds, and 0 for off', async () => {
+    for (const patch of [
+      { costAlertThreshold: 25 },
+      { sessionCostAlertThreshold: 10 },
+      { costAlertThreshold: 0, sessionCostAlertThreshold: 0 },
+    ]) {
+      expect(await callSettingsSet(patch)).toEqual({ ok: true, data: undefined })
+    }
+  })
+
+  it('refuses a negative threshold', async () => {
+    expect(await callSettingsSet({ sessionCostAlertThreshold: -1 })).toMatchObject({ ok: false })
   })
 })

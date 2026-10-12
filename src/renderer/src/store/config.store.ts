@@ -6,15 +6,16 @@ import type {
   McpServerEntry,
   MemoryFile,
   ExtendedConfig,
+  PluginEntry,
 } from '@shared/types'
-import type { ProjectSkillEntry, ProjectClaudeMd } from '@shared/types/project'
+import type { ProjectClaudeMd } from '@shared/types/project'
 import { ipc } from '@renderer/lib/ipc-client'
 
 interface ConfigState {
   hooks: HookEventGroup[]
   commands: CommandEntry[]
   skills: SkillEntry[]
-  projectSkills: ProjectSkillEntry[]
+  plugins: PluginEntry[]
   mcps: McpServerEntry[]
   memoryFiles: MemoryFile[]
   projectClaudeMds: ProjectClaudeMd[]
@@ -28,6 +29,7 @@ interface ConfigState {
   selectedMcpId: string | null
   selectedMemoryId: string | null
   selectedHookId: string | null
+  selectedPluginId: string | null
 
   loadAll(projectId?: string): Promise<void>
   setSelectedCommand(id: string | null): void
@@ -35,13 +37,14 @@ interface ConfigState {
   setSelectedMcp(id: string | null): void
   setSelectedMemory(id: string | null): void
   setSelectedHook(id: string | null): void
+  setSelectedPlugin(id: string | null): void
 }
 
 export const useConfigStore = create<ConfigState>((set) => ({
   hooks: [],
   commands: [],
   skills: [],
-  projectSkills: [],
+  plugins: [],
   mcps: [],
   memoryFiles: [],
   projectClaudeMds: [],
@@ -55,6 +58,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   selectedMcpId: null,
   selectedMemoryId: null,
   selectedHookId: null,
+  selectedPluginId: null,
 
   async loadAll(projectId) {
     set({ isLoading: true, hasLoaded: false, error: null })
@@ -63,7 +67,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
         fullResult,
         commandsResult,
         skillsResult,
-        projectSkillsResult,
+        pluginsResult,
         mcpsResult,
         memoryResult,
         projectClaudeMdsResult,
@@ -71,7 +75,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
         ipc.config.getFull(projectId),
         ipc.config.getCommands(projectId),
         ipc.config.getSkills(),
-        ipc.config.getProjectSkills(),
+        ipc.config.getPlugins(),
         ipc.config.getMcps(projectId),
         ipc.config.getMemory(projectId),
         ipc.config.getProjectClaudeMds(),
@@ -82,7 +86,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
         hooks: fullResult.ok ? (fullResult.data.hooks ?? []) : [],
         commands: commandsResult.ok ? commandsResult.data : [],
         skills: skillsResult.ok ? skillsResult.data : [],
-        projectSkills: projectSkillsResult.ok ? projectSkillsResult.data : [],
+        plugins: pluginsResult.ok ? pluginsResult.data : [],
         mcps: mcpsResult.ok ? mcpsResult.data : [],
         memoryFiles: memoryResult.ok ? memoryResult.data : [],
         projectClaudeMds: projectClaudeMdsResult.ok ? projectClaudeMdsResult.data : [],
@@ -100,4 +104,5 @@ export const useConfigStore = create<ConfigState>((set) => ({
   setSelectedMcp: (id) => set({ selectedMcpId: id }),
   setSelectedMemory: (id) => set({ selectedMemoryId: id }),
   setSelectedHook: (id) => set({ selectedHookId: id }),
+  setSelectedPlugin: (id) => set({ selectedPluginId: id }),
 }))

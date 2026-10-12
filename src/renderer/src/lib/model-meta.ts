@@ -1,5 +1,7 @@
 import { getModelFamily } from '@shared/constants/models'
+import { isPricedFamily } from '@shared/constants/pricing'
 import type { ModelFamily } from '@shared/types'
+import { useSettingsStore } from '@renderer/store/settings.store'
 
 interface ModelMeta {
   label: string
@@ -73,6 +75,11 @@ const META: Record<ModelFamily, ModelMeta> = {
     color: '#818cf8',
   },
   // ── Haiku — greens / cyans ───────────────────────────────────────────────────
+  'haiku-5-5': {
+    label: 'Haiku 5.5',
+    badgeClass: 'bg-green-500/10 text-green-500',
+    color: '#22c55e',
+  },
   'haiku-4-5': {
     label: 'Haiku 4.5',
     badgeClass: 'bg-emerald-500/10 text-emerald-500',
@@ -83,6 +90,20 @@ const META: Record<ModelFamily, ModelMeta> = {
   unknown: { label: 'Claude', badgeClass: 'bg-slate-500/10 text-slate-400', color: '#94a3b8' },
 }
 
+/**
+ * Label and colours for a model ID or a family name. Settings › Models can
+ * map an ID to a family and give it a display name; both apply here, so a
+ * gateway alias shows as the model it stands for.
+ */
 export function getModelMeta(model: string | null | undefined): ModelMeta {
-  return META[getModelFamily(model)] ?? META['unknown']
+  const pref = model ? useSettingsStore.getState().prefs.modelPreferences?.[model] : undefined
+  const family = isPricedFamily(pref?.family) ? pref.family : getModelFamily(model)
+  const meta = META[family] ?? META['unknown']
+  const displayName = pref?.displayName?.trim()
+  return displayName ? { ...meta, label: displayName } : meta
+}
+
+/** The built-in label for a family, ignoring display names. */
+export function familyLabel(family: ModelFamily): string {
+  return (META[family] ?? META['unknown']).label
 }

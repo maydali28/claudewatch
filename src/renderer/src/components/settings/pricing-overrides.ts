@@ -1,4 +1,4 @@
-import type { AppPreferences, ModelFamily, ModelPricing } from '@shared/types'
+import type { AppPreferences, ModelFamily, ModelPricing, RateKey } from '@shared/types'
 
 export type PricingOverrides = AppPreferences['pricingOverrides']
 
@@ -23,7 +23,7 @@ export function parseRateInput(raw: string): RateInput {
 export function applyOverrideEdit(
   overrides: PricingOverrides,
   family: ModelFamily,
-  field: keyof ModelPricing,
+  field: RateKey,
   value: number | undefined,
   defaultRate: number
 ): PricingOverrides {

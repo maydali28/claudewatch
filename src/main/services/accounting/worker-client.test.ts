@@ -237,6 +237,19 @@ describe('AccountingWorkerClient — lifecycle', () => {
     expect(workers[0].terminated).toBe(true)
   })
 
+  it('restarts: fails what was in flight, then serves the next request from a new worker', async () => {
+    const { client, workers } = makeClient()
+
+    const inFlight = client.request(SCAN)
+    await client.restart()
+    await expect(inFlight).rejects.toThrow(/restarted/i)
+    expect(workers[0].terminated).toBe(true)
+
+    const next = client.request(SCAN)
+    workers[1].replyTo(0, 'fresh')
+    await expect(next).resolves.toBe('fresh')
+  })
+
   it('rejects in-flight requests on dispose rather than leaving them hanging', async () => {
     const { client, workers } = makeClient()
 

@@ -1,4 +1,4 @@
-import type { BrowserWindow } from 'electron'
+import { BrowserWindow, Notification } from 'electron'
 import { app, autoUpdater as squirrelUpdater, session } from 'electron'
 import { spawn } from 'child_process'
 
@@ -13,7 +13,7 @@ import { registerTrayHandlers } from './ipc/tray.handlers'
 import { Preferences } from './store/preferences'
 import { FileWatcher } from './services/file-watcher'
 import { accountingWorker } from './services/accounting/worker-client'
-import { getClaudeDir } from '@main/lib/claude-paths'
+import { getClaudeDir, getProjectsDirPath, setClaudeDirOverride } from '@main/lib/claude-paths'
 import { initUpdateService } from './services/update-service'
 import { isAppQuitting, registerUpdateQuitHandlers, onUpdateQuitDisarmed } from './lib/update-quit'
 import { rootLogger as log } from './lib/logger'
@@ -21,6 +21,18 @@ import { CHANNELS } from '@shared/ipc/channels'
 import { initSentryEarly, initSentry, captureException } from './services/sentry'
 import { handleSquirrelEvent } from './lib/squirrel-events'
 import { setAutostart } from './services/autostart'
+import { initSecretScanService } from './services/secret-scan-service'
+import { createSecretFindingsStore } from './services/secret-findings-store'
+import { notifySecretFindings } from './services/secret-notifier'
+import { getOrScanProjects, peekCachedSessionsForProject } from '@main/ipc/sessions.handlers'
+import { CostAlertTracker, describeCostAlert, type CostAlert } from './services/cost-alerts'
+import { createCostAlertStateStore } from './services/cost-alert-state-store'
+import { initNotifier } from './services/notifier'
+import { costAlertThresholds, resolveCostAlertSettings } from '@shared/utils/cost-alert-settings'
+import type { CostAlertNotice, SessionSummary } from '@shared/types'
+import { onClaudeDirChange } from './services/claude-dir-service'
+import { scanCache } from './services/scan-cache'
+import { sessionCache } from '@shared/utils'
 
 app.setName('ClaudeWatch')
 
@@ -200,6 +212,8 @@ function bootstrap(): void {
     // Load preferences before anything else
     await Preferences.load()
     initSentry(Preferences.get().sentryEnabled)
+    // The folder chosen in Settings › Claude folder, ahead of every other source.
+    setClaudeDirOverride(Preferences.get().claudeDirOverride)
 
     // Register all IPC handlers before creating windows so handlers are ready
     // when renderer loads
@@ -227,12 +241,141 @@ function bootstrap(): void {
     // pushes PUSH_UPDATE_AVAILABLE to the renderer when an update is found.
     initUpdateService()
 
-    // Start file watcher after handlers are registered and the window exists.
-    fileWatcher = new FileWatcher(getClaudeDir(), {
-      broadcast: broadcastToRenderers,
-      getMainWindow: () => mainWindow,
+    // Every system notification goes through one notifier, which learns from
+    // each whether the OS shows them and tells the windows (Settings shows a
+    // way to fix it when they are blocked).
+    const notifier = initNotifier({
+      isSupported: () => Notification.isSupported(),
+      create: (options) => new Notification(options),
+      onStatusChange: (status) => {
+        log.info('Notification status:', status)
+        broadcastToRenderers(CHANNELS.PUSH_NOTIFICATION_STATUS, status)
+      },
     })
-    fileWatcher.start()
+
+    // Secret scanning, with the user's consent: findings are kept beside the
+    // preferences, masked; live scanning starts only if it was turned on.
+    const secretScan = initSecretScanService({
+      projectsDir: getProjectsDirPath(),
+      store: createSecretFindingsStore(app.getPath('userData')),
+      isEnabled: () => {
+        const prefs = Preferences.get()
+        return prefs.secretScanEnabled && prefs.secretScanConsent === 'granted'
+      },
+      onNewFindings: (findings) => {
+        broadcastToRenderers(CHANNELS.PUSH_SECRETS_FOUND, findings)
+        notifySecretFindings(findings, {
+          isEnabled: () => Preferences.get().secretScanNotify && Notification.isSupported(),
+          isAppFocused: () => BrowserWindow.getFocusedWindow() !== null,
+          titleOf: (projectId, sessionId) =>
+            peekCachedSessionsForProject(projectId).find((s) => s.id === sessionId)?.title,
+          show: ({ title, body, onClick }) => {
+            log.info('Secret notification:', body)
+            notifier.show({ title, body, onClick })
+          },
+          openSession: (projectId, sessionId) => {
+            const win = mainWindow
+            if (!win) return
+            win.show()
+            win.focus()
+            win.webContents.send(CHANNELS.PUSH_NAVIGATE_SESSION, { sessionId, projectId })
+          },
+        })
+      },
+    })
+    void secretScan.sync()
+
+    // Cost alerts (Settings › Alerts), checked on every re-parsed session.
+    // What was announced is stored, so a restart neither repeats an alert nor
+    // swallows one that came due while the app was not running.
+    const costAlerts = new CostAlertTracker({
+      store: createCostAlertStateStore(app.getPath('userData')),
+    })
+    const costThresholds = () => costAlertThresholds(Preferences.get())
+    const allSessions = async (): Promise<SessionSummary[]> =>
+      (await getOrScanProjects()).flatMap((p) => p.sessions)
+    /**
+     * Toast in every window, plus a system notification when no ClaudeWatch
+     * window has focus. `atStartup` notifies regardless of focus: the windows
+     * are still loading, so a toast alone could go unseen.
+     */
+    const announceCostAlerts = (alerts: CostAlert[], atStartup: boolean): void => {
+      if (alerts.length === 0) return
+      const notices: CostAlertNotice[] = alerts.map((a) => ({
+        ...a,
+        message: describeCostAlert(a),
+      }))
+      broadcastToRenderers(CHANNELS.PUSH_COST_ALERT, notices)
+      if (!resolveCostAlertSettings(Preferences.get()).notify) return
+      if (!atStartup && BrowserWindow.getFocusedWindow() !== null) return
+      for (const notice of notices) {
+        log.info('Cost notification:', notice.message.body)
+        notifier.show({
+          ...notice.message,
+          onClick: () => {
+            const win = mainWindow
+            if (!win) return
+            win.show()
+            win.focus()
+            if (notice.kind === 'session') {
+              win.webContents.send(CHANNELS.PUSH_NAVIGATE_SESSION, {
+                sessionId: notice.sessionId,
+                projectId: notice.projectId,
+              })
+            }
+          },
+        })
+      }
+    }
+    const dashboardLoaded = (): Promise<void> =>
+      new Promise((resolve) => {
+        const win = mainWindow
+        if (!win || win.isDestroyed() || !win.webContents.isLoading()) return resolve()
+        win.webContents.once('did-finish-load', () => resolve())
+      })
+    const costStartup = allSessions()
+      .then(async (sessions) => {
+        const due = costAlerts.start(sessions, costThresholds())
+        await dashboardLoaded()
+        announceCostAlerts(due, true)
+      })
+      .catch((error) => log.error('Cost alert start-up check failed:', error))
+    const checkCostAlerts = async (summary: SessionSummary): Promise<void> => {
+      await costStartup
+      const others = (await allSessions()).filter((s) => s.id !== summary.id)
+      announceCostAlerts(costAlerts.check(summary, [...others, summary], costThresholds()), false)
+    }
+
+    // Start file watcher after handlers are registered and the window exists.
+    const startWatcher = (claudeDir: string): void => {
+      fileWatcher = new FileWatcher(claudeDir, {
+        broadcast: broadcastToRenderers,
+        getMainWindow: () => mainWindow,
+        onTranscriptsChanged: (files) => {
+          secretScan.scanChanged(files).catch((error) => log.error('Secret scan failed:', error))
+        },
+        onSessionUpdated: (summary) => {
+          checkCostAlerts(summary).catch((error) => log.error('Cost alert check failed:', error))
+        },
+      })
+      fileWatcher.start()
+    }
+    startWatcher(getClaudeDir())
+
+    // The Claude folder changed in Settings: re-point everything that captured
+    // the old one, then reload every window so no view keeps its data.
+    onClaudeDirChange(async (claudeDir) => {
+      log.info('Claude folder changed to', claudeDir)
+      fileWatcher?.stop()
+      await accountingWorker.restart()
+      sessionCache.clear()
+      await scanCache
+        .refresh()
+        .catch((error) => log.error('Rescan after folder change failed:', error))
+      startWatcher(claudeDir)
+      await secretScan.setProjectsDir(getProjectsDirPath())
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.reload()
+    })
     log.info('FileWatcher started')
 
     app.on('activate', () => {

@@ -26,13 +26,15 @@ vi.mock('@main/store/preferences', () => ({
 const BASE_PREFS: AppPreferences = {
   pricingProvider: 'anthropic',
   pricingOverrides: {},
+  modelPreferences: {},
   secretScanEnabled: false,
   redactionLevel: 'none',
   launchAtLogin: false,
   trayTipDismissed: false,
   theme: 'system',
   sidebarWidth: 280,
-  alertedSecrets: [],
+  secretScanConsent: 'unasked',
+  secretScanNotify: true,
   sentryEnabled: false,
 }
 
@@ -97,6 +99,7 @@ function makeSummary(overrides: Partial<SessionSummary> = {}): SessionSummary {
     recordedEffortDistribution: {},
     turnOpen: false,
     serviceTiers: [],
+    toolUsage: [],
     ...overrides,
   }
 }

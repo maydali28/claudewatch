@@ -6,6 +6,7 @@ import { validate, AnalyticsGetSchema } from '@shared/ipc/schemas'
 import { Preferences } from '@main/store/preferences'
 import { computeAnalytics } from '@main/services/analytics-engine'
 import { getActivePricingTable } from '@main/services/pricing-engine'
+import { listSeenModels } from '@main/services/seen-models'
 import { getOrScanProjects } from './sessions.handlers'
 
 export function registerAnalyticsHandlers(): void {
@@ -27,6 +28,16 @@ export function registerAnalyticsHandlers(): void {
 
       const analytics = computeAnalytics(sessions, filteredProjects, dateRange, pricingTable)
       return ok(analytics)
+    } catch (e) {
+      captureHandlerException(e)
+      return err(toSafeError(e), 'ANALYTICS_FAILED')
+    }
+  })
+
+  // ── analytics:list-models ──────────────────────────────────────────────────
+  ipcMain.handle(CHANNELS.ANALYTICS_LIST_MODELS, async () => {
+    try {
+      return ok(listSeenModels(await getOrScanProjects()))
     } catch (e) {
       captureHandlerException(e)
       return err(toSafeError(e), 'ANALYTICS_FAILED')

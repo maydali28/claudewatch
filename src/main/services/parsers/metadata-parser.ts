@@ -10,11 +10,13 @@ import type {
   SessionErrorDetail,
   SessionObservability,
   EffortDistribution,
+  ContextFill,
 } from '@shared/types/session'
 import type { ModelFamily, ModelPricing } from '@shared/types/pricing'
 import { decodeProjectId } from '@shared/utils/decode-project-id'
 import { toDayKeyOrUndated, UNDATED_DAY } from '@shared/utils/date-ranges'
 import { IDLE_GAP_MS, ERROR_SNIPPET_MAX_CHARS } from '@shared/constants/tuning'
+import { contextWindowFor } from '@shared/constants/context-window'
 import {
   extractTextFromContent,
   getRawBlocks,
@@ -23,8 +25,11 @@ import {
   isToolResultCarrierUser,
   LOCAL_COMMAND_PREFIXES,
   parseTokenUsage,
+  promoteQueuedPrompt,
 } from './parser-helpers'
 import { parseSubagents } from './subagent-parser'
+import { createAgentResultCollector } from './agent-results'
+import { createToolUsageAccumulator, mergeToolUsage } from './tool-usage'
 import { createResponseAccumulator } from '@main/services/accounting/ledger'
 import { projectUsage, type UsageProjection } from '@main/services/accounting/projection'
 import {
@@ -38,6 +43,7 @@ import {
   judgeResponse,
   type PendingResponse,
 } from './response-observability'
+import { createSkillListingCollector } from './skill-listing'
 import { createLogger } from '@main/lib/logger'
 
 const log = createLogger('MetadataParser')
@@ -46,6 +52,9 @@ interface MetadataAccumulator {
   // Identity
   slug: string | undefined
   aiTitle: string | undefined
+  isBackground: boolean
+  firstUuid: string | undefined
+  lastUuid: string | undefined
   cwd: string | undefined
 
   // Timestamps
@@ -106,6 +115,9 @@ function createMetadataAccumulator(): MetadataAccumulator {
   return {
     slug: undefined,
     aiTitle: undefined,
+    isBackground: false,
+    firstUuid: undefined,
+    lastUuid: undefined,
     cwd: undefined,
     firstTimestamp: undefined,
     lastTimestamp: undefined,
@@ -303,6 +315,16 @@ function flushPendingResponse(acc: MetadataAccumulator): void {
  * counter that stays immediate: blocks are not duplicated across records, so
  * summing them per record was already correct.
  */
+function buildContextFill(usage: UsageProjection): ContextFill | undefined {
+  if (usage.latestParentContextTokens === undefined) return undefined
+  const window = contextWindowFor(usage.latestParentModel, usage.latestParentPeakContextTokens ?? 0)
+  return {
+    tokens: usage.latestParentContextTokens,
+    window: window.tokens,
+    windowEstimated: window.estimated,
+  }
+}
+
 function processAssistantRecord(
   raw: RawRecord,
   acc: MetadataAccumulator,
@@ -498,6 +520,10 @@ function buildSessionSummary(
     parentMessageCount: activity.total,
     latestModel: usage.latestParentModel,
     dominantModel: usage.dominantParentModel,
+    contextFill: buildContextFill(usage),
+    isBackground: acc.isBackground || undefined,
+    firstUuid: acc.firstUuid,
+    lastUuid: acc.lastUuid,
     modelsUsed: usage.modelsUsed,
     unpricedResponses,
     totalInputTokens,
@@ -532,6 +558,7 @@ function buildSessionSummary(
     thinkingTokens,
     recordedEffortDistribution: usage.recordedEffortDistribution,
     serviceTiers: usage.serviceTiers,
+    toolUsage: [],
   }
 }
 
@@ -636,6 +663,11 @@ export async function parseSessionMetadata(
   // Message counts come from the same response-grouping the ledger uses for
   // usage, so a block-split response counts once for both.
   const activity = createActivityAccumulator()
+  // The skills Claude Code listed for the session — see `SessionSummary.skillListing`.
+  const skills = createSkillListingCollector()
+  // How long each sub-agent ran and when it stopped, as the parent recorded it.
+  const agentResults = createAgentResultCollector()
+  const tools = createToolUsageAccumulator('parent')
   // Counted, not swallowed — see `SessionSummary.diagnostics`.
   let malformedLines = 0
 
@@ -650,7 +682,7 @@ export async function parseSessionMetadata(
 
     let raw: RawRecord
     try {
-      raw = JSON.parse(trimmed) as RawRecord
+      raw = promoteQueuedPrompt(JSON.parse(trimmed) as RawRecord)
     } catch {
       malformedLines++
       continue
@@ -658,7 +690,15 @@ export async function parseSessionMetadata(
 
     if (shouldSkipRecord(raw, seenUuids)) continue
 
+    skills.add(raw)
+    agentResults.add(raw)
+    tools.add(raw)
     if (raw.slug && !acc.slug) acc.slug = raw.slug
+    if (raw.sessionKind === 'bg') acc.isBackground = true
+    if (raw.uuid) {
+      acc.firstUuid ??= raw.uuid
+      acc.lastUuid = raw.uuid
+    }
     if (raw.type === 'ai-title') {
       const title = raw.aiTitle?.trim()
       if (title) acc.aiTitle = title
@@ -727,9 +767,11 @@ export async function parseSessionMetadata(
     entries: childEntries,
     childActivityByDay,
     diagnostics: childDiagnostics,
-  } = await parseSubagents(filePath, sessionId, projectId, pricingTable)
+    toolUsage: childToolUsage,
+  } = await parseSubagents(filePath, sessionId, projectId, pricingTable, agentResults)
 
-  const usage = projectUsage([...ledger.entries(), ...childEntries])
+  const parentEntries = ledger.entries()
+  const usage = projectUsage([...parentEntries, ...childEntries])
   // A tripwire, not an expected condition — see `ResponseEntry.usageIncomplete`.
   // Logged once per parse rather than per response so a session with many such
   // responses does not flood the log. Goes through the shared logger (not
@@ -787,7 +829,13 @@ export async function parseSessionMetadata(
     diagnostics
   )
 
+  agentResults.apply(summaries)
   summary.subagents = summaries
+  const toolUsage = tools.rows(parentEntries)
+  mergeToolUsage(toolUsage, childToolUsage)
+  summary.toolUsage = toolUsage
+  const skillListing = skills.resultOrUndefined()
+  if (skillListing) summary.skillListing = skillListing
   summary.parentMessageCount = activityCounts.total
   summary.messageCount = activityCounts.total + summaries.reduce((s, x) => s + x.messageCount, 0)
 

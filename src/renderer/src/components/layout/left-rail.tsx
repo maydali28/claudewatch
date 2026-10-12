@@ -9,10 +9,10 @@ import {
   BarChart2,
   FileText,
   BookOpen,
-  Clock,
   Webhook,
   Terminal,
   Layers,
+  Puzzle,
   Server,
   Brain,
   ShieldCheck,
@@ -34,13 +34,13 @@ const TOP_ITEMS: NavItem[] = [
   { id: 'analytics', icon: BarChart2, label: 'Analytics' },
   { id: 'sessions', icon: FileText, label: 'Sessions' },
   { id: 'plans', icon: BookOpen, label: 'Plans' },
-  { id: 'timeline', icon: Clock, label: 'Timeline', flag: 'timeline' },
   { id: 'hooks', icon: Webhook, label: 'Hooks' },
   { id: 'commands', icon: Terminal, label: 'Commands' },
   { id: 'skills', icon: Layers, label: 'Skills' },
+  { id: 'plugins', icon: Puzzle, label: 'Plugins' },
   { id: 'mcps', icon: Server, label: 'MCPs' },
   { id: 'memory', icon: Brain, label: 'Memory' },
-  { id: 'lint', icon: ShieldCheck, label: 'Lint', flag: 'lint' },
+  { id: 'lint', icon: ShieldCheck, label: 'Health' },
 ]
 
 const BOTTOM_ITEM: NavItem = { id: 'settings', icon: Settings, label: 'Settings' }

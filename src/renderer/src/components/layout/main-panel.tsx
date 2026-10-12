@@ -1,15 +1,14 @@
-import React, { useEffect } from 'react'
+import React from 'react'
 import { useUIStore, type ViewId } from '@renderer/store/ui.store'
-import { useFeatureFlags } from '@renderer/store/feature-flags.store'
 
 // Panel components
 import AnalyticsPanel from '@renderer/components/analytics/analytics-panel'
 import SessionPanel from '@renderer/components/sessions/session-panel'
 import PlansPanel from '@renderer/components/plans/plans-panel'
-import TimelinePanel from '@renderer/components/timeline/timeline-panel'
 import HooksPanel from '@renderer/components/config/hooks-panel'
 import CommandsPanel from '@renderer/components/config/commands-panel'
 import SkillsPanel from '@renderer/components/config/skills-panel'
+import PluginsPanel from '@renderer/components/plugins/plugins-panel'
 import McpsPanel from '@renderer/components/config/mcps-panel'
 import MemoryPanel from '@renderer/components/config/memory-panel'
 import LintPanel from '@renderer/components/lint/lint-panel'
@@ -23,14 +22,14 @@ function PanelContent({ view }: { view: ViewId }): React.JSX.Element {
       return <SessionPanel />
     case 'plans':
       return <PlansPanel />
-    case 'timeline':
-      return <TimelinePanel />
     case 'hooks':
       return <HooksPanel />
     case 'commands':
       return <CommandsPanel />
     case 'skills':
       return <SkillsPanel />
+    case 'plugins':
+      return <PluginsPanel />
     case 'mcps':
       return <McpsPanel />
     case 'memory':
@@ -50,13 +49,6 @@ function PanelContent({ view }: { view: ViewId }): React.JSX.Element {
 
 export default function MainPanel(): React.JSX.Element {
   const activeView = useUIStore((s) => s.activeView)
-  const setView = useUIStore((s) => s.setView)
-  const flags = useFeatureFlags()
-
-  useEffect(() => {
-    if (activeView === 'timeline' && !flags.timeline) setView('analytics')
-    if (activeView === 'lint' && !flags.lint) setView('analytics')
-  }, [activeView, flags.timeline, flags.lint, setView])
 
   return (
     <main className="flex flex-1 flex-col overflow-auto bg-background">

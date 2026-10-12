@@ -1,6 +1,6 @@
 {
   "name": "claudewatch",
-  "version": "1.5.7",
+  "version": "1.6.0",
   "description": "Claude Code session explorer (macOS, Windows, Linux)",
   "main": "out/main/index.js",
   "author": {
@@ -59,8 +59,9 @@
     }
   },
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
+    "dev": "node scripts/build-native.mjs && electron-vite dev",
+    "build": "electron-vite build && node scripts/build-native.mjs",
+    "build:native": "node scripts/build-native.mjs",
     "start": "electron-vite preview",
     "typecheck": "tsc -b --force",
     "lint": "eslint src",
@@ -76,9 +77,9 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "verify:accounting": "VERIFY_ACCOUNTING=1 vitest run src/main/services/accounting/verify-real-history.test.ts src/main/services/accounting/verify-ranges.test.ts --reporter=verbose",
-    "package": "electron-vite build && electron-forge package",
-    "make": "electron-vite build && electron-forge make",
-    "publish": "electron-vite build && electron-forge publish",
+    "package": "pnpm build && electron-forge package",
+    "make": "pnpm build && electron-forge make",
+    "publish": "pnpm build && electron-forge publish",
     "commit": "git-cz",
     "changelog": "node scripts/generate-changelog.mjs",
     "changelog:all": "node scripts/generate-changelog.mjs --all",

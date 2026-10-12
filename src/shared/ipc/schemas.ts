@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { PRICED_FAMILIES } from '@shared/constants/pricing'
+import type { ModelFamily } from '@shared/types/pricing'
 
 // ─── Primitives ───────────────────────────────────────────────────────────────
 
@@ -31,6 +33,13 @@ export const GetSummaryListSchema = z.object({ projectId })
 /** sessions:get-parsed */
 export const GetParsedSchema = z.object({ sessionId, projectId })
 
+/** sessions:get-subagent — the id is the `agent-<id>.jsonl` file's, so no path characters. */
+export const GetSubagentSchema = z.object({
+  sessionId,
+  projectId,
+  agentId: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/, 'agentId must be a plain id'),
+})
+
 /** sessions:search */
 export const SearchSchema = z.object({
   query: z.string().min(1).max(500),
@@ -44,11 +53,21 @@ export const TagSchema = z.object({
 })
 
 /** sessions:export */
+/** app:inspect-claude-dir */
+export const InspectClaudeDirSchema = z.object({ path: z.string().trim().min(1).max(1000) })
+
+/** app:set-claude-dir — null goes back to the environment and defaults. */
+export const SetClaudeDirSchema = z.object({ path: z.string().trim().min(1).max(1000).nullable() })
+
+/** secrets:dismiss — ids as the findings list gives them. */
+export const SecretsDismissSchema = z.object({
+  ids: z.array(z.string().min(1).max(200)).min(1).max(1000),
+})
+
 export const ExportSchema = z.object({
   sessionId,
   projectId,
   format: z.enum(['json', 'csv', 'markdown']),
-  outputPath: z.string().min(1).max(1000),
 })
 
 // ─── Analytics ────────────────────────────────────────────────────────────────
@@ -89,8 +108,11 @@ const WindowBoundsSchema = z.object({
 })
 
 /** settings:set — partial patch; every key is optional */
+// Strict: a key this schema does not list is rejected, not silently dropped.
+// Dropping it made a setting look broken with no error anywhere (the window
+// kept a value main never stored, then main pushed the old one back).
 export const SettingsSetSchema = z
-  .object({
+  .strictObject({
     pricingProvider: PricingProviderSchema,
     pricingOverrides: z.record(
       z.string(),
@@ -102,27 +124,44 @@ export const SettingsSetSchema = z
         cache1h: z.number().nonnegative().optional(),
       })
     ),
+    modelPreferences: z.record(
+      z.string().trim().min(1).max(512),
+      z.strictObject({
+        family: z.enum(PRICED_FAMILIES as [ModelFamily, ...ModelFamily[]]).optional(),
+        rates: z
+          .strictObject({
+            input: z.number().nonnegative().optional(),
+            output: z.number().nonnegative().optional(),
+            cacheRead: z.number().nonnegative().optional(),
+            cache5m: z.number().nonnegative().optional(),
+            cache1h: z.number().nonnegative().optional(),
+          })
+          .optional(),
+        displayName: z.string().max(80).optional(),
+      })
+    ),
     costAlertThreshold: z.number().nonnegative(),
+    sessionCostAlertThreshold: z.number().nonnegative(),
+    costAlertsEnabled: z.boolean(),
+    dailyCostAlertEnabled: z.boolean(),
+    sessionCostAlertEnabled: z.boolean(),
+    costAlertNotify: z.boolean(),
     secretScanEnabled: z.boolean(),
+    secretScanConsent: z.enum(['unasked', 'granted', 'declined']),
+    secretScanNotify: z.boolean(),
     redactionLevel: RedactionSchema,
     launchAtLogin: z.boolean(),
     trayTipDismissed: z.boolean(),
     theme: ThemeSchema,
     sidebarWidth: z.number().int().min(160).max(600),
     windowBounds: WindowBoundsSchema,
-    alertedSecrets: z.array(z.string()).max(500),
     sentryEnabled: z.boolean(),
+    lastSeenVersion: z.string().min(1).max(50),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Patch must not be empty' })
 
 // ─── Plans ────────────────────────────────────────────────────────────────────
-
-const planSlug = z
-  .string()
-  .min(1)
-  .max(200)
-  .regex(/^[a-zA-Z0-9._-]+$/, 'slug must be alphanumeric / dot / dash / underscore')
 
 /** plans:list — no payload */
 export const PlansListSchema = z.void()
@@ -131,9 +170,6 @@ export const PlansListSchema = z.void()
  * `readPlan` re-derives and validates it against the resolved plan directories,
  * this bound is defence in depth against an oversized payload. */
 export const PlansGetSchema = z.object({ id: z.string().min(1).max(4096) })
-
-/** plans:get-projects */
-export const PlansGetProjectsSchema = z.object({ slug: planSlug })
 
 // ─── Tray ─────────────────────────────────────────────────────────────────────
 

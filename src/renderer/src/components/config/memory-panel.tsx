@@ -1,11 +1,14 @@
 import React from 'react'
-import { Brain, Eye, Code } from 'lucide-react'
+import { Brain, Code, Eye } from 'lucide-react'
 import { cn } from '@renderer/lib/cn'
 import { useConfigStore } from '@renderer/store/config.store'
+import { useUIStore } from '@renderer/store/ui.store'
 import { EmptyState } from '@renderer/components/shared/empty-state'
 import type { MemoryFile } from '@shared/types'
-import type { ProjectClaudeMd } from '@shared/types/project'
 import MarkdownRenderer from '@renderer/components/shared/markdown-renderer'
+import { memoryContentState, memoryKindOf, type MemoryFilter } from './memory-filter'
+import { buildMemoryOwners, visibleMemoryOwners } from './memory-owners'
+import { relativeDay } from './skill-usage'
 
 // ─── Content section with raw / preview toggle ────────────────────────────────
 
@@ -62,6 +65,7 @@ function ContentSection({ content }: { content: string }): React.JSX.Element {
 
 function MemoryDetail({ file }: { file: MemoryFile }): React.JSX.Element {
   const lineCount = file.content?.split('\n').length ?? 0
+  const state = memoryContentState(file.content)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -70,62 +74,83 @@ function MemoryDetail({ file }: { file: MemoryFile }): React.JSX.Element {
         <Brain className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
           <h2 className="text-sm font-semibold">{file.label}</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{file.sublabel}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{fileOwnerText(file)}</p>
+          <p
+            className="text-[10px] text-muted-foreground/50 mt-0.5 font-mono truncate"
+            title={file.path}
+          >
+            {file.path}
+          </p>
           <div className="flex items-center gap-3 mt-1">
             {file.sizeBytes !== undefined && (
               <span className="text-[10px] text-muted-foreground/60">
                 {(file.sizeBytes / 1024).toFixed(1)} KB
               </span>
             )}
-            {file.content && (
+            {state === 'present' && (
               <span className="text-[10px] text-muted-foreground/60">{lineCount} lines</span>
+            )}
+            {file.modifiedAt && (
+              <span className="text-[10px] text-muted-foreground/60">
+                changed {relativeDay(file.modifiedAt)}
+              </span>
             )}
           </div>
         </div>
       </div>
 
-      {/* Content or unavailable */}
-      {file.content ? (
-        <ContentSection content={file.content} />
+      {/* Content, an empty file, or one that could not be read */}
+      {state === 'present' ? (
+        <ContentSection content={file.content ?? ''} />
       ) : (
-        <div className="flex flex-col items-center justify-center flex-1 text-center gap-2">
-          <p className="text-xs text-muted-foreground">Content not available</p>
+        <div className="flex flex-col items-center justify-center flex-1 text-center gap-1 px-6">
+          <p className="text-xs text-muted-foreground">
+            {state === 'empty' ? 'This file is empty' : 'Content not available'}
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 font-mono break-all">{file.path}</p>
         </div>
       )}
     </div>
   )
 }
 
-// ─── Main panel ───────────────────────────────────────────────────────────────
-
-function projectClaudeMdToMemoryFile(p: ProjectClaudeMd): MemoryFile {
-  return {
-    id: `project-claude-md:${p.projectId}`,
-    label: 'CLAUDE.md',
-    sublabel: p.projectName,
-    path: p.filePath,
-    content: p.content,
-    sizeBytes: p.sizeBytes,
+/** Where a file belongs, for its header: Global, the project, or the project's auto memory. */
+function fileOwnerText(file: MemoryFile): string {
+  switch (memoryKindOf(file)) {
+    case 'global':
+      return 'Global'
+    case 'auto':
+      return file.projectName ? `${file.projectName} · auto memory` : 'Auto memory'
+    case 'project':
+      return file.projectName ? `${file.projectName} · project` : 'project'
   }
 }
 
+// ─── Main panel ───────────────────────────────────────────────────────────────
+
 export default function MemoryPanel(): React.JSX.Element {
   const { memoryFiles, projectClaudeMds, selectedMemoryId } = useConfigStore()
+  const kindFilter = (useUIStore((s) => s.sourceFilters.memory) ?? 'all') as MemoryFilter
 
-  const selected =
-    memoryFiles.find((f) => f.id === selectedMemoryId) ??
-    (selectedMemoryId?.startsWith('project-claude-md:')
-      ? (projectClaudeMds.map(projectClaudeMdToMemoryFile).find((f) => f.id === selectedMemoryId) ??
-        null)
-      : null)
+  // The same files the sidebar lists, so a file the filter hides is not shown here either.
+  const files = visibleMemoryOwners(
+    buildMemoryOwners(memoryFiles, projectClaudeMds),
+    kindFilter,
+    ''
+  ).flatMap((o) => o.files)
+  const file = files.find((f) => f.id === selectedMemoryId)
 
-  if (!selected)
+  if (!file)
     return (
       <EmptyState
         icon={Brain}
         title="No memory file selected"
-        description="Choose a memory file from the sidebar to view its content"
+        description={
+          selectedMemoryId
+            ? 'The selected file is hidden by the current filter. Choose a file from the list, or switch the filter back to All.'
+            : 'Choose a memory file from the sidebar to view its content'
+        }
       />
     )
-  return <MemoryDetail file={selected} />
+  return <MemoryDetail file={file} />
 }

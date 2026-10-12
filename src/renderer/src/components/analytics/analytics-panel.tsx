@@ -14,6 +14,7 @@ import { CacheTab } from './tabs/cache-tab'
 import { ModelsTab } from './tabs/models-tab'
 import { LatencyTab } from './tabs/latency-tab'
 import { EffortTab } from './tabs/effort-tab'
+import { ToolsTab } from './tabs/tools-tab'
 import type { DateRange, DateRangePreset } from '@shared/types'
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'models', label: 'Models' },
   { id: 'latency', label: 'Latency' },
   { id: 'effort', label: 'Effort' },
+  { id: 'tools', label: 'Tools' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -270,6 +272,9 @@ export default function AnalyticsPanel(): React.JSX.Element {
             </TabsContent>
             <TabsContent value="effort" className="mt-0 p-4">
               <EffortTab data={analyticsData} />
+            </TabsContent>
+            <TabsContent value="tools" className="mt-0 p-4">
+              <ToolsTab data={analyticsData} />
             </TabsContent>
           </Tabs>
         )}

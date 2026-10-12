@@ -1,15 +1,18 @@
 import { useQuery } from '@tanstack/react-query'
 import { ipc } from '@renderer/lib/ipc-client'
+import type { ClaudeDirSource } from '@shared/types'
 
-// Static key: this resolves once per app process on the main side (see
-// getClaudeDir()'s cache in @main/lib/claude-paths) and never changes for the
-// lifetime of a running app, so there is nothing to invalidate.
+// Static key: the folder only changes through Settings › Claude folder, and
+// main reloads every window when it does, so a loaded page never sees it
+// change underneath it.
 const CLAUDE_PATHS_KEY = ['app', 'claude-paths'] as const
 
 export interface ClaudePaths {
   claudeDir: string
   display: string
-  source: 'env' | 'user-settings' | 'default'
+  source: ClaudeDirSource
+  /** The folder without the app setting: environment, settings.json or default. */
+  fallback: { claudeDir: string; source: ClaudeDirSource }
 }
 
 // Shown while the query is loading (and as the last-resort fallback on
@@ -19,6 +22,7 @@ const FALLBACK_PATHS: ClaudePaths = {
   claudeDir: '~/.claude',
   display: '~/.claude',
   source: 'default',
+  fallback: { claudeDir: '~/.claude', source: 'default' },
 }
 
 async function fetchClaudePaths(): Promise<ClaudePaths> {

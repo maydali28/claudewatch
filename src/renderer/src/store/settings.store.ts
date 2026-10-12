@@ -3,6 +3,7 @@ import type { AppPreferences } from '@shared/types'
 import { DEFAULT_PREFERENCES } from '@shared/types'
 import { CHANNELS } from '@shared/ipc/channels'
 import { ipc } from '@renderer/lib/ipc-client'
+import { ipcCall } from '@renderer/lib/ipc-call'
 
 interface SettingsState {
   prefs: AppPreferences
@@ -10,6 +11,8 @@ interface SettingsState {
 
   loadPrefs(): Promise<void>
   updatePref<K extends keyof AppPreferences>(key: K, value: AppPreferences[K]): Promise<void>
+  /** Several preferences in one write, for settings that must change together. */
+  updatePrefs(patch: Partial<AppPreferences>): Promise<void>
   applyExternalPrefs(next: AppPreferences): void
 }
 
@@ -30,14 +33,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   },
 
   async updatePref(key, value) {
+    await get().updatePrefs({ [key]: value } as Partial<AppPreferences>)
+  },
+
+  async updatePrefs(patch) {
     const prev = get().prefs
-    const next = { ...prev, [key]: value }
-    set({ prefs: next })
-    try {
-      await ipc.settings.set({ [key]: value } as Partial<typeof next>)
-    } catch {
-      set({ prefs: prev })
-    }
+    set({ prefs: { ...prev, ...patch } })
+    // A refused write (a key main does not accept, an invalid value) comes
+    // back as an error result, not a throw; both must undo the optimistic
+    // change, or the control shows a value that was never stored.
+    const result = await ipcCall(() => ipc.settings.set(patch), {
+      errorMessage: 'Could not save the setting',
+    })
+    if (!result.ok) set({ prefs: prev })
   },
 
   // Replaces local prefs with the authoritative snapshot pushed by the main

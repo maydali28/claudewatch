@@ -8,17 +8,15 @@ import { cn } from '@renderer/lib/cn'
 import { ipc } from '@renderer/lib/ipc-client'
 import { useUIStore } from '@renderer/store/ui.store'
 import { useClaudePaths } from '@renderer/hooks/use-claude-paths'
-import { pickSelectedPlanId } from './group-plans'
+import { abbreviateHome, pickSelectedPlanId } from './group-plans'
 import type { PlanSummary, PlanDetail } from '@shared/types'
 
 // React Query keys for plan data. Centralised so the refresh button can
 // invalidate everything in one call without depending on internal cache shape.
 // `PlanSummary.id` is an absolute file path — unique across directories — so
-// it is what identifies a plan for caching and fetching; the slug used to
-// look up related projects is always derived from `filename`, never `id`.
+// it is what identifies a plan for caching and fetching.
 const PLANS_LIST_KEY = ['plans', 'list'] as const
 const planDetailKey = (id: string) => ['plans', 'detail', id] as const
-const planProjectsKey = (id: string) => ['plans', 'projects', id] as const
 
 async function fetchPlansList(): Promise<PlanSummary[]> {
   const result = await ipc.plans.list()
@@ -30,13 +28,6 @@ async function fetchPlanDetail(id: string): Promise<PlanDetail> {
   const result = await ipc.plans.get(id)
   if (!result.ok) throw new Error(result.error)
   return result.data
-}
-
-async function fetchPlanProjects(filename: string): Promise<string[]> {
-  const slug = filename.replace(/\.md$/, '')
-  const result = await ipc.plans.getProjects(slug)
-  // Non-critical — badges just don't appear on failure.
-  return result.ok ? result.data : []
 }
 
 export default function PlansPanel(): React.JSX.Element {
@@ -67,14 +58,15 @@ export default function PlansPanel(): React.JSX.Element {
   const detail = detailQuery.data ?? null
   const isLoadingDetail = !!selectedId && detailQuery.isLoading
 
-  const projectsQuery = useQuery({
-    queryKey: selectedId ? planProjectsKey(selectedId) : ['plans', 'projects', null],
-    // The slug the backend matches against transcripts comes from the
-    // filename, never from `id` (an absolute path).
-    queryFn: () => fetchPlanProjects(selectedPlan!.filename),
-    enabled: !!selectedId && !!selectedPlan,
-  })
-  const planProjects = projectsQuery.data ?? []
+  // Shared-folder plans carry the projects that used them; a project-folder
+  // plan belongs to its own project.
+  const planProjects = selectedPlan
+    ? selectedPlan.scope === 'project'
+      ? selectedPlan.projectName
+        ? [selectedPlan.projectName]
+        : []
+      : (selectedPlan.usedBy ?? []).map((u) => u.projectName)
+    : []
 
   const refreshPlans = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['plans'] })
@@ -155,9 +147,17 @@ export default function PlansPanel(): React.JSX.Element {
           {selectedPlan ? (
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
-              <h2 className="text-sm font-semibold truncate">{selectedPlan.title}</h2>
-              <span className="text-xs text-muted-foreground font-mono shrink-0">
-                {selectedPlan.filename}
+              <h2 className="text-sm font-semibold truncate max-w-[60%] shrink-0">
+                {selectedPlan.title}
+              </h2>
+              {/* Cut from the start so the folder's end and the filename stay visible. */}
+              <span
+                className="text-xs text-muted-foreground font-mono truncate min-w-0 flex-1 [direction:rtl] text-left"
+                title={selectedPlan.id}
+              >
+                <span className="[direction:ltr] [unicode-bidi:embed]">
+                  {abbreviateHome(selectedPlan.directory, paths)}/{selectedPlan.filename}
+                </span>
               </span>
               {planProjects.length > 0 && (
                 <div className="flex items-center gap-1 ml-1 shrink-0">

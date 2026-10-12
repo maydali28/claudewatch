@@ -117,6 +117,22 @@ export class AccountingWorkerClient {
     })
   }
 
+  /**
+   * Stop the current worker; the next request starts a fresh one, which
+   * reads the Claude folder again (it is handed over at spawn). Used when the
+   * folder changes. Requests in flight fail and are retried by their callers'
+   * next refresh.
+   */
+  async restart(): Promise<void> {
+    const worker = this.worker
+    this.worker = null
+    for (const [, entry] of this.pending) {
+      entry.reject(new Error('Accounting worker restarted'))
+    }
+    this.pending.clear()
+    if (worker) await worker.terminate().catch(() => undefined)
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true
     const worker = this.worker
