@@ -173,7 +173,7 @@
     "react-day-picker": "^10.0.2",
     "react-dom": "^19.3.0",
     "react-markdown": "^10.1.0",
-    "react-syntax-highlighter": "^16.1.1",
+    "react-syntax-highlighter": "^16.1.2",
     "react-window": "^2.3.3",
     "recharts": "^3.10.1",
     "remark-gfm": "^4.0.1",
